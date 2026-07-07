@@ -1,0 +1,114 @@
+services:
+  postgres:
+    profiles:
+      - docker-db
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Amen@2461
+      POSTGRES_DB: hms_identity_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+  pgadmin:
+    image: dpage/pgadmin4:8.14
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@hms.dev
+      PGADMIN_DEFAULT_PASSWORD: PgAdmin@123
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  identity-api:
+    build:
+      context: ../backend
+      dockerfile: src/Services/Identity/HMS.Identity.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "5101:8080"
+
+  patients-api:
+    build:
+      context: ../backend
+      dockerfile: src/Services/Patients/HMS.Patients.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__PatientsDb: Host=host.docker.internal;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461
+      RabbitMq__ManagementUrl: http://rabbitmq:15672
+      RabbitMq__Username: guest
+      RabbitMq__Password: guest
+    ports:
+      - "5102:8080"
+    depends_on:
+      - rabbitmq
+
+  appointments-api:
+    build:
+      context: ../backend
+      dockerfile: src/Services/Appointments/HMS.Appointments.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "5103:8080"
+
+  clinical-api:
+    build:
+      context: ../backend
+      dockerfile: src/Services/Clinical/HMS.Clinical.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "5104:8080"
+
+  billing-api:
+    build:
+      context: ../backend
+      dockerfile: src/Services/Billing/HMS.Billing.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "5105:8080"
+
+  api-gateway:
+    build:
+      context: ../backend
+      dockerfile: src/ApiGateway/HMS.ApiGateway/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "5000:8080"
+    depends_on:
+      - identity-api
+      - patients-api
+      - appointments-api
+      - clinical-api
+      - billing-api
+
+  hms-web:
+    build:
+      context: ../frontend/hms-web
+      dockerfile: Dockerfile
+    ports:
+      - "4200:80"
+    depends_on:
+      - api-gateway
+
+volumes:
+  postgres-data:
+  pgadmin-data:

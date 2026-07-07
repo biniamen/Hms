@@ -1,0 +1,6 @@
+@HMS.ApiGateway_HostAddress = http://localhost:5133
+
+GET {{HMS.ApiGateway_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

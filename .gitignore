@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/.angular/
+**/.npm-cache/
+**/.vs/
+**/.vscode/
+*.user
+*.suo
+.env
+.env.*
+!.env.example
