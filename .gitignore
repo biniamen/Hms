@@ -1,13 +1,77 @@
+# Build and publish output
 **/bin/
 **/obj/
-**/node_modules/
 **/dist/
+**/publish/
+**/out/
+**/out-tsc/
+**/.codex-build/
+**/.codex-build*/
+
+# Frontend dependencies, cache, and generated output
+**/node_modules/
 **/.angular/
 **/.npm-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE and OS files
 **/.vs/
 **/.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 *.user
 *.suo
+*.userosscache
+*.sln.docstates
+
+# Runtime logs and local generated output
+.runtime-logs/
+*.log
+deploy/*.log
+logs/
+*.tmp
+*.temp
+
+# Local secrets
 .env
 .env.*
 !.env.example
+smtp.local.ps1
+smtp.local.*.ps1
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Office lock files and generated presentation/report artifacts
+~$*.docx
+~$*
+docs/*.docx
+docs/*.pdf
+docs/*.pptx
+docs/*.xlsx
+docs/*.png
+docs/*.jpg
+docs/*.jpeg
+
+# Local database/container data
+**/pgdata/
+**/postgres-data/
+**/rabbitmq-data/
+**/redis-data/
+**/pgadmin-data/
+docker-data/
+
+# Keep only selected source documentation for GitLab
+docs/*
+!docs/
+!docs/HMS_ARCHITECTURE_CEO_BRIEF.md
+!docs/ENTERPRISE_OPERATIONS_WORKFLOW.md
+
+# Keep templates and scripts that are part of the codebase
+!smtp.local.example.ps1
+!start-hms.ps1
