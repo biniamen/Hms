@@ -23,7 +23,11 @@ var appointments = new List<AppointmentDto>
         Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201"),
         DateTime.UtcNow.AddDays(1),
         "Scheduled",
-        "General consultation")
+        "General consultation",
+        "Outpatient",
+        "Consultation",
+        "Normal",
+        "Standalone appointments service is retired. Appointment workflows are handled by Patient Management.")
 };
 var beds = new List<BedDto>
 {
@@ -38,7 +42,17 @@ app.MapGet("/api/appointments", () => Results.Ok(ApiResponse<IEnumerable<Appoint
 
 app.MapPost("/api/appointments", (CreateAppointmentRequest request) =>
 {
-    var appointment = new AppointmentDto(Guid.NewGuid(), request.PatientId, request.DoctorId, request.StartsAtUtc, "Scheduled", request.Reason);
+    var appointment = new AppointmentDto(
+        Guid.NewGuid(),
+        request.PatientId,
+        request.DoctorId,
+        request.StartsAtUtc,
+        "Scheduled",
+        request.Reason,
+        string.IsNullOrWhiteSpace(request.Department) ? "Outpatient" : request.Department,
+        string.IsNullOrWhiteSpace(request.AppointmentType) ? "Consultation" : request.AppointmentType,
+        string.IsNullOrWhiteSpace(request.Priority) ? "Normal" : request.Priority,
+        request.Notes);
     appointments.Add(appointment);
     return Results.Created($"/api/appointments/{appointment.Id}", ApiResponse<AppointmentDto>.Ok(appointment, "Appointment created."));
 });

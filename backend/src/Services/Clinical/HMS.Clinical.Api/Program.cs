@@ -1,10 +1,20 @@
+using HMS.Clinical.Infrastructure;
 using HMS.Contracts;
 using HMS.SharedKernel;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+
+var connectionString = builder.Configuration.GetConnectionString("ClinicalDb")
+    ?? "Host=localhost;Port=5432;Database=hms_clinical_db;Username=postgres;Password=Amen@2461";
+
+await ClinicalDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+builder.Services.AddDbContext<ClinicalDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
 
@@ -15,75 +25,349 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-var doctorId = Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201");
-var saraId = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a");
-var dawitId = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80");
-
-var encounters = new List<ClinicalEncounterDto>
+await using (var scope = app.Services.CreateAsyncScope())
 {
-    new(Guid.Parse("7a58c9f1-4412-48dd-9165-7f08de63f863"), saraId, doctorId, "Outpatient", "Fever and sore throat", "Likely bacterial pharyngitis", "Antibiotics, hydration, follow-up in 5 days", DateTime.UtcNow.AddHours(-4))
-};
-
-var vitals = new List<VitalSignDto>
-{
-    new(Guid.Parse("a4d6c3ef-6d9f-4d35-9e92-40f980022f6a"), saraId, 37.8m, 92, 18, "118/76", 62.5m, 164m, DateTime.UtcNow.AddHours(-4))
-};
-
-var diagnoses = new List<DiagnosisDto>
-{
-    new(Guid.Parse("f4231a15-8a45-48cd-824a-28f454ccdfc1"), saraId, doctorId, "J02.9", "Acute pharyngitis", "Moderate", DateTime.UtcNow.AddHours(-3))
-};
-
-var prescriptions = new List<PrescriptionDto>
-{
-    new(Guid.Parse("325cf3a1-2af1-4b69-8a17-6fac5c547915"), saraId, doctorId, "Amoxicillin 500mg", "Take one capsule every 8 hours for 5 days", DateTime.UtcNow.AddHours(-3))
-};
-
-var labRequests = new List<LabRequestDto>
-{
-    new(Guid.Parse("3cb3eb61-03a4-4fec-8517-9d2778f6e40d"), dawitId, doctorId, "Complete Blood Count", "Requested", DateTime.UtcNow.AddHours(-2))
-};
+    var db = scope.ServiceProvider.GetRequiredService<ClinicalDbContext>();
+    await db.Database.MigrateAsync();
+    await ClinicalSeedData.SeedAsync(db);
+}
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "clinical", status = "healthy" })));
 
-app.MapGet("/api/clinical/encounters", () => Results.Ok(ApiResponse<IEnumerable<ClinicalEncounterDto>>.Ok(encounters)));
-app.MapPost("/api/clinical/encounters", (CreateClinicalEncounterRequest request) =>
+app.MapGet("/api/clinical/encounters", async (ClinicalDbContext db) =>
 {
-    var encounter = new ClinicalEncounterDto(Guid.NewGuid(), request.PatientId, request.DoctorId, request.VisitType, request.ChiefComplaint, request.Assessment, request.Plan, DateTime.UtcNow);
-    encounters.Add(encounter);
-    return Results.Created($"/api/clinical/encounters/{encounter.Id}", ApiResponse<ClinicalEncounterDto>.Ok(encounter, "Clinical encounter saved."));
+    var encounters = await db.Encounters
+        .AsNoTracking()
+        .OrderByDescending(encounter => encounter.EncounterAtUtc)
+        .Select(encounter => new ClinicalEncounterDto(encounter.Id, encounter.PatientId, encounter.DoctorId, encounter.VisitType, encounter.ChiefComplaint, encounter.Assessment, encounter.Plan, encounter.EncounterAtUtc))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<ClinicalEncounterDto>>.Ok(encounters));
 });
 
-app.MapGet("/api/clinical/vitals", () => Results.Ok(ApiResponse<IEnumerable<VitalSignDto>>.Ok(vitals)));
-app.MapPost("/api/clinical/vitals", (CreateVitalSignRequest request) =>
+app.MapPost("/api/clinical/encounters", async (CreateClinicalEncounterRequest request, ClinicalDbContext db) =>
 {
-    var vital = new VitalSignDto(Guid.NewGuid(), request.PatientId, request.TemperatureC, request.Pulse, request.RespiratoryRate, request.BloodPressure, request.WeightKg, request.HeightCm, DateTime.UtcNow);
-    vitals.Add(vital);
-    return Results.Created($"/api/clinical/vitals/{vital.Id}", ApiResponse<VitalSignDto>.Ok(vital, "Vitals recorded."));
+    var encounter = new ClinicalEncounter
+    {
+        Id = Guid.NewGuid(),
+        PatientId = request.PatientId,
+        DoctorId = request.DoctorId,
+        VisitType = Clean(request.VisitType, "Outpatient"),
+        ChiefComplaint = Clean(request.ChiefComplaint, ""),
+        Assessment = Clean(request.Assessment, ""),
+        Plan = Clean(request.Plan, ""),
+        EncounterAtUtc = DateTime.UtcNow
+    };
+
+    db.Encounters.Add(encounter);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/encounters/{encounter.Id}", ApiResponse<ClinicalEncounterDto>.Ok(
+        new ClinicalEncounterDto(encounter.Id, encounter.PatientId, encounter.DoctorId, encounter.VisitType, encounter.ChiefComplaint, encounter.Assessment, encounter.Plan, encounter.EncounterAtUtc),
+        "Clinical encounter saved."));
 });
 
-app.MapGet("/api/clinical/diagnoses", () => Results.Ok(ApiResponse<IEnumerable<DiagnosisDto>>.Ok(diagnoses)));
-app.MapPost("/api/clinical/diagnoses", (CreateDiagnosisRequest request) =>
+app.MapGet("/api/clinical/vitals", async (ClinicalDbContext db) =>
 {
-    var diagnosis = new DiagnosisDto(Guid.NewGuid(), request.PatientId, request.DoctorId, request.Code, request.Description, request.Severity, DateTime.UtcNow);
-    diagnoses.Add(diagnosis);
-    return Results.Created($"/api/clinical/diagnoses/{diagnosis.Id}", ApiResponse<DiagnosisDto>.Ok(diagnosis, "Diagnosis added."));
+    var vitals = await db.VitalSigns
+        .AsNoTracking()
+        .OrderByDescending(vital => vital.RecordedAtUtc)
+        .Select(vital => new VitalSignDto(vital.Id, vital.PatientId, vital.TemperatureC, vital.Pulse, vital.RespiratoryRate, vital.BloodPressure, vital.WeightKg, vital.HeightCm, vital.RecordedAtUtc))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<VitalSignDto>>.Ok(vitals));
 });
 
-app.MapGet("/api/clinical/prescriptions", () => Results.Ok(ApiResponse<IEnumerable<PrescriptionDto>>.Ok(prescriptions)));
-app.MapPost("/api/clinical/prescriptions", (CreatePrescriptionRequest request) =>
+app.MapPost("/api/clinical/vitals", async (CreateVitalSignRequest request, ClinicalDbContext db) =>
 {
-    var prescription = new PrescriptionDto(Guid.NewGuid(), request.PatientId, request.DoctorId, request.Medication, request.Instructions, DateTime.UtcNow);
-    prescriptions.Add(prescription);
-    return Results.Created($"/api/clinical/prescriptions/{prescription.Id}", ApiResponse<PrescriptionDto>.Ok(prescription, "Prescription created."));
+    var vital = new VitalSign
+    {
+        Id = Guid.NewGuid(),
+        PatientId = request.PatientId,
+        TemperatureC = request.TemperatureC,
+        Pulse = request.Pulse,
+        RespiratoryRate = request.RespiratoryRate,
+        BloodPressure = Clean(request.BloodPressure, ""),
+        WeightKg = request.WeightKg,
+        HeightCm = request.HeightCm,
+        RecordedAtUtc = DateTime.UtcNow
+    };
+
+    db.VitalSigns.Add(vital);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/vitals/{vital.Id}", ApiResponse<VitalSignDto>.Ok(
+        new VitalSignDto(vital.Id, vital.PatientId, vital.TemperatureC, vital.Pulse, vital.RespiratoryRate, vital.BloodPressure, vital.WeightKg, vital.HeightCm, vital.RecordedAtUtc),
+        "Vitals recorded."));
 });
 
-app.MapGet("/api/clinical/lab-requests", () => Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(labRequests)));
-app.MapPost("/api/clinical/lab-requests", (CreateLabRequestRequest request) =>
+app.MapGet("/api/clinical/diagnoses", async (ClinicalDbContext db) =>
 {
-    var labRequest = new LabRequestDto(Guid.NewGuid(), request.PatientId, request.DoctorId, request.TestName, "Requested", DateTime.UtcNow);
-    labRequests.Add(labRequest);
-    return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(labRequest, "Lab request created."));
+    var diagnoses = await db.Diagnoses
+        .AsNoTracking()
+        .OrderByDescending(diagnosis => diagnosis.DiagnosedAtUtc)
+        .Select(diagnosis => new DiagnosisDto(diagnosis.Id, diagnosis.PatientId, diagnosis.DoctorId, diagnosis.Code, diagnosis.Description, diagnosis.Severity, diagnosis.DiagnosedAtUtc))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<DiagnosisDto>>.Ok(diagnoses));
+});
+
+app.MapPost("/api/clinical/diagnoses", async (CreateDiagnosisRequest request, ClinicalDbContext db) =>
+{
+    var diagnosis = new Diagnosis
+    {
+        Id = Guid.NewGuid(),
+        PatientId = request.PatientId,
+        DoctorId = request.DoctorId,
+        Code = Clean(request.Code, ""),
+        Description = Clean(request.Description, ""),
+        Severity = Clean(request.Severity, "Normal"),
+        DiagnosedAtUtc = DateTime.UtcNow
+    };
+
+    db.Diagnoses.Add(diagnosis);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/diagnoses/{diagnosis.Id}", ApiResponse<DiagnosisDto>.Ok(
+        new DiagnosisDto(diagnosis.Id, diagnosis.PatientId, diagnosis.DoctorId, diagnosis.Code, diagnosis.Description, diagnosis.Severity, diagnosis.DiagnosedAtUtc),
+        "Diagnosis added."));
+});
+
+app.MapGet("/api/clinical/prescriptions", async (ClinicalDbContext db) =>
+{
+    var prescriptions = await db.Prescriptions
+        .AsNoTracking()
+        .OrderByDescending(prescription => prescription.OrderedAtUtc)
+        .Select(prescription => new PrescriptionDto(prescription.Id, prescription.PatientId, prescription.DoctorId, prescription.Medication, prescription.Instructions, prescription.OrderedAtUtc))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<PrescriptionDto>>.Ok(prescriptions));
+});
+
+app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest request, ClinicalDbContext db) =>
+{
+    var prescription = new Prescription
+    {
+        Id = Guid.NewGuid(),
+        PatientId = request.PatientId,
+        DoctorId = request.DoctorId,
+        Medication = Clean(request.Medication, ""),
+        Instructions = Clean(request.Instructions, ""),
+        OrderedAtUtc = DateTime.UtcNow
+    };
+
+    db.Prescriptions.Add(prescription);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/prescriptions/{prescription.Id}", ApiResponse<PrescriptionDto>.Ok(
+        new PrescriptionDto(prescription.Id, prescription.PatientId, prescription.DoctorId, prescription.Medication, prescription.Instructions, prescription.OrderedAtUtc),
+        "Prescription created."));
+});
+
+app.MapGet("/api/clinical/lab-requests", async (ClinicalDbContext db) =>
+{
+    var labRequests = await db.LabRequests
+        .AsNoTracking()
+        .OrderByDescending(request => request.OrderedAtUtc)
+        .Select(request => new LabRequestDto(request.Id, request.PatientId, request.DoctorId, request.TestName, request.Status, request.OrderedAtUtc))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(labRequests));
+});
+
+app.MapPost("/api/clinical/lab-requests", async (CreateLabRequestRequest request, ClinicalDbContext db) =>
+{
+    var labRequest = new LabRequest
+    {
+        Id = Guid.NewGuid(),
+        PatientId = request.PatientId,
+        DoctorId = request.DoctorId,
+        TestName = Clean(request.TestName, ""),
+        Status = "Requested",
+        OrderedAtUtc = DateTime.UtcNow
+    };
+
+    db.LabRequests.Add(labRequest);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(
+        new LabRequestDto(labRequest.Id, labRequest.PatientId, labRequest.DoctorId, labRequest.TestName, labRequest.Status, labRequest.OrderedAtUtc),
+        "Lab request created."));
+});
+
+app.MapGet("/api/clinical/enterprise-records", async (string? area, ClinicalDbContext db) =>
+{
+    var query = db.EnterpriseRecords.AsNoTracking();
+    if (!string.IsNullOrWhiteSpace(area))
+    {
+        var areaFilter = area.Trim();
+        query = query.Where(record => record.Area == areaFilter);
+    }
+
+    var records = (await query.ToListAsync())
+        .OrderBy(record => StatusOrder(record.Status))
+        .ThenBy(record => record.DueAtUtc ?? DateTime.MaxValue)
+        .ThenByDescending(record => record.CreatedAtUtc)
+        .Select(ToEnterpriseRecordDto)
+        .ToList();
+
+    return Results.Ok(ApiResponse<IEnumerable<EnterpriseRecordDto>>.Ok(records));
+});
+
+app.MapPost("/api/clinical/enterprise-records", async (CreateEnterpriseRecordRequest request, ClinicalDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Area) || string.IsNullOrWhiteSpace(request.Title))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Service area and title are required."));
+    }
+
+    var record = new EnterpriseRecord
+    {
+        Id = Guid.NewGuid(),
+        Area = request.Area.Trim(),
+        RecordNumber = await NextRecordNumberAsync(db, request.Area),
+        PatientId = request.PatientId is Guid patientId && patientId != Guid.Empty ? patientId : null,
+        Title = request.Title.Trim(),
+        Department = Clean(request.Department, request.Area),
+        Owner = Clean(request.Owner, "Unassigned"),
+        Priority = Clean(request.Priority, "Normal"),
+        Status = Clean(request.Status, "Open"),
+        Amount = Math.Max(0, request.Amount),
+        DueAtUtc = request.DueAtUtc is null ? DateTime.UtcNow.AddDays(1) : ToUtc(request.DueAtUtc.Value),
+        Details = Clean(request.Details, ""),
+        CreatedAtUtc = DateTime.UtcNow,
+        UpdatedAtUtc = DateTime.UtcNow
+    };
+
+    db.EnterpriseRecords.Add(record);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/enterprise-records/{record.Id}", ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Record saved."));
+});
+
+app.MapPut("/api/clinical/enterprise-records/{id:guid}/status", async (Guid id, EnterpriseStatusRequest request, ClinicalDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Status))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Status is required."));
+    }
+
+    var record = await db.EnterpriseRecords.FirstOrDefaultAsync(item => item.Id == id);
+    if (record is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Record not found."));
+    }
+
+    record.Status = request.Status.Trim();
+    record.UpdatedAtUtc = DateTime.UtcNow;
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Status updated."));
 });
 
 app.Run();
+
+static EnterpriseRecordDto ToEnterpriseRecordDto(EnterpriseRecord record) => new(
+    record.Id,
+    record.Area,
+    record.RecordNumber,
+    record.PatientId,
+    record.Title,
+    record.Department,
+    record.Owner,
+    record.Priority,
+    record.Status,
+    record.Amount,
+    record.DueAtUtc,
+    record.Details,
+    record.CreatedAtUtc,
+    record.UpdatedAtUtc);
+
+static async Task<string> NextRecordNumberAsync(ClinicalDbContext db, string area)
+{
+    var prefix = area.Trim().ToUpperInvariant() switch
+    {
+        "PHARMACY" => "PHA",
+        "LABORATORY" => "LAB",
+        "RADIOLOGY" => "RAD",
+        "INPATIENT" => "ADM",
+        "EMERGENCY" => "EMR",
+        "OPERATING THEATRE" => "OT",
+        "INVENTORY" => "INVST",
+        "PROCUREMENT" => "PR",
+        "ASSET MANAGEMENT" => "AST",
+        "BIOMEDICAL MAINTENANCE" => "BIO",
+        "INSURANCE CLAIMS" => "CLM",
+        "SECURITY AUDIT" => "AUD",
+        "NOTIFICATIONS" => "NTF",
+        "DOCUMENTS" => "DOC",
+        "REPORTING" => "RPT",
+        "INTEGRATION" => "INT",
+        _ => "OPS"
+    };
+
+    var numberPrefix = $"{prefix}-{DateTime.UtcNow:yyyy}-";
+    var existingNumbers = await db.EnterpriseRecords
+        .AsNoTracking()
+        .Where(record => record.RecordNumber.StartsWith(numberPrefix))
+        .Select(record => record.RecordNumber)
+        .ToListAsync();
+
+    var next = existingNumbers
+        .Select(LastNumberSegment)
+        .DefaultIfEmpty(0)
+        .Max() + 1;
+
+    return $"{numberPrefix}{next:0000}";
+}
+
+static int LastNumberSegment(string value)
+{
+    var segment = value.Split('-', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+    return int.TryParse(segment, out var number) ? number : 0;
+}
+
+static int StatusOrder(string status) => status switch
+{
+    "Open" => 1,
+    "In Progress" => 2,
+    "Under Review" => 3,
+    "Completed" => 4,
+    _ => 5
+};
+
+static string Clean(string? value, string fallback) =>
+    string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+static DateTime ToUtc(DateTime value) =>
+    value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+
+sealed record CreateEnterpriseRecordRequest(
+    string Area,
+    Guid? PatientId,
+    string Title,
+    string? Department,
+    string? Owner,
+    string? Priority,
+    string? Status,
+    decimal Amount,
+    DateTime? DueAtUtc,
+    string? Details);
+
+sealed record EnterpriseStatusRequest(string Status);
+
+sealed record EnterpriseRecordDto(
+    Guid Id,
+    string Area,
+    string RecordNumber,
+    Guid? PatientId,
+    string Title,
+    string Department,
+    string Owner,
+    string Priority,
+    string Status,
+    decimal Amount,
+    DateTime? DueAtUtc,
+    string Details,
+    DateTime CreatedAtUtc,
+    DateTime UpdatedAtUtc);

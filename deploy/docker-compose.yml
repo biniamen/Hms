@@ -1,7 +1,5 @@
 services:
   postgres:
-    profiles:
-      - docker-db
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -13,6 +11,18 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
 
+  postgres-init:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: Amen@2461
+    depends_on:
+      - postgres
+    volumes:
+      - ./postgres/init:/seed:ro
+    command: >
+      sh -c "until pg_isready -h postgres -U postgres; do sleep 1; done;
+      psql -h postgres -U postgres -d hms_identity_db -f /seed/01-hms-seed.sql"
+
   pgadmin:
     image: dpage/pgadmin4:8.14
     environment:
@@ -20,6 +30,9 @@ services:
       PGADMIN_DEFAULT_PASSWORD: PgAdmin@123
     ports:
       - "5050:80"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
     volumes:
       - pgadmin-data:/var/lib/pgadmin
 
@@ -40,8 +53,12 @@ services:
       dockerfile: src/Services/Identity/HMS.Identity.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__IdentityDb: Host=postgres;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461
     ports:
       - "5101:8080"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
 
   patients-api:
     build:
@@ -49,23 +66,17 @@ services:
       dockerfile: src/Services/Patients/HMS.Patients.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__PatientsDb: Host=host.docker.internal;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461
+      ConnectionStrings__PatientManagementDb: Host=postgres;Port=5432;Database=hms_patient_management_db;Username=postgres;Password=Amen@2461
       RabbitMq__ManagementUrl: http://rabbitmq:15672
       RabbitMq__Username: guest
       RabbitMq__Password: guest
     ports:
       - "5102:8080"
     depends_on:
-      - rabbitmq
-
-  appointments-api:
-    build:
-      context: ../backend
-      dockerfile: src/Services/Appointments/HMS.Appointments.Api/Dockerfile
-    environment:
-      ASPNETCORE_URLS: http://+:8080
-    ports:
-      - "5103:8080"
+      postgres-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
 
   clinical-api:
     build:
@@ -73,8 +84,12 @@ services:
       dockerfile: src/Services/Clinical/HMS.Clinical.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__ClinicalDb: Host=postgres;Port=5432;Database=hms_clinical_db;Username=postgres;Password=Amen@2461
     ports:
       - "5104:8080"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
 
   billing-api:
     build:
@@ -82,8 +97,12 @@ services:
       dockerfile: src/Services/Billing/HMS.Billing.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__BillingDb: Host=postgres;Port=5432;Database=hms_billing_db;Username=postgres;Password=Amen@2461
     ports:
       - "5105:8080"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
 
   api-gateway:
     build:
@@ -92,11 +111,10 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
     ports:
-      - "5000:8080"
+      - "5200:8080"
     depends_on:
       - identity-api
       - patients-api
-      - appointments-api
       - clinical-api
       - billing-api
 

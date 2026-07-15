@@ -14,7 +14,7 @@
   </button>
 </div>
 
-<main class="min-h-screen bg-slate-100" *ngIf="session() as user; else loginView">
+<main class="min-h-screen bg-slate-100" *ngIf="session() as user; else publicAccessView">
   <div class="grid min-h-screen grid-cols-[280px_minmax(0,1fr)] max-[900px]:grid-cols-1">
     <aside class="bg-brand-900 p-5 text-white">
       <div class="mb-7 flex items-center gap-3">
@@ -65,9 +65,8 @@
       <section *ngIf="active() === 'dashboard'" class="enterprise-panel overflow-hidden">
         <div class="grid grid-cols-[1.2fr_.8fr] gap-0 max-[950px]:grid-cols-1">
           <div class="p-7">
-            <p class="text-xs font-extrabold uppercase text-brand-600">Today Command Center</p>
-            <h2 class="mt-1 text-2xl font-black text-slate-900">A cleaner, service-oriented HMS cockpit</h2>
-            <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-600">Use the module shortcuts to register patients, capture photos, manage role permissions, book visits, record clinical work, and produce exportable operational reports.</p>
+            <p class="text-xs font-extrabold uppercase text-brand-600">Command Center</p>
+            <h2 class="mt-1 text-2xl font-black text-slate-900">Hospital operations snapshot</h2>
             <div class="mt-5 grid grid-cols-4 gap-3 max-[900px]:grid-cols-2">
               <button class="btn-primary" type="button" (click)="load('patients')">Patient Intake</button>
               <button class="btn-primary" type="button" (click)="load('clinical')">Clinical Chart</button>
@@ -76,43 +75,254 @@
             </div>
           </div>
           <div class="bg-slate-900 p-7 text-white">
-            <p class="text-xs font-extrabold uppercase text-slate-300">RabbitMQ Event Flow</p>
-            <h3 class="mt-1 text-xl font-black">PatientRegistered</h3>
-            <p class="mt-3 text-sm leading-6 text-slate-300">When a patient is registered, the Patients API publishes an event to RabbitMQ exchange <strong>hms.events</strong> and queue <strong>hms.patient-registered</strong>.</p>
+            <p class="text-xs font-extrabold uppercase text-slate-300">Revenue Health</p>
+            <div class="mt-5 grid gap-4">
+              <div *ngFor="let item of revenueChart()" class="grid gap-2">
+                <div class="flex justify-between text-sm"><span>{{ item.label }}</span><strong>{{ item.value | currency:'ETB' }}</strong></div>
+                <div class="h-2 rounded-full bg-slate-700"><div class="h-2 rounded-full bg-mint-500" [style.width.%]="item.percent"></div></div>
+              </div>
+            </div>
           </div>
         </div>
+      </section>
+
+      <section *ngIf="active() === 'dashboard'" class="mt-5 grid grid-cols-2 gap-5 max-[950px]:grid-cols-1">
+        <article class="enterprise-panel p-5">
+          <h3 class="text-base font-black text-slate-900">Queue Flow</h3>
+          <div class="mt-4 grid gap-3">
+            <div *ngFor="let item of queueChart()" class="grid grid-cols-[110px_1fr_44px] items-center gap-3 text-sm">
+              <span class="font-bold text-slate-600">{{ item.label }}</span>
+              <div class="h-3 rounded-full bg-slate-100"><div class="h-3 rounded-full bg-cyan-500" [style.width.%]="item.percent"></div></div>
+              <strong class="text-right">{{ item.value }}</strong>
+            </div>
+          </div>
+        </article>
+        <article class="enterprise-panel p-5">
+          <h3 class="text-base font-black text-slate-900">Clinical Workload</h3>
+          <div class="mt-4 grid gap-3">
+            <div *ngFor="let item of clinicalChart()" class="grid grid-cols-[110px_1fr_44px] items-center gap-3 text-sm">
+              <span class="font-bold text-slate-600">{{ item.label }}</span>
+              <div class="h-3 rounded-full bg-slate-100"><div class="h-3 rounded-full bg-violet-500" [style.width.%]="item.percent"></div></div>
+              <strong class="text-right">{{ item.value }}</strong>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section *ngIf="active() === 'operations'" class="grid gap-5">
+        <div class="flex items-center justify-between gap-3 max-[700px]:flex-col max-[700px]:items-stretch">
+          <div>
+            <h2 class="text-xl font-black text-slate-900">Microservice Operations Portal</h2>
+            <p class="text-sm text-slate-500">Four production-focused services: Identity/Admin, Patient Management, Clinical, and Billing.</p>
+          </div>
+          <button class="btn-secondary" type="button" (click)="loadAll()">Refresh Status</button>
+        </div>
+
+        <div class="grid grid-cols-4 gap-4 max-[1200px]:grid-cols-2 max-[720px]:grid-cols-1">
+          <article *ngFor="let service of services()" class="enterprise-panel p-5">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h3 class="text-base font-black text-slate-900">{{ service.name }}</h3>
+                <p class="mt-1 text-sm leading-6 text-slate-500">{{ service.description }}</p>
+              </div>
+              <span class="badge" [class.badge-green]="service.status === 'Running'">{{ service.status }}</span>
+            </div>
+            <div class="mt-4 rounded-lg bg-slate-50 p-3 text-xs font-semibold text-slate-600">{{ service.url }}</div>
+            <button class="btn-primary mt-4 w-full" type="button" [disabled]="!service.canStart || saving()" (click)="startService(service)">
+              {{ service.canStart ? 'Start Service' : 'Managed Externally' }}
+            </button>
+          </article>
+        </div>
+
       </section>
 
       <section *ngIf="active() === 'admin'" class="grid gap-5">
-        <div class="flex items-center justify-between gap-3 max-[700px]:flex-col max-[700px]:items-stretch">
-          <div>
-            <h2 class="text-xl font-black text-slate-900">Roles & Permissions</h2>
-            <p class="text-sm text-slate-500">Visual role matrix for administration and access design.</p>
-          </div>
-          <div class="flex gap-2">
-            <button class="btn-secondary" type="button" (click)="exportExcel('role-permissions', roles())">Excel</button>
-            <button class="btn-secondary" type="button" (click)="exportPdf('role-permissions', roles())">PDF</button>
-            <button class="btn-secondary" type="button" (click)="printTable('role-permissions', roles())">Print</button>
+        <div class="enterprise-panel p-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-xl font-black text-slate-900">Administration Control Center</h2>
+              <p class="text-sm text-slate-500">Create users, define roles, assign permissions, and maintain service departments.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn-secondary" type="button" [class.bg-brand-50]="adminTab() === 'users'" (click)="adminTab.set('users')">Users</button>
+              <button class="btn-secondary" type="button" [class.bg-brand-50]="adminTab() === 'roles'" (click)="adminTab.set('roles')">Roles</button>
+              <button class="btn-secondary" type="button" [class.bg-brand-50]="adminTab() === 'permissions'" (click)="adminTab.set('permissions')">Permissions</button>
+              <button class="btn-secondary" type="button" [class.bg-brand-50]="adminTab() === 'departments'" (click)="adminTab.set('departments')">Departments</button>
+              <button class="btn-secondary" type="button" [class.bg-brand-50]="adminTab() === 'emails'" (click)="adminTab.set('emails')">Email Outbox</button>
+            </div>
           </div>
         </div>
-        <div class="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-2 max-[720px]:grid-cols-1">
-          <article *ngFor="let role of roles()" class="enterprise-panel p-5">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <span class="badge badge-blue">{{ role.role }}</span>
-                <h3 class="mt-3 text-base font-black text-slate-900">{{ role.description }}</h3>
+
+        <section *ngIf="adminTab() === 'users'" class="enterprise-panel overflow-auto p-4">
+          <div class="mb-3 flex justify-between gap-2 max-[700px]:flex-col">
+            <strong class="text-sm text-slate-700">System Users</strong>
+            <div class="flex gap-2"><button class="btn-primary" type="button" (click)="modal.set('employee')">New User</button><button class="btn-secondary" (click)="exportExcel('employees', employees())">Excel</button><button class="btn-secondary" (click)="printTable('employees', employees())">Print</button></div>
+          </div>
+          <table class="data-table"><thead><tr><th>No</th><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Specialization</th><th>Status</th><th>Action</th></tr></thead><tbody><tr *ngFor="let row of filtered(employees())"><td class="font-black">{{ row.employeeNo }}</td><td>{{ row.firstName }} {{ row.lastName }}<br><span class="text-xs text-slate-500">{{ row.phone || '-' }}</span></td><td>{{ row.emailAddress }}</td><td><span class="badge badge-blue">{{ row.role }}</span></td><td>{{ row.department || '-' }}</td><td>{{ row.specialization || '-' }}</td><td><span class="badge" [class.badge-green]="row.isActive && row.passwordSetupCompleted">{{ !row.isActive ? 'Inactive' : row.passwordSetupCompleted ? 'Active' : 'Pending Setup' }}</span><br><span class="text-xs text-slate-500" *ngIf="row.passwordSetupExpiresAtUtc">Expires {{ row.passwordSetupExpiresAtUtc | date:'short' }}</span></td><td><div class="flex flex-wrap gap-1"><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" [disabled]="saving()" (click)="resendInvite(row)">Send</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="copyLatestEmailLink(row)">Copy Link</button></div></td></tr></tbody></table>
+        </section>
+
+        <section *ngIf="adminTab() === 'roles'" class="grid gap-4">
+          <div class="flex justify-end gap-2"><button class="btn-primary" type="button" (click)="modal.set('newRole')">New Role</button><button class="btn-secondary" type="button" (click)="exportExcel('role-permissions', roles())">Excel</button><button class="btn-secondary" type="button" (click)="printTable('role-permissions', roles())">Print</button></div>
+          <div class="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-2 max-[720px]:grid-cols-1">
+            <article *ngFor="let role of roles()" class="enterprise-panel p-5">
+              <div class="flex items-start justify-between gap-3">
+                <div><span class="badge badge-blue">{{ role.role }}</span><h3 class="mt-3 text-base font-black text-slate-900">{{ role.description }}</h3></div>
+                <strong class="rounded-lg bg-slate-100 px-3 py-2 text-sm">{{ role.userCount }} users</strong>
               </div>
-              <strong class="rounded-lg bg-slate-100 px-3 py-2 text-sm">{{ role.userCount }} users</strong>
-            </div>
-            <div class="mt-4 flex flex-wrap gap-2">
-              <span *ngFor="let permission of role.permissions" class="badge">{{ permission }}</span>
-            </div>
-            <button class="btn-secondary mt-5 w-full" type="button" (click)="openRoleEditor(role)">Manage Permissions</button>
-          </article>
-        </div>
+              <div class="mt-4 flex flex-wrap gap-2"><span *ngFor="let permission of role.permissions" class="badge">{{ permission }}</span></div>
+              <button class="btn-secondary mt-5 w-full" type="button" (click)="openRoleEditor(role)">Assign Permissions</button>
+            </article>
+          </div>
+        </section>
+
+        <section *ngIf="adminTab() === 'permissions'" class="enterprise-panel overflow-auto p-4">
+          <div class="mb-3 flex justify-between gap-2 max-[700px]:flex-col"><strong class="text-sm text-slate-700">Permission Dictionary</strong><button class="btn-primary" type="button" (click)="modal.set('permission')">New Permission</button></div>
+          <table class="data-table"><thead><tr><th>Key</th><th>Description</th><th>Module</th></tr></thead><tbody><tr *ngFor="let row of filtered(permissions())"><td><span class="badge badge-blue">{{ row.key }}</span></td><td>{{ row.description }}</td><td>{{ row.module }}</td></tr></tbody></table>
+        </section>
+
+        <section *ngIf="adminTab() === 'departments'" class="grid gap-4">
+          <div class="flex justify-end"><button class="btn-primary" type="button" (click)="modal.set('department')">New Department</button></div>
+          <div class="grid grid-cols-4 gap-4 max-[1200px]:grid-cols-2 max-[720px]:grid-cols-1">
+            <article *ngFor="let department of departments()" class="enterprise-panel p-5">
+              <span class="badge badge-blue">{{ department.code }}</span>
+              <h3 class="mt-3 text-lg font-black text-slate-900">{{ department.name }}</h3>
+              <p class="text-sm text-slate-500">{{ department.type }} | {{ department.location }}</p>
+              <strong class="mt-4 block text-2xl text-slate-900">{{ departmentStaffCount(department.name) }}</strong>
+              <span class="text-xs font-bold uppercase text-slate-500">assigned staff</span>
+            </article>
+          </div>
+        </section>
+
+        <section *ngIf="adminTab() === 'emails'" class="enterprise-panel overflow-auto p-4">
+          <div class="mb-3 flex justify-between gap-2 max-[700px]:flex-col"><strong class="text-sm text-slate-700">Email Delivery Log</strong><button class="btn-secondary" type="button" (click)="loadAll()">Refresh</button></div>
+          <table class="data-table"><thead><tr><th>Recipient</th><th>Subject</th><th>Status</th><th>Created</th><th>Error</th><th>Link</th></tr></thead><tbody><tr *ngFor="let row of emailOutbox()"><td>{{ row.recipient }}</td><td>{{ row.subject }}</td><td><span class="badge" [class.badge-green]="row.status === 'Sent'">{{ row.status }}</span></td><td>{{ row.createdAtUtc | date:'short' }}</td><td>{{ row.error || '-' }}</td><td><button class="btn-secondary !min-h-8 !px-2 !py-1" *ngIf="row.setupUrl" type="button" (click)="copySetupUrl(row.setupUrl)">Copy</button></td></tr></tbody></table>
+        </section>
       </section>
 
-      <section *ngIf="active() !== 'dashboard' && active() !== 'admin'" class="grid gap-4">
+      <section *ngIf="active() === 'enterprise'" class="grid gap-5">
+        <section class="enterprise-panel overflow-hidden">
+          <div class="grid grid-cols-[1.15fr_.85fr] gap-0 max-[1000px]:grid-cols-1">
+            <div class="p-6">
+              <p class="text-xs font-extrabold uppercase text-brand-600">Hospital Operations Desk</p>
+              <h2 class="mt-1 text-2xl font-black text-slate-900">{{ activeEnterpriseModule().label }}</h2>
+              <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                {{ activeEnterpriseModule().description }}
+              </p>
+              <div class="mt-5 flex flex-wrap gap-2">
+                <button
+                  *ngFor="let tab of enterpriseModules"
+                  class="btn-secondary"
+                  type="button"
+                  [class.bg-brand-50]="enterpriseTab() === tab.id"
+                  (click)="enterpriseTab.set(tab.id)"
+                >
+                  {{ tab.label }}
+                </button>
+              </div>
+            </div>
+            <div class="bg-slate-900 p-6 text-white">
+              <p class="text-xs font-extrabold uppercase text-slate-300">Daily Control</p>
+              <div class="mt-5 grid gap-4">
+                <div *ngFor="let item of enterpriseKpis()" class="rounded-lg border border-white/10 bg-white/5 p-4">
+                  <div class="flex items-start justify-between gap-3">
+                    <span class="text-xs font-extrabold uppercase text-slate-300">{{ item.label }}</span>
+                    <strong class="text-2xl font-black text-white">{{ item.value }}</strong>
+                  </div>
+                  <p class="mt-2 text-xs leading-5 text-slate-300">{{ item.hint }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid grid-cols-6 gap-4 max-[1300px]:grid-cols-3 max-[760px]:grid-cols-1">
+          <article *ngFor="let metric of enterpriseOperationalMetrics()" class="enterprise-panel p-4">
+            <span class="text-xs font-extrabold uppercase text-slate-500">{{ metric.label }}</span>
+            <strong class="mt-3 block text-2xl font-black text-slate-900">{{ metric.value }}</strong>
+            <p class="mt-2 text-xs leading-5 text-slate-500">{{ metric.hint }}</p>
+          </article>
+        </section>
+
+        <section class="enterprise-panel p-5">
+          <div class="flex items-center justify-between gap-3 max-[700px]:flex-col max-[700px]:items-start">
+            <div>
+              <h3 class="text-lg font-black text-slate-900">Department Workflow</h3>
+              <p class="text-sm text-slate-500">Standard steps followed by the selected service area.</p>
+            </div>
+            <button class="btn-primary" type="button" (click)="openEnterpriseRecord()">{{ activeEnterpriseModule().action }}</button>
+          </div>
+          <div class="mt-5 grid grid-cols-6 gap-3 max-[1200px]:grid-cols-3 max-[700px]:grid-cols-1">
+            <div *ngFor="let step of enterpriseWorkflow(); let i = index" class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <span class="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-sm font-black text-white">{{ i + 1 }}</span>
+              <strong class="mt-3 block text-sm text-slate-900">{{ step }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-1">
+          <article class="enterprise-panel p-5">
+            <span class="badge badge-green">Care Delivery</span>
+            <h3 class="mt-3 text-base font-black text-slate-900">Clinical departments</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-500">Pharmacy, laboratory, radiology, emergency, inpatient, and theatre teams can track work from request to closure.</p>
+          </article>
+          <article class="enterprise-panel p-5">
+            <span class="badge badge-blue">Business Control</span>
+            <h3 class="mt-3 text-base font-black text-slate-900">Finance and administration</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-500">Claims, inventory, procurement, assets, biomedical maintenance, documents, reporting, and integrations are managed in one desk.</p>
+          </article>
+          <article class="enterprise-panel p-5">
+            <span class="badge">Platform Strength</span>
+            <h3 class="mt-3 text-base font-black text-slate-900">Security and communication</h3>
+            <p class="mt-2 text-sm leading-6 text-slate-500">Access reviews, notification tasks, document indexing, reports, and integration checks are traceable by owner and due date.</p>
+          </article>
+        </section>
+
+        <section class="enterprise-panel overflow-auto p-4">
+          <div class="mb-4 flex items-center justify-between gap-3 max-[700px]:flex-col max-[700px]:items-start">
+            <div>
+              <h3 class="text-lg font-black text-slate-900">{{ activeEnterpriseModule().label }} Worklist</h3>
+              <p class="text-sm text-slate-500">Create records, assign responsibility, track due dates, and close work when it is completed.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn-primary" type="button" (click)="openEnterpriseRecord()">New Record</button>
+              <button class="btn-secondary" type="button" (click)="exportExcel(activeEnterpriseModule().area, enterpriseRows())">Excel</button>
+              <button class="btn-secondary" type="button" (click)="printTable(activeEnterpriseModule().area, enterpriseRows())">Print</button>
+            </div>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Record</th>
+                <th>Patient</th>
+                <th>Title</th>
+                <th>Department</th>
+                <th>Owner</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Value</th>
+                <th>Due</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of enterpriseRows()">
+                <td class="font-black">{{ row.recordNumber }}</td>
+                <td>{{ row.patientId ? patientName(row.patientId) : '-' }}</td>
+                <td>{{ row.title }}<br><span class="text-xs text-slate-500">{{ row.details }}</span></td>
+                <td>{{ row.department }}</td>
+                <td>{{ row.owner }}</td>
+                <td><span class="badge" [class.badge-blue]="row.priority === 'High'">{{ row.priority }}</span></td>
+                <td><span class="badge" [class.badge-green]="row.status === 'Completed'" [class.badge-blue]="row.status === 'In Progress'">{{ row.status }}</span></td>
+                <td>{{ row.amount | currency:'ETB' }}</td>
+                <td>{{ row.dueAtUtc | date:'short' }}</td>
+                <td><div class="flex flex-wrap gap-1"><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="setEnterpriseRecordStatus(row, 'In Progress')">Start</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="setEnterpriseRecordStatus(row, 'Under Review')">Review</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="setEnterpriseRecordStatus(row, 'Completed')">Close</button></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
+
+      <section *ngIf="active() !== 'dashboard' && active() !== 'operations' && active() !== 'admin' && active() !== 'enterprise'" class="grid gap-4">
         <div class="enterprise-panel p-4">
           <div class="flex items-center justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
             <label class="field-label max-w-sm flex-1">Search
@@ -121,6 +331,7 @@
             <div class="flex flex-wrap gap-2">
               <button class="btn-primary" *ngIf="active() === 'employees'" type="button" (click)="modal.set('employee')">New Employee</button>
               <button class="btn-primary" *ngIf="active() === 'patients'" type="button" (click)="modal.set('patient')">Register Patient</button>
+              <button class="btn-primary" *ngIf="active() === 'insurance'" type="button" (click)="modal.set('insurance')">Register Company</button>
               <button class="btn-primary" *ngIf="active() === 'appointments'" type="button" (click)="modal.set('appointment')">Book Appointment</button>
               <button class="btn-primary" *ngIf="active() === 'billing'" type="button" (click)="modal.set('invoice')">Create Invoice</button>
               <button class="btn-secondary" *ngIf="active() === 'billing'" type="button" (click)="modal.set('payment')">Record Payment</button>
@@ -131,18 +342,45 @@
         <ng-container [ngSwitch]="active()">
           <section *ngSwitchCase="'employees'" class="enterprise-panel overflow-auto p-4">
             <div class="mb-3 flex justify-end gap-2"><button class="btn-secondary" (click)="exportExcel('employees', employees())">Excel</button><button class="btn-secondary" (click)="exportPdf('employees', employees())">PDF</button><button class="btn-secondary" (click)="printTable('employees', employees())">Print</button></div>
-            <table class="data-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Permission</th></tr></thead><tbody><tr *ngFor="let row of filtered(employees())"><td class="font-bold">{{ row.firstName }} {{ row.lastName }}</td><td>{{ row.emailAddress }}</td><td><span class="badge badge-blue">{{ row.role }}</span></td><td>{{ row.permission }}</td></tr></tbody></table>
+            <table class="data-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Permission</th><th>Status</th><th>Action</th></tr></thead><tbody><tr *ngFor="let row of filtered(employees())"><td class="font-bold">{{ row.firstName }} {{ row.lastName }}</td><td>{{ row.emailAddress }}</td><td><span class="badge badge-blue">{{ row.role }}</span></td><td>{{ row.permission }}</td><td><span class="badge" [class.badge-green]="row.isActive && row.passwordSetupCompleted">{{ !row.isActive ? 'Inactive' : row.passwordSetupCompleted ? 'Active' : 'Pending Setup' }}</span></td><td><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" [disabled]="saving()" (click)="resendInvite(row)">Send Invite</button></td></tr></tbody></table>
           </section>
 
           <section *ngSwitchCase="'patients'" class="enterprise-panel overflow-auto p-4">
             <div class="mb-3 flex justify-end gap-2"><button class="btn-secondary" (click)="exportExcel('patients', patients())">Excel</button><button class="btn-secondary" (click)="exportPdf('patients', patients())">PDF</button><button class="btn-secondary" (click)="printTable('patients', patients())">Print</button></div>
-            <table class="data-table"><thead><tr><th>Photo</th><th>MRN</th><th>Name</th><th>Phone</th><th>Gender</th><th>Blood</th><th>Emergency</th></tr></thead><tbody><tr *ngFor="let row of filtered(patients())"><td><img *ngIf="row.photoDataUrl" class="h-11 w-11 rounded-lg object-cover" [src]="row.photoDataUrl" alt="Patient"><span *ngIf="!row.photoDataUrl" class="grid h-11 w-11 place-items-center rounded-lg bg-slate-100 text-xs font-black">NA</span></td><td class="font-black">{{ row.mrn }}</td><td>{{ row.firstName }} {{ row.lastName }}</td><td>{{ row.phone }}</td><td>{{ row.gender }}</td><td>{{ row.bloodType || '-' }}</td><td>{{ row.emergencyContactName || '-' }}<br><span class="text-xs text-slate-500">{{ row.emergencyContactPhone }}</span></td></tr></tbody></table>
+            <table class="data-table"><thead><tr><th>Photo</th><th>MRN</th><th>Name</th><th>Phone</th><th>National ID</th><th>Employer</th><th>Insurance</th><th>Emergency</th></tr></thead><tbody><tr *ngFor="let row of filtered(patients())"><td><img *ngIf="row.photoDataUrl" class="h-11 w-11 rounded-lg object-cover" [src]="row.photoDataUrl" alt="Patient"><span *ngIf="!row.photoDataUrl" class="grid h-11 w-11 place-items-center rounded-lg bg-slate-100 text-xs font-black">NA</span></td><td class="font-black">{{ row.mrn }}</td><td>{{ row.firstName }} {{ row.lastName }}<br><span class="text-xs text-slate-500">{{ row.email || row.gender }}</span></td><td>{{ row.phone }}</td><td>{{ row.nationalId || '-' }}</td><td>{{ row.employerName || '-' }}<br><span class="text-xs text-slate-500">{{ row.occupation }}</span></td><td>{{ row.insuranceCompanyName || row.insuranceProvider || 'Self Pay' }}<br><span class="text-xs text-slate-500">{{ row.insurancePlan || row.insurancePolicyNumber }}</span></td><td>{{ row.emergencyContactName || '-' }}<br><span class="text-xs text-slate-500">{{ row.emergencyContactPhone }}</span></td></tr></tbody></table>
+          </section>
+
+          <section *ngSwitchCase="'insurance'" class="grid gap-4">
+            <div class="grid grid-cols-3 gap-4 max-[1000px]:grid-cols-1">
+              <article *ngFor="let company of filtered(insuranceCompanies())" class="enterprise-panel p-5">
+                <div class="flex items-start justify-between gap-3">
+                  <div><span class="badge badge-blue">{{ company.payerCode }}</span><h3 class="mt-3 text-lg font-black text-slate-900">{{ company.name }}</h3></div>
+                  <span class="badge" [class.badge-green]="company.isActive">{{ company.coveragePercent }}%</span>
+                </div>
+                <p class="mt-3 text-sm text-slate-500">{{ company.coverageType }} coverage</p>
+                <div class="mt-4 grid gap-2 text-sm text-slate-700">
+                  <span><strong>Contact:</strong> {{ company.contactPerson || '-' }}</span>
+                  <span><strong>Phone:</strong> {{ company.phone }}</span>
+                  <span><strong>Email:</strong> {{ company.email || '-' }}</span>
+                  <span><strong>Address:</strong> {{ company.address || '-' }}</span>
+                </div>
+              </article>
+            </div>
           </section>
 
           <section *ngSwitchCase="'appointments'" class="grid gap-4">
+            <div class="grid grid-cols-4 gap-4 max-[1200px]:grid-cols-2 max-[720px]:grid-cols-1">
+              <article *ngFor="let doctor of doctors()" class="enterprise-panel p-4">
+                <span class="badge badge-blue">{{ doctor.department || 'Clinical' }}</span>
+                <h3 class="mt-3 text-base font-black text-slate-900">Dr. {{ doctor.firstName }} {{ doctor.lastName }}</h3>
+                <p class="text-sm text-slate-500">{{ doctor.specialization || 'General Practice' }}</p>
+                <strong class="mt-3 block text-3xl text-slate-900">{{ doctorQueueCount(doctor.id) }}</strong>
+                <span class="text-xs font-bold uppercase text-slate-500">active queue</span>
+              </article>
+            </div>
             <div class="enterprise-panel overflow-auto p-4">
               <div class="mb-3 flex justify-end gap-2"><button class="btn-secondary" (click)="exportExcel('appointments', appointments())">Excel</button><button class="btn-secondary" (click)="exportPdf('appointments', appointments())">PDF</button><button class="btn-secondary" (click)="printTable('appointments', appointments())">Print</button></div>
-              <table class="data-table"><thead><tr><th>Patient</th><th>Doctor</th><th>Starts</th><th>Status</th><th>Reason</th></tr></thead><tbody><tr *ngFor="let row of filtered(appointments())"><td>{{ patientName(row.patientId) }}</td><td>{{ doctorName(row.doctorId) }}</td><td>{{ row.startsAtUtc | date:'medium' }}</td><td><span class="badge badge-green">{{ row.status }}</span></td><td>{{ row.reason }}</td></tr></tbody></table>
+              <table class="data-table"><thead><tr><th>Queue</th><th>Patient</th><th>Doctor</th><th>Starts</th><th>Department</th><th>Type</th><th>Priority</th><th>Status</th><th>Action</th></tr></thead><tbody><tr *ngFor="let row of filtered(appointments())"><td><span class="badge badge-blue">#{{ row.queueNumber }}</span><br><span class="text-xs text-slate-500">{{ row.waitingAhead }} ahead</span></td><td>{{ patientName(row.patientId) }}<br><span class="text-xs text-slate-500">{{ patientById(row.patientId)?.phone }}</span></td><td>{{ doctorName(row.doctorId) }}<br><span class="text-xs text-slate-500">{{ employeeById(row.doctorId)?.specialization }}</span></td><td>{{ row.startsAtUtc | date:'medium' }}</td><td>{{ row.department }}</td><td>{{ row.appointmentType }}</td><td><span class="badge">{{ row.priority }}</span></td><td><span class="badge" [class.badge-green]="row.queueStatus === 'Completed'">{{ row.queueStatus }}</span></td><td><div class="flex flex-wrap gap-1"><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="setAppointmentStatus(row, 'In Service')">Call</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="setAppointmentStatus(row, 'Completed')">Done</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="setAppointmentStatus(row, 'No Show')">No Show</button></div></td></tr></tbody></table>
             </div>
             <div class="enterprise-panel overflow-auto p-4">
               <h3 class="mb-3 text-base font-black text-slate-900">Bed Board</h3>
@@ -179,14 +417,39 @@
               <table *ngSwitchCase="'encounters'" class="data-table"><thead><tr><th>Patient</th><th>Doctor</th><th>Visit</th><th>Complaint</th><th>Assessment</th><th>Plan</th></tr></thead><tbody><tr *ngFor="let row of filtered(encounters())"><td>{{ patientName(row.patientId) }}</td><td>{{ doctorName(row.doctorId) }}</td><td>{{ row.visitType }}</td><td>{{ row.chiefComplaint }}</td><td>{{ row.assessment }}</td><td>{{ row.plan }}</td></tr></tbody></table>
               <table *ngSwitchCase="'vitals'" class="data-table"><thead><tr><th>Patient</th><th>Temp</th><th>Pulse</th><th>RR</th><th>BP</th><th>Weight</th><th>Height</th></tr></thead><tbody><tr *ngFor="let row of filtered(vitals())"><td>{{ patientName(row.patientId) }}</td><td>{{ row.temperatureC }} C</td><td>{{ row.pulse }}</td><td>{{ row.respiratoryRate }}</td><td>{{ row.bloodPressure }}</td><td>{{ row.weightKg }} kg</td><td>{{ row.heightCm }} cm</td></tr></tbody></table>
               <table *ngSwitchCase="'diagnoses'" class="data-table"><thead><tr><th>Patient</th><th>Doctor</th><th>Code</th><th>Description</th><th>Severity</th></tr></thead><tbody><tr *ngFor="let row of filtered(diagnoses())"><td>{{ patientName(row.patientId) }}</td><td>{{ doctorName(row.doctorId) }}</td><td>{{ row.code }}</td><td>{{ row.description }}</td><td><span class="badge">{{ row.severity }}</span></td></tr></tbody></table>
-              <table *ngSwitchCase="'prescriptions'" class="data-table"><thead><tr><th>Patient</th><th>Doctor</th><th>Medication</th><th>Instructions</th><th>Ordered</th></tr></thead><tbody><tr *ngFor="let row of filtered(prescriptions())"><td>{{ patientName(row.patientId) }}</td><td>{{ doctorName(row.doctorId) }}</td><td>{{ row.medication }}</td><td>{{ row.instructions }}</td><td>{{ row.orderedAtUtc | date:'short' }}</td></tr></tbody></table>
+              <table *ngSwitchCase="'prescriptions'" class="data-table"><thead><tr><th>Patient</th><th>Doctor</th><th>Medication</th><th>Instructions</th><th>Ordered</th><th>Print</th></tr></thead><tbody><tr *ngFor="let row of filtered(prescriptions())"><td>{{ patientName(row.patientId) }}</td><td>{{ doctorName(row.doctorId) }}</td><td>{{ row.medication }}</td><td>{{ row.instructions }}</td><td>{{ row.orderedAtUtc | date:'short' }}</td><td><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="printPrescription(row)">Rx</button></td></tr></tbody></table>
               <table *ngSwitchCase="'labs'" class="data-table"><thead><tr><th>Patient</th><th>Doctor</th><th>Test</th><th>Status</th><th>Ordered</th></tr></thead><tbody><tr *ngFor="let row of filtered(labRequests())"><td>{{ patientName(row.patientId) }}</td><td>{{ doctorName(row.doctorId) }}</td><td>{{ row.testName }}</td><td><span class="badge badge-blue">{{ row.status }}</span></td><td>{{ row.orderedAtUtc | date:'short' }}</td></tr></tbody></table>
             </div>
           </section>
 
-          <section *ngSwitchCase="'billing'" class="enterprise-panel overflow-auto p-4">
-            <div class="mb-3 flex justify-end gap-2"><button class="btn-secondary" (click)="exportExcel('invoices', invoices())">Excel</button><button class="btn-secondary" (click)="exportPdf('invoices', invoices())">PDF</button><button class="btn-secondary" (click)="printTable('invoices', invoices())">Print</button></div>
-            <table class="data-table"><thead><tr><th>Patient</th><th>Description</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead><tbody><tr *ngFor="let row of filtered(invoices())"><td>{{ patientName(row.patientId) }}</td><td>{{ row.description }}</td><td>{{ row.amount | currency }}</td><td><span class="badge" [class.badge-green]="row.status === 'Paid'">{{ row.status }}</span></td><td>{{ row.createdAtUtc | date:'short' }}</td></tr></tbody></table>
+          <section *ngSwitchCase="'billing'" class="grid gap-4">
+            <div class="enterprise-panel p-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn-secondary" [class.bg-brand-50]="billingTab() === 'invoices'" (click)="billingTab.set('invoices')">Invoices</button>
+                  <button class="btn-secondary" [class.bg-brand-50]="billingTab() === 'payments'" (click)="billingTab.set('payments')">Payments</button>
+                  <button class="btn-secondary" [class.bg-brand-50]="billingTab() === 'receipts'" (click)="billingTab.set('receipts')">Receipts</button>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn-primary" type="button" (click)="modal.set('invoice')">Create Invoice</button>
+                  <button class="btn-secondary" type="button" (click)="modal.set('payment')">Collect Payment</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-4 gap-4 max-[1100px]:grid-cols-2 max-[640px]:grid-cols-1">
+              <article class="enterprise-panel p-4"><span class="badge badge-blue">Billed</span><strong class="mt-3 block text-2xl text-slate-900">{{ totalBilled() | currency:'ETB' }}</strong></article>
+              <article class="enterprise-panel p-4"><span class="badge badge-green">Collected</span><strong class="mt-3 block text-2xl text-slate-900">{{ totalCollected() | currency:'ETB' }}</strong></article>
+              <article class="enterprise-panel p-4"><span class="badge">Open</span><strong class="mt-3 block text-2xl text-slate-900">{{ totalOpenBalance() | currency:'ETB' }}</strong></article>
+              <article class="enterprise-panel p-4"><span class="badge">Receipts</span><strong class="mt-3 block text-2xl text-slate-900">{{ receipts().length }}</strong></article>
+            </div>
+
+            <div class="enterprise-panel overflow-auto p-4" [ngSwitch]="billingTab()">
+              <div class="mb-3 flex justify-end gap-2"><button class="btn-secondary" (click)="exportExcel('billing-' + billingTab(), billingTab() === 'invoices' ? invoices() : billingTab() === 'payments' ? payments() : receipts())">Excel</button><button class="btn-secondary" (click)="printTable('billing-' + billingTab(), billingTab() === 'invoices' ? invoices() : billingTab() === 'payments' ? payments() : receipts())">Print</button></div>
+              <table *ngSwitchCase="'invoices'" class="data-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Description</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Due</th><th>Print</th></tr></thead><tbody><tr *ngFor="let row of filtered(invoices())"><td class="font-black">{{ row.invoiceNumber }}</td><td>{{ patientName(row.patientId) }}<br><span class="text-xs text-slate-500">{{ patientById(row.patientId)?.insuranceCompanyName || patientById(row.patientId)?.insuranceProvider || 'Self Pay' }}</span></td><td>{{ row.description }}<br><span class="text-xs text-slate-500">{{ row.items.length }} line item(s)</span></td><td>{{ row.total | currency:'ETB' }}</td><td>{{ row.paid | currency:'ETB' }}</td><td>{{ row.balance | currency:'ETB' }}</td><td><span class="badge" [class.badge-green]="row.status === 'Paid'">{{ row.status }}</span></td><td>{{ row.dueAtUtc | date:'shortDate' }}</td><td><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="printInvoice(row)">Invoice</button></td></tr></tbody></table>
+              <table *ngSwitchCase="'payments'" class="data-table"><thead><tr><th>Receipt</th><th>Invoice</th><th>Amount</th><th>Method</th><th>Reference</th><th>Received By</th><th>Paid At</th></tr></thead><tbody><tr *ngFor="let row of filtered(payments())"><td class="font-black">{{ row.receiptNumber }}</td><td>{{ invoiceFor(row.invoiceId)?.invoiceNumber }}</td><td>{{ row.amount | currency:'ETB' }}</td><td>{{ row.method }}</td><td>{{ row.reference || '-' }}</td><td>{{ row.receivedBy }}</td><td>{{ row.paidAtUtc | date:'short' }}</td></tr></tbody></table>
+              <table *ngSwitchCase="'receipts'" class="data-table"><thead><tr><th>Receipt</th><th>Invoice</th><th>Patient</th><th>Amount</th><th>Method</th><th>Balance After</th><th>Print</th></tr></thead><tbody><tr *ngFor="let row of filtered(receipts())"><td class="font-black">{{ row.receiptNumber }}</td><td>{{ row.invoiceNumber }}</td><td>{{ patientName(row.patientId) }}</td><td>{{ row.amount | currency:'ETB' }}</td><td>{{ row.method }}</td><td>{{ row.balanceAfterPayment | currency:'ETB' }}</td><td><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="printReceipt(row)">Receipt</button></td></tr></tbody></table>
+            </div>
           </section>
         </ng-container>
       </section>
@@ -200,6 +463,56 @@
       <h2 class="text-lg font-black text-slate-900">{{ modal() | titlecase }}</h2>
       <button class="btn-secondary" type="button" (click)="modal.set(null); stopCamera()">Close</button>
     </div>
+
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'enterpriseRecord'" (ngSubmit)="createEnterpriseRecord()">
+      <div class="rounded-lg border border-brand-100 bg-brand-50 p-4">
+        <span class="badge badge-blue">{{ enterpriseRecordForm.area }}</span>
+        <p class="mt-2 text-sm text-slate-600">{{ activeEnterpriseModule().description }}</p>
+      </div>
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+        <label class="field-label">Patient
+          <select class="field-control" name="erPatient" [(ngModel)]="enterpriseRecordForm.patientId">
+            <option value="">Not patient specific</option>
+            <option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }}</option>
+          </select>
+        </label>
+        <label class="field-label">Department
+          <input class="field-control" name="erDepartment" [(ngModel)]="enterpriseRecordForm.department">
+        </label>
+        <label class="field-label col-span-2 max-[700px]:col-span-1">Title
+          <input class="field-control" name="erTitle" [(ngModel)]="enterpriseRecordForm.title" placeholder="Short work description" required>
+        </label>
+        <label class="field-label">Owner
+          <input class="field-control" name="erOwner" [(ngModel)]="enterpriseRecordForm.owner">
+        </label>
+        <label class="field-label">Priority
+          <select class="field-control" name="erPriority" [(ngModel)]="enterpriseRecordForm.priority">
+            <option>Normal</option>
+            <option>High</option>
+            <option>Urgent</option>
+            <option>Low</option>
+          </select>
+        </label>
+        <label class="field-label">Status
+          <select class="field-control" name="erStatus" [(ngModel)]="enterpriseRecordForm.status">
+            <option>Open</option>
+            <option>In Progress</option>
+            <option>Under Review</option>
+            <option>Completed</option>
+          </select>
+        </label>
+        <label class="field-label">Value
+          <input class="field-control" name="erAmount" type="number" [(ngModel)]="enterpriseRecordForm.amount">
+        </label>
+        <label class="field-label">Due Date
+          <input class="field-control" name="erDue" type="datetime-local" [(ngModel)]="enterpriseRecordForm.dueAtUtc">
+        </label>
+        <label class="field-label col-span-2 max-[700px]:col-span-1">Details
+          <textarea class="field-control min-h-28" name="erDetails" [(ngModel)]="enterpriseRecordForm.details"></textarea>
+        </label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Save Record</button>
+    </form>
 
     <form class="grid gap-4 p-5" *ngIf="modal() === 'role'" (ngSubmit)="updateRole()">
       <div class="rounded-lg border border-brand-100 bg-brand-50 p-4">
@@ -215,9 +528,54 @@
       <button class="btn-primary" [disabled]="saving()">Update Role Permissions</button>
     </form>
 
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'newRole'" (ngSubmit)="createRole()">
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+        <label class="field-label">Role Key<input class="field-control" name="nrrole" [(ngModel)]="newRoleForm.role" placeholder="INSURANCE_MANAGER"></label>
+        <label class="field-label">Description<input class="field-control" name="nrdesc" [(ngModel)]="newRoleForm.description"></label>
+        <label class="field-label col-span-2 max-[700px]:col-span-1">Permissions
+          <textarea class="field-control min-h-28" name="nrperms" [(ngModel)]="newRoleForm.permissionsText" placeholder="MANAGE_INSURANCE, VIEW_PATIENTS"></textarea>
+        </label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Create Role</button>
+    </form>
+
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'permission'" (ngSubmit)="createPermission()">
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+        <label class="field-label">Permission Key<input class="field-control" name="pkey" [(ngModel)]="permissionForm.key" placeholder="APPROVE_CLAIMS"></label>
+        <label class="field-label">Module<select class="field-control" name="pmod" [(ngModel)]="permissionForm.module"><option>Administration</option><option>Patient Management</option><option>Clinical</option><option>Billing</option></select></label>
+        <label class="field-label col-span-2 max-[700px]:col-span-1">Description<input class="field-control" name="pdesc" [(ngModel)]="permissionForm.description"></label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Save Permission</button>
+    </form>
+
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'department'" (ngSubmit)="createDepartment()">
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+        <label class="field-label">Code<input class="field-control" name="dcode" [(ngModel)]="departmentForm.code" placeholder="CARD"></label>
+        <label class="field-label">Name<input class="field-control" name="dname" [(ngModel)]="departmentForm.name" placeholder="Cardiology"></label>
+        <label class="field-label">Type<select class="field-control" name="dtype" [(ngModel)]="departmentForm.type"><option>Clinical</option><option>Administration</option><option>Support</option></select></label>
+        <label class="field-label">Location<input class="field-control" name="dloc" [(ngModel)]="departmentForm.location"></label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Save Department</button>
+    </form>
+
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'insurance'" (ngSubmit)="createInsuranceCompany()">
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+        <label class="field-label">Company Name<input class="field-control" name="icname" [(ngModel)]="insuranceForm.name"></label>
+        <label class="field-label">Payer Code<input class="field-control" name="iccode" [(ngModel)]="insuranceForm.payerCode"></label>
+        <label class="field-label">Contact Person<input class="field-control" name="icperson" [(ngModel)]="insuranceForm.contactPerson"></label>
+        <label class="field-label">Phone<input class="field-control" name="icphone" [(ngModel)]="insuranceForm.phone"></label>
+        <label class="field-label">Email<input class="field-control" type="email" name="icemail" [(ngModel)]="insuranceForm.email"></label>
+        <label class="field-label">Coverage Type<select class="field-control" name="ictype" [(ngModel)]="insuranceForm.coverageType"><option>Corporate</option><option>Employer Fund</option><option>Community</option><option>Private</option></select></label>
+        <label class="field-label">Coverage %<input class="field-control" type="number" min="0" max="100" name="icpercent" [(ngModel)]="insuranceForm.coveragePercent"></label>
+        <label class="field-label">Address<input class="field-control" name="icaddr" [(ngModel)]="insuranceForm.address"></label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Register Insurance Company</button>
+    </form>
+
     <form class="grid gap-4 p-5" *ngIf="modal() === 'employee'" (ngSubmit)="createEmployee()">
-      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">First Name<input class="field-control" name="efn" [(ngModel)]="employeeForm.firstName"></label><label class="field-label">Last Name<input class="field-control" name="eln" [(ngModel)]="employeeForm.lastName"></label><label class="field-label">Email<input class="field-control" name="eem" [(ngModel)]="employeeForm.emailAddress"></label><label class="field-label">Role<select class="field-control" name="erole" [(ngModel)]="employeeForm.role"><option *ngFor="let role of roles()" [value]="role.role">{{ role.role }}</option></select></label></div>
-      <button class="btn-primary" [disabled]="saving()">Save Employee</button>
+      <p class="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">The user will receive a one-time password setup invitation. They cannot sign in until setup is completed.</p>
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">First Name<input class="field-control" name="efn" [(ngModel)]="employeeForm.firstName"></label><label class="field-label">Last Name<input class="field-control" name="eln" [(ngModel)]="employeeForm.lastName"></label><label class="field-label">Email<input class="field-control" name="eem" type="email" [(ngModel)]="employeeForm.emailAddress"></label><label class="field-label">Phone<input class="field-control" name="ephone" [(ngModel)]="employeeForm.phone"></label><label class="field-label">Role<select class="field-control" name="erole" [(ngModel)]="employeeForm.role"><option *ngFor="let role of roles()" [value]="role.role">{{ role.role }}</option></select></label><label class="field-label">Department<select class="field-control" name="edepartment" [(ngModel)]="employeeForm.department"><option *ngFor="let department of departments()" [value]="department.name">{{ department.name }}</option><option>Front Desk</option><option>Ward</option><option>Laboratory</option><option>Pharmacy</option><option>Finance</option></select></label><label class="field-label col-span-2 max-[700px]:col-span-1">Specialization<input class="field-control" name="especialization" [(ngModel)]="employeeForm.specialization"></label></div>
+      <button class="btn-primary" [disabled]="saving()">Create User & Send Invitation</button>
     </form>
 
     <form class="grid gap-4 p-5" *ngIf="modal() === 'patient'" (ngSubmit)="createPatient()">
@@ -225,12 +583,12 @@
         <div class="grid gap-3"><div class="grid aspect-square place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100"><img *ngIf="patientForm.photoDataUrl" class="h-full w-full object-cover" [src]="patientForm.photoDataUrl" alt="Patient"><span *ngIf="!patientForm.photoDataUrl" class="text-xs font-black text-slate-500">NO PHOTO</span></div><input class="field-control" type="file" accept="image/*" (change)="onPhotoFile($event)"></div>
         <div class="grid gap-3"><video #cameraPreview class="h-40 w-full rounded-lg border border-slate-200 bg-slate-100 object-cover" muted playsinline></video><canvas #cameraCanvas hidden></canvas><div class="flex flex-wrap gap-2"><button class="btn-secondary" type="button" (click)="startCamera()">Start Camera</button><button class="btn-secondary" type="button" (click)="capturePhoto()" [disabled]="!cameraOn()">Capture</button><button class="btn-secondary" type="button" (click)="stopCamera()" [disabled]="!cameraOn()">Stop</button></div></div>
       </div>
-      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">First Name<input class="field-control" name="pfn" [(ngModel)]="patientForm.firstName"></label><label class="field-label">Last Name<input class="field-control" name="pln" [(ngModel)]="patientForm.lastName"></label><label class="field-label">Phone<input class="field-control" name="pphone" [(ngModel)]="patientForm.phone"></label><label class="field-label">Gender<select class="field-control" name="pgender" [(ngModel)]="patientForm.gender"><option>Female</option><option>Male</option><option>Other</option></select></label><label class="field-label">DOB<input class="field-control" name="pdob" type="date" [(ngModel)]="patientForm.dateOfBirth"></label><label class="field-label">Blood Type<select class="field-control" name="pblood" [(ngModel)]="patientForm.bloodType"><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></label><label class="field-label col-span-2 max-[700px]:col-span-1">Address<input class="field-control" name="paddress" [(ngModel)]="patientForm.address"></label><label class="field-label">Emergency Contact<input class="field-control" name="pec" [(ngModel)]="patientForm.emergencyContactName"></label><label class="field-label">Emergency Phone<input class="field-control" name="pephone" [(ngModel)]="patientForm.emergencyContactPhone"></label></div>
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">First Name<input class="field-control" name="pfn" [(ngModel)]="patientForm.firstName"></label><label class="field-label">Last Name<input class="field-control" name="pln" [(ngModel)]="patientForm.lastName"></label><label class="field-label">Email<input class="field-control" name="pemail" type="email" [(ngModel)]="patientForm.email"></label><label class="field-label">Phone<input class="field-control" name="pphone" [(ngModel)]="patientForm.phone"></label><label class="field-label">National ID<input class="field-control" name="pnid" [(ngModel)]="patientForm.nationalId"></label><label class="field-label">Occupation<input class="field-control" name="pocc" [(ngModel)]="patientForm.occupation"></label><label class="field-label">Gender<select class="field-control" name="pgender" [(ngModel)]="patientForm.gender"><option>Female</option><option>Male</option><option>Other</option></select></label><label class="field-label">Marital Status<select class="field-control" name="pmarital" [(ngModel)]="patientForm.maritalStatus"><option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option></select></label><label class="field-label">DOB<input class="field-control" name="pdob" type="date" [(ngModel)]="patientForm.dateOfBirth"></label><label class="field-label">Blood Type<select class="field-control" name="pblood" [(ngModel)]="patientForm.bloodType"><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option></select></label><label class="field-label">Insurance Company<select class="field-control" name="pcompany" [ngModel]="patientForm.insuranceCompanyId" (ngModelChange)="onInsuranceCompanyChange($event)"><option value="">Self Pay / No Insurance</option><option *ngFor="let company of insuranceCompanies()" [value]="company.id">{{ company.name }} - {{ company.coveragePercent }}%</option></select></label><label class="field-label">Insurance Provider<select class="field-control" name="pins" [(ngModel)]="patientForm.insuranceProvider"><option value="">Self Pay</option><option *ngFor="let company of insuranceCompanies()" [value]="company.name">{{ company.name }}</option></select></label><label class="field-label">Employer / Company<input class="field-control" name="pemployer" [(ngModel)]="patientForm.employerName"></label><label class="field-label">Insurance Plan<select class="field-control" name="pplan" [(ngModel)]="patientForm.insurancePlan"><option value="">None</option><option *ngFor="let company of insuranceCompanies()" [value]="company.coverageType">{{ company.coverageType }} - {{ company.coveragePercent }}%</option></select></label><label class="field-label">Policy Number<input class="field-control" name="ppolicy" [(ngModel)]="patientForm.insurancePolicyNumber"></label><label class="field-label col-span-2 max-[700px]:col-span-1">Address<input class="field-control" name="paddress" [(ngModel)]="patientForm.address"></label><label class="field-label">Emergency Contact<input class="field-control" name="pec" [(ngModel)]="patientForm.emergencyContactName"></label><label class="field-label">Emergency Phone<input class="field-control" name="pephone" [(ngModel)]="patientForm.emergencyContactPhone"></label></div>
       <button class="btn-primary" [disabled]="saving()">Register Patient</button>
     </form>
 
     <form class="grid gap-4 p-5" *ngIf="modal() === 'appointment'" (ngSubmit)="createAppointment()">
-      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Patient<select class="field-control" name="ap" [(ngModel)]="appointmentForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }}</option></select></label><label class="field-label">Doctor<select class="field-control" name="ad" [(ngModel)]="appointmentForm.doctorId"><option *ngFor="let doctor of doctors()" [value]="doctor.id">{{ doctor.firstName }} {{ doctor.lastName }}</option></select></label><label class="field-label">Starts At<input class="field-control" name="as" type="datetime-local" [(ngModel)]="appointmentForm.startsAtUtc"></label><label class="field-label">Reason<input class="field-control" name="ar" [(ngModel)]="appointmentForm.reason"></label></div>
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Patient<select class="field-control" name="ap" [(ngModel)]="appointmentForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }} - {{ patient.phone }}</option></select></label><label class="field-label">Department<select class="field-control" name="adept" [(ngModel)]="appointmentForm.department" (ngModelChange)="onAppointmentDepartmentChange()"><option *ngFor="let department of departments()" [value]="department.name">{{ department.name }}</option><option>Outpatient</option><option>Emergency</option><option>General Ward</option><option>Maternity</option><option>Pediatrics</option></select></label><label class="field-label">Doctor<select class="field-control" name="ad" [(ngModel)]="appointmentForm.doctorId"><option *ngFor="let doctor of appointmentDoctors()" [value]="doctor.id">Dr. {{ doctor.firstName }} {{ doctor.lastName }} - {{ doctor.specialization || 'General' }} ({{ doctorQueueCount(doctor.id) }} in queue)</option></select></label><label class="field-label">Starts At<input class="field-control" name="as" type="datetime-local" [(ngModel)]="appointmentForm.startsAtUtc"></label><label class="field-label">Type<select class="field-control" name="atype" [(ngModel)]="appointmentForm.appointmentType"><option>Consultation</option><option>Follow-up</option><option>Procedure</option><option>Admission Review</option></select></label><label class="field-label">Priority<select class="field-control" name="apriority" [(ngModel)]="appointmentForm.priority"><option>Normal</option><option>Urgent</option><option>Emergency</option></select></label><label class="field-label col-span-2 max-[700px]:col-span-1">Reason<input class="field-control" name="ar" [(ngModel)]="appointmentForm.reason"></label><label class="field-label col-span-2 max-[700px]:col-span-1">Notes<input class="field-control" name="anotes" [(ngModel)]="appointmentForm.notes"></label></div>
       <button class="btn-primary" [disabled]="saving()">Book Appointment</button>
     </form>
 
@@ -239,19 +597,64 @@
     <form class="grid gap-4 p-5" *ngIf="modal() === 'diagnosis'" (ngSubmit)="createDiagnosis()"><div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Patient<select class="field-control" name="dp" [(ngModel)]="diagnosisForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }}</option></select></label><label class="field-label">Doctor<select class="field-control" name="dd" [(ngModel)]="diagnosisForm.doctorId"><option *ngFor="let doctor of doctors()" [value]="doctor.id">{{ doctor.firstName }} {{ doctor.lastName }}</option></select></label><label class="field-label">Code<input class="field-control" name="dc" [(ngModel)]="diagnosisForm.code"></label><label class="field-label">Severity<select class="field-control" name="ds" [(ngModel)]="diagnosisForm.severity"><option>Mild</option><option>Moderate</option><option>Severe</option><option>Critical</option></select></label><label class="field-label col-span-2 max-[700px]:col-span-1">Description<input class="field-control" name="desc" [(ngModel)]="diagnosisForm.description"></label></div><button class="btn-primary" [disabled]="saving()">Add Diagnosis</button></form>
     <form class="grid gap-4 p-5" *ngIf="modal() === 'prescription'" (ngSubmit)="createPrescription()"><div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Patient<select class="field-control" name="rxp" [(ngModel)]="prescriptionForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }}</option></select></label><label class="field-label">Doctor<select class="field-control" name="rxd" [(ngModel)]="prescriptionForm.doctorId"><option *ngFor="let doctor of doctors()" [value]="doctor.id">{{ doctor.firstName }} {{ doctor.lastName }}</option></select></label><label class="field-label">Medication<input class="field-control" name="rxm" [(ngModel)]="prescriptionForm.medication"></label><label class="field-label">Instructions<input class="field-control" name="rxi" [(ngModel)]="prescriptionForm.instructions"></label></div><button class="btn-primary" [disabled]="saving()">Save Prescription</button></form>
     <form class="grid gap-4 p-5" *ngIf="modal() === 'lab'" (ngSubmit)="createLabRequest()"><div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Patient<select class="field-control" name="lp" [(ngModel)]="labForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }}</option></select></label><label class="field-label">Doctor<select class="field-control" name="ld" [(ngModel)]="labForm.doctorId"><option *ngFor="let doctor of doctors()" [value]="doctor.id">{{ doctor.firstName }} {{ doctor.lastName }}</option></select></label><label class="field-label col-span-2 max-[700px]:col-span-1">Test Name<input class="field-control" name="lt" [(ngModel)]="labForm.testName"></label></div><button class="btn-primary" [disabled]="saving()">Request Lab</button></form>
-    <form class="grid gap-4 p-5" *ngIf="modal() === 'invoice'" (ngSubmit)="createInvoice()"><div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Patient<select class="field-control" name="ip" [(ngModel)]="invoiceForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }}</option></select></label><label class="field-label">Amount<input class="field-control" name="ia" type="number" [(ngModel)]="invoiceForm.amount"></label><label class="field-label col-span-2 max-[700px]:col-span-1">Description<input class="field-control" name="idesc" [(ngModel)]="invoiceForm.description"></label></div><button class="btn-primary" [disabled]="saving()">Create Invoice</button></form>
-    <form class="grid gap-4 p-5" *ngIf="modal() === 'payment'" (ngSubmit)="recordPayment()"><div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1"><label class="field-label">Invoice<select class="field-control" name="pi" [(ngModel)]="paymentForm.invoiceId"><option *ngFor="let invoice of invoices()" [value]="invoice.id">{{ patientName(invoice.patientId) }} - {{ invoice.amount | currency }}</option></select></label><label class="field-label">Amount<input class="field-control" name="pa" type="number" [(ngModel)]="paymentForm.amount"></label><label class="field-label">Method<select class="field-control" name="pm" [(ngModel)]="paymentForm.method"><option>Cash</option><option>Card</option><option>Bank Transfer</option><option>Insurance</option></select></label></div><button class="btn-primary" [disabled]="saving()">Record Payment</button></form>
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'invoice'" (ngSubmit)="createInvoice()">
+      <div class="grid grid-cols-3 gap-4 max-[800px]:grid-cols-1">
+        <label class="field-label col-span-2 max-[800px]:col-span-1">Patient<select class="field-control" name="ip" [(ngModel)]="invoiceForm.patientId"><option *ngFor="let patient of patients()" [value]="patient.id">{{ patient.mrn }} - {{ patient.firstName }} {{ patient.lastName }} - {{ patient.insuranceCompanyName || patient.insuranceProvider || 'Self Pay' }}</option></select></label>
+        <label class="field-label">Payment Type<select class="field-control" name="ipt" [(ngModel)]="invoiceForm.paymentType"><option>Cash</option><option>Insurance</option><option>Corporate Credit</option><option>Mixed</option></select></label>
+        <label class="field-label col-span-3 max-[800px]:col-span-1">Invoice Description<input class="field-control" name="idesc" [(ngModel)]="invoiceForm.description"></label>
+        <label class="field-label">Service Code<input class="field-control" name="iscode" [(ngModel)]="invoiceForm.serviceCode"></label>
+        <label class="field-label">Service Description<input class="field-control" name="isdesc" [(ngModel)]="invoiceForm.serviceDescription"></label>
+        <label class="field-label">Quantity<input class="field-control" name="iqty" type="number" min="1" [(ngModel)]="invoiceForm.quantity"></label>
+        <label class="field-label">Unit Price<input class="field-control" name="iunit" type="number" min="0" [(ngModel)]="invoiceForm.unitPrice"></label>
+        <label class="field-label">Line Discount<input class="field-control" name="ildisc" type="number" min="0" [(ngModel)]="invoiceForm.lineDiscount"></label>
+        <label class="field-label">Invoice Discount<input class="field-control" name="igdisc" type="number" min="0" [(ngModel)]="invoiceForm.discount"></label>
+        <label class="field-label">Tax<input class="field-control" name="itax" type="number" min="0" [(ngModel)]="invoiceForm.tax"></label>
+        <label class="field-label col-span-2 max-[800px]:col-span-1">Insurance Provider<select class="field-control" name="iins" [(ngModel)]="invoiceForm.insuranceProvider"><option value="">Self Pay</option><option *ngFor="let company of insuranceCompanies()" [value]="company.name">{{ company.name }}</option></select></label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Create Invoice</button>
+    </form>
+
+    <form class="grid gap-4 p-5" *ngIf="modal() === 'payment'" (ngSubmit)="recordPayment()">
+      <div class="grid grid-cols-2 gap-4 max-[700px]:grid-cols-1">
+        <label class="field-label">Invoice<select class="field-control" name="pi" [(ngModel)]="paymentForm.invoiceId"><option *ngFor="let invoice of invoices()" [value]="invoice.id">{{ invoice.invoiceNumber }} - {{ patientName(invoice.patientId) }} - Balance {{ invoice.balance | currency:'ETB' }}</option></select></label>
+        <label class="field-label">Amount<input class="field-control" name="pa" type="number" min="0" [(ngModel)]="paymentForm.amount"></label>
+        <label class="field-label">Method<select class="field-control" name="pm" [(ngModel)]="paymentForm.method"><option>Cash</option><option>Card</option><option>Bank Transfer</option><option>Insurance</option><option>Mobile Money</option></select></label>
+        <label class="field-label">Reference<input class="field-control" name="pref" [(ngModel)]="paymentForm.reference" placeholder="Transaction / claim reference"></label>
+        <label class="field-label col-span-2 max-[700px]:col-span-1">Received By<input class="field-control" name="precv" [(ngModel)]="paymentForm.receivedBy"></label>
+      </div>
+      <button class="btn-primary" [disabled]="saving()">Record Payment & Print Receipt</button>
+    </form>
   </div>
 </section>
 
-<ng-template #loginView>
+<ng-template #publicAccessView>
   <main class="grid min-h-screen place-items-center bg-slate-100 p-4">
+    <form class="enterprise-panel grid w-[min(430px,100%)] gap-4 p-7" *ngIf="setupMode(); else accountAccessView" (ngSubmit)="setupPassword()">
+      <span class="grid h-12 w-12 place-items-center rounded-lg bg-mint-500 text-xl font-black text-white">H</span>
+      <div><h1 class="text-2xl font-black text-slate-900">Create Password</h1><p class="text-sm text-slate-500">Set a secure password to activate your HMS account.</p></div>
+      <label class="field-label">New Password<input class="field-control" name="newPassword" type="password" [(ngModel)]="setupPasswordForm.password" autocomplete="new-password"></label>
+      <label class="field-label">Confirm Password<input class="field-control" name="confirmPassword" type="password" [(ngModel)]="setupPasswordForm.confirmPassword" autocomplete="new-password"></label>
+      <p class="text-xs font-semibold leading-5 text-slate-500">Use at least 8 characters with uppercase, lowercase, and a number.</p>
+      <button class="btn-primary" type="submit" [disabled]="loading()">{{ loading() ? 'Saving...' : 'Save Password' }}</button>
+    </form>
+    <ng-template #accountAccessView>
+    <form class="enterprise-panel grid w-[min(430px,100%)] gap-4 p-7" *ngIf="forgotMode(); else loginView" (ngSubmit)="requestPasswordReset()">
+      <span class="grid h-12 w-12 place-items-center rounded-lg bg-mint-500 text-xl font-black text-white">H</span>
+      <div><h1 class="text-2xl font-black text-slate-900">Reset Password</h1><p class="text-sm text-slate-500">Enter your account email to receive a secure reset link.</p></div>
+      <label class="field-label">Email<input class="field-control" name="forgotEmail" type="email" [(ngModel)]="forgotPasswordForm.emailAddress" autocomplete="username"></label>
+      <button class="btn-primary" type="submit" [disabled]="loading()">{{ loading() ? 'Preparing...' : 'Send Reset Link' }}</button>
+      <button class="btn-secondary" type="button" (click)="backToLogin()">Back to Sign In</button>
+    </form>
+    <ng-template #loginView>
     <form class="enterprise-panel grid w-[min(430px,100%)] gap-4 p-7" (ngSubmit)="login()">
       <span class="grid h-12 w-12 place-items-center rounded-lg bg-mint-500 text-xl font-black text-white">H</span>
       <div><h1 class="text-2xl font-black text-slate-900">HMS Platform</h1><p class="text-sm text-slate-500">Sign in to the enterprise hospital workspace.</p></div>
       <label class="field-label">Email<input class="field-control" name="emailAddress" [(ngModel)]="emailAddress" autocomplete="username"></label>
       <label class="field-label">Password<input class="field-control" name="password" type="password" [(ngModel)]="password" autocomplete="current-password"></label>
       <button class="btn-primary" type="submit" [disabled]="loading()">{{ loading() ? 'Signing in...' : 'Sign In' }}</button>
+      <button class="btn-secondary" type="button" (click)="showForgotPassword()">Forgot Password</button>
     </form>
+    </ng-template>
+    </ng-template>
   </main>
 </ng-template>

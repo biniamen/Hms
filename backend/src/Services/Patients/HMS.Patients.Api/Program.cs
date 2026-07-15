@@ -1,6 +1,7 @@
 using HMS.Contracts;
+using HMS.Patients.Infrastructure;
 using HMS.SharedKernel;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -8,13 +9,17 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
-var connectionString = builder.Configuration.GetConnectionString("PatientsDb")
-    ?? "Host=localhost;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461";
+var connectionString = builder.Configuration.GetConnectionString("PatientManagementDb")
+    ?? builder.Configuration.GetConnectionString("PatientsDb")
+    ?? "Host=localhost;Port=5432;Database=hms_patient_management_db;Username=postgres;Password=Amen@2461";
 
-builder.Services.AddSingleton(new NpgsqlDataSourceBuilder(connectionString).Build());
+await PatientsDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+builder.Services.AddDbContext<PatientsDbContext>(options => options.UseNpgsql(connectionString));
 builder.Services.AddHttpClient("rabbitmq");
 
 var app = builder.Build();
@@ -26,54 +31,96 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-await EnsureDatabaseAsync(app.Services.GetRequiredService<NpgsqlDataSource>());
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<PatientsDbContext>();
+    await db.Database.MigrateAsync();
+    await PatientsSeedData.SeedAsync(db);
+}
+
 await EnsureRabbitMqAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration);
 
-app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patients", status = "healthy" })));
+app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patient-management", status = "healthy" })));
 
-app.MapGet("/api/patients", async (NpgsqlDataSource dataSource) =>
+app.MapGet("/api/patients", async (PatientsDbContext db) =>
 {
-    var patients = new List<PatientDto>();
-    await using var connection = await dataSource.OpenConnectionAsync();
-    await using var command = new NpgsqlCommand("""
-        select id, mrn, first_name, last_name, phone, gender, date_of_birth,
-               address, blood_type, emergency_contact_name, emergency_contact_phone,
-               photo_content_type, photo_data
-        from patients
-        order by created_at desc, mrn
-        """, connection);
+    var patients = await db.Patients
+        .AsNoTracking()
+        .Include(patient => patient.InsuranceCompany)
+        .OrderByDescending(patient => patient.CreatedAtUtc)
+        .ThenBy(patient => patient.Mrn)
+        .ToListAsync();
 
-    await using var reader = await command.ExecuteReaderAsync();
-    while (await reader.ReadAsync())
-    {
-        patients.Add(ReadPatient(reader));
-    }
-
-    return Results.Ok(ApiResponse<IEnumerable<PatientDto>>.Ok(patients));
+    return Results.Ok(ApiResponse<IEnumerable<PatientDto>>.Ok(patients.Select(ToPatientDto)));
 });
 
-app.MapGet("/api/patients/{id:guid}", async (Guid id, NpgsqlDataSource dataSource) =>
+app.MapGet("/api/patients/{id:guid}", async (Guid id, PatientsDbContext db) =>
 {
-    await using var connection = await dataSource.OpenConnectionAsync();
-    await using var command = new NpgsqlCommand("""
-        select id, mrn, first_name, last_name, phone, gender, date_of_birth,
-               address, blood_type, emergency_contact_name, emergency_contact_phone,
-               photo_content_type, photo_data
-        from patients
-        where id = @id
-        """, connection);
-    command.Parameters.AddWithValue("id", id);
+    var patient = await db.Patients
+        .AsNoTracking()
+        .Include(item => item.InsuranceCompany)
+        .FirstOrDefaultAsync(item => item.Id == id);
 
-    await using var reader = await command.ExecuteReaderAsync();
-    if (!await reader.ReadAsync())
-    {
-        return Results.NotFound(ApiResponse<object>.Fail("Patient not found."));
-    }
-
-    return Results.Ok(ApiResponse<PatientDto>.Ok(ReadPatient(reader)));
+    return patient is null
+        ? Results.NotFound(ApiResponse<object>.Fail("Patient not found."))
+        : Results.Ok(ApiResponse<PatientDto>.Ok(ToPatientDto(patient)));
 });
 
-app.MapPost("/api/patients", async (CreatePatientRequest request, NpgsqlDataSource dataSource) =>
+app.MapGet("/api/insurance-companies", async (PatientsDbContext db) =>
+{
+    var companies = await db.InsuranceCompanies
+        .AsNoTracking()
+        .OrderBy(company => company.Name)
+        .Select(company => new InsuranceCompanyDto(
+            company.Id,
+            company.Name,
+            company.PayerCode,
+            company.ContactPerson ?? "",
+            company.Phone,
+            company.Email ?? "",
+            company.Address ?? "",
+            company.CoverageType,
+            company.CoveragePercent,
+            company.IsActive))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<InsuranceCompanyDto>>.Ok(companies));
+});
+
+app.MapPost("/api/insurance-companies", async (CreateInsuranceCompanyRequest request, PatientsDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Name) ||
+        string.IsNullOrWhiteSpace(request.PayerCode) ||
+        string.IsNullOrWhiteSpace(request.Phone))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Company name, payer code, and phone are required."));
+    }
+
+    var payerCode = NormalizeCode(request.PayerCode);
+    var company = await db.InsuranceCompanies.FirstOrDefaultAsync(item => item.PayerCode == payerCode);
+    if (company is null)
+    {
+        company = new InsuranceCompany { Id = Guid.NewGuid(), PayerCode = payerCode };
+        db.InsuranceCompanies.Add(company);
+    }
+
+    company.Name = request.Name.Trim();
+    company.ContactPerson = CleanOrNull(request.ContactPerson);
+    company.Phone = request.Phone.Trim();
+    company.Email = CleanOrNull(request.Email);
+    company.Address = CleanOrNull(request.Address);
+    company.CoverageType = Clean(request.CoverageType, "Corporate");
+    company.CoveragePercent = Math.Clamp(request.CoveragePercent, 0, 100);
+    company.IsActive = true;
+
+    await db.SaveChangesAsync();
+
+    return Results.Created("/api/insurance-companies", ApiResponse<InsuranceCompanyDto>.Ok(
+        new InsuranceCompanyDto(company.Id, company.Name, company.PayerCode, company.ContactPerson ?? "", company.Phone, company.Email ?? "", company.Address ?? "", company.CoverageType, company.CoveragePercent, company.IsActive),
+        "Insurance company registered."));
+});
+
+app.MapPost("/api/patients", async (CreatePatientRequest request, PatientsDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(request.FirstName) ||
         string.IsNullOrWhiteSpace(request.LastName) ||
@@ -84,84 +131,233 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, NpgsqlDataSour
     }
 
     var (photoContentType, photoData) = ParsePhoto(request.PhotoDataUrl);
-    var id = Guid.NewGuid();
+    var patient = new Patient
+    {
+        Id = Guid.NewGuid(),
+        Mrn = await NextMrnAsync(db),
+        FirstName = request.FirstName.Trim(),
+        LastName = request.LastName.Trim(),
+        Email = CleanOrNull(request.Email),
+        Phone = request.Phone.Trim(),
+        Gender = request.Gender.Trim(),
+        DateOfBirth = request.DateOfBirth,
+        NationalId = CleanOrNull(request.NationalId),
+        MaritalStatus = CleanOrNull(request.MaritalStatus),
+        Occupation = CleanOrNull(request.Occupation),
+        Address = CleanOrNull(request.Address),
+        BloodType = CleanOrNull(request.BloodType),
+        InsuranceCompanyId = request.InsuranceCompanyId,
+        EmployerName = CleanOrNull(request.EmployerName),
+        InsurancePlan = CleanOrNull(request.InsurancePlan),
+        InsuranceProvider = CleanOrNull(request.InsuranceProvider),
+        InsurancePolicyNumber = CleanOrNull(request.InsurancePolicyNumber),
+        EmergencyContactName = CleanOrNull(request.EmergencyContactName),
+        EmergencyContactPhone = CleanOrNull(request.EmergencyContactPhone),
+        PhotoContentType = photoContentType,
+        PhotoData = photoData,
+        CreatedAtUtc = DateTime.UtcNow
+    };
 
-    await using var connection = await dataSource.OpenConnectionAsync();
-    var mrn = await NextMrnAsync(connection);
+    db.Patients.Add(patient);
+    await db.SaveChangesAsync();
 
-    await using var command = new NpgsqlCommand("""
-        insert into patients
-            (id, mrn, first_name, last_name, phone, gender, date_of_birth,
-             address, blood_type, emergency_contact_name, emergency_contact_phone,
-             photo_content_type, photo_data)
-        values
-            (@id, @mrn, @first_name, @last_name, @phone, @gender, @date_of_birth,
-             @address, @blood_type, @emergency_contact_name, @emergency_contact_phone,
-             @photo_content_type, @photo_data)
-        returning id, mrn, first_name, last_name, phone, gender, date_of_birth,
-                  address, blood_type, emergency_contact_name, emergency_contact_phone,
-                  photo_content_type, photo_data
-        """, connection);
+    patient = (await db.Patients.AsNoTracking().Include(item => item.InsuranceCompany).FirstAsync(item => item.Id == patient.Id))!;
+    var dto = ToPatientDto(patient);
+    await PublishPatientRegisteredAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration, dto);
 
-    command.Parameters.AddWithValue("id", id);
-    command.Parameters.AddWithValue("mrn", mrn);
-    command.Parameters.AddWithValue("first_name", request.FirstName.Trim());
-    command.Parameters.AddWithValue("last_name", request.LastName.Trim());
-    command.Parameters.AddWithValue("phone", request.Phone.Trim());
-    command.Parameters.AddWithValue("gender", request.Gender.Trim());
-    command.Parameters.AddWithValue("date_of_birth", request.DateOfBirth);
-    command.Parameters.AddWithValue("address", DbValue(request.Address));
-    command.Parameters.AddWithValue("blood_type", DbValue(request.BloodType));
-    command.Parameters.AddWithValue("emergency_contact_name", DbValue(request.EmergencyContactName));
-    command.Parameters.AddWithValue("emergency_contact_phone", DbValue(request.EmergencyContactPhone));
-    command.Parameters.AddWithValue("photo_content_type", DbValue(photoContentType));
-    command.Parameters.AddWithValue("photo_data", photoData is null ? DBNull.Value : photoData);
+    return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(dto, "Patient registered."));
+});
 
-    await using var reader = await command.ExecuteReaderAsync();
-    await reader.ReadAsync();
-    var patient = ReadPatient(reader);
-    await reader.DisposeAsync();
+app.MapGet("/api/appointments", async (PatientsDbContext db) =>
+{
+    var appointments = await db.Appointments
+        .AsNoTracking()
+        .OrderByDescending(appointment => appointment.StartsAtUtc)
+        .ToListAsync();
 
-    await PublishPatientRegisteredAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration, patient);
+    return Results.Ok(ApiResponse<IEnumerable<AppointmentDto>>.Ok(ToAppointmentDtos(appointments)));
+});
 
-    return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(patient, "Patient registered."));
+app.MapGet("/api/appointments/queue", async (PatientsDbContext db) =>
+{
+    var today = DateTime.UtcNow.Date;
+    var tomorrow = today.AddDays(1);
+    var appointments = await db.Appointments
+        .AsNoTracking()
+        .Where(appointment => appointment.StartsAtUtc >= today && appointment.StartsAtUtc < tomorrow)
+        .ToListAsync();
+
+    var summaries = appointments
+        .GroupBy(appointment => new { appointment.DoctorId, appointment.Department })
+        .OrderBy(group => group.Key.Department)
+        .Select(group => new QueueSummaryDto(
+            group.Key.DoctorId,
+            group.Key.DoctorId.ToString(),
+            group.Key.Department,
+            group.Count(item => item.Status == "Scheduled"),
+            group.Count(item => item.Status == "Waiting"),
+            group.Count(item => item.Status == "In Service"),
+            group.Count(item => item.Status == "Completed")))
+        .ToList();
+
+    return Results.Ok(ApiResponse<IEnumerable<QueueSummaryDto>>.Ok(summaries));
+});
+
+app.MapPost("/api/appointments", async (CreateAppointmentRequest request, PatientsDbContext db) =>
+{
+    if (request.PatientId == Guid.Empty || request.DoctorId == Guid.Empty || string.IsNullOrWhiteSpace(request.Reason))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Patient, doctor, and reason are required."));
+    }
+
+    if (!await db.Patients.AnyAsync(patient => patient.Id == request.PatientId))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Selected patient does not exist."));
+    }
+
+    var appointment = new Appointment
+    {
+        Id = Guid.NewGuid(),
+        PatientId = request.PatientId,
+        DoctorId = request.DoctorId,
+        StartsAtUtc = ToUtc(request.StartsAtUtc),
+        Status = "Waiting",
+        Reason = request.Reason.Trim(),
+        Department = Clean(request.Department, "Outpatient"),
+        AppointmentType = Clean(request.AppointmentType, "Consultation"),
+        Priority = Clean(request.Priority, "Normal"),
+        Notes = CleanOrNull(request.Notes),
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    db.Appointments.Add(appointment);
+    await db.SaveChangesAsync();
+
+    var dto = ToAppointmentDtos(await db.Appointments.AsNoTracking().ToListAsync()).First(item => item.Id == appointment.Id);
+    return Results.Created($"/api/appointments/{appointment.Id}", ApiResponse<AppointmentDto>.Ok(dto, "Appointment created."));
+});
+
+app.MapPut("/api/appointments/{id:guid}/status", async (Guid id, AppointmentStatusUpdateRequest request, PatientsDbContext db) =>
+{
+    var allowed = new[] { "Scheduled", "Waiting", "In Service", "Completed", "Cancelled", "No Show" };
+    if (!allowed.Contains(request.Status, StringComparer.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Invalid queue status."));
+    }
+
+    var appointment = await db.Appointments.FirstOrDefaultAsync(item => item.Id == id);
+    if (appointment is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Appointment not found."));
+    }
+
+    appointment.Status = allowed.First(item => item.Equals(request.Status, StringComparison.OrdinalIgnoreCase));
+    await db.SaveChangesAsync();
+
+    var dto = ToAppointmentDtos(await db.Appointments.AsNoTracking().ToListAsync()).First(item => item.Id == appointment.Id);
+    return Results.Ok(ApiResponse<AppointmentDto>.Ok(dto, "Queue status updated."));
+});
+
+app.MapGet("/api/beds", async (PatientsDbContext db) =>
+{
+    var beds = await db.Beds
+        .AsNoTracking()
+        .OrderBy(bed => bed.Ward)
+        .ThenBy(bed => bed.Room)
+        .ThenBy(bed => bed.BedNumber)
+        .Select(bed => new BedDto(bed.Id, bed.Ward, bed.Room, bed.BedNumber, bed.IsAvailable))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<BedDto>>.Ok(beds));
 });
 
 app.Run();
 
-static async Task EnsureDatabaseAsync(NpgsqlDataSource dataSource)
+static PatientDto ToPatientDto(Patient patient)
 {
-    await using var connection = await dataSource.OpenConnectionAsync();
-    await using var command = new NpgsqlCommand("""
-        create extension if not exists pgcrypto;
+    var photoDataUrl = patient.PhotoData is { Length: > 0 } && !string.IsNullOrWhiteSpace(patient.PhotoContentType)
+        ? $"data:{patient.PhotoContentType};base64,{Convert.ToBase64String(patient.PhotoData)}"
+        : null;
 
-        create table if not exists patients (
-            id uuid primary key,
-            mrn varchar(32) not null unique,
-            first_name varchar(96) not null,
-            last_name varchar(96) not null,
-            phone varchar(32) not null,
-            gender varchar(32) not null,
-            date_of_birth date not null,
-            created_at timestamptz not null default now()
-        );
+    return new PatientDto(
+        patient.Id,
+        patient.Mrn,
+        patient.FirstName,
+        patient.LastName,
+        patient.Email,
+        patient.Phone,
+        patient.Gender,
+        patient.DateOfBirth,
+        patient.NationalId,
+        patient.MaritalStatus,
+        patient.Occupation,
+        patient.Address,
+        patient.BloodType,
+        patient.InsuranceCompanyId,
+        patient.InsuranceCompany?.Name,
+        patient.EmployerName,
+        patient.InsurancePlan,
+        patient.InsuranceProvider,
+        patient.InsurancePolicyNumber,
+        patient.EmergencyContactName,
+        patient.EmergencyContactPhone,
+        photoDataUrl);
+}
 
-        alter table patients add column if not exists address text;
-        alter table patients add column if not exists blood_type varchar(16);
-        alter table patients add column if not exists emergency_contact_name varchar(160);
-        alter table patients add column if not exists emergency_contact_phone varchar(32);
-        alter table patients add column if not exists photo_content_type varchar(80);
-        alter table patients add column if not exists photo_data bytea;
+static List<AppointmentDto> ToAppointmentDtos(IEnumerable<Appointment> appointments)
+{
+    var orderedAppointments = appointments
+        .OrderBy(appointment => appointment.StartsAtUtc)
+        .ThenBy(appointment => appointment.CreatedAtUtc)
+        .ToList();
 
-        insert into patients
-            (id, mrn, first_name, last_name, phone, gender, date_of_birth, address, blood_type, emergency_contact_name, emergency_contact_phone)
-        values
-            ('f64d3368-a4da-4d44-9612-5c302b0ec29a', 'MRN-0001', 'Sara', 'Bekele', '0920000001', 'Female', '1995-05-10', 'Bole, Addis Ababa', 'O+', 'Meron Bekele', '0921000001'),
-            ('d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80', 'MRN-0002', 'Dawit', 'Alemu', '0920000002', 'Male', '1988-02-20', 'CMC, Addis Ababa', 'A+', 'Alem Alemu', '0921000002')
-        on conflict (mrn) do nothing;
-        """, connection);
+    var queueValues = new Dictionary<Guid, (int QueueNumber, int WaitingAhead)>();
+    foreach (var group in orderedAppointments.GroupBy(appointment => new { appointment.DoctorId, Day = appointment.StartsAtUtc.Date }))
+    {
+        var groupAppointments = group.ToList();
+        for (var index = 0; index < groupAppointments.Count; index++)
+        {
+            var current = groupAppointments[index];
+            var waitingAhead = groupAppointments
+                .Take(index)
+                .Count(appointment => appointment.Status is "Scheduled" or "Waiting");
+            queueValues[current.Id] = (index + 1, waitingAhead);
+        }
+    }
 
-    await command.ExecuteNonQueryAsync();
+    return orderedAppointments
+        .OrderByDescending(appointment => appointment.StartsAtUtc)
+        .Select(appointment =>
+        {
+            var queue = queueValues.GetValueOrDefault(appointment.Id);
+            return new AppointmentDto(
+                appointment.Id,
+                appointment.PatientId,
+                appointment.DoctorId,
+                appointment.StartsAtUtc,
+                appointment.Status,
+                appointment.Reason,
+                appointment.Department,
+                appointment.AppointmentType,
+                appointment.Priority,
+                appointment.Notes,
+                queue.QueueNumber,
+                queue.WaitingAhead,
+                appointment.Status);
+        })
+        .ToList();
+}
+
+static async Task<string> NextMrnAsync(PatientsDbContext db)
+{
+    var existingMrns = await db.Patients.AsNoTracking().Select(patient => patient.Mrn).ToListAsync();
+    var next = existingMrns
+        .Select(value => value.Split('-', StringSplitOptions.RemoveEmptyEntries).LastOrDefault())
+        .Select(segment => int.TryParse(segment, out var number) ? number : 0)
+        .DefaultIfEmpty(0)
+        .Max() + 1;
+
+    return $"MRN-{next:0000}";
 }
 
 static async Task EnsureRabbitMqAsync(IHttpClientFactory httpClientFactory, IConfiguration configuration)
@@ -233,48 +429,6 @@ static async Task PostJsonAsync(HttpClient client, string path, object payload)
     response.EnsureSuccessStatusCode();
 }
 
-static async Task<string> NextMrnAsync(NpgsqlConnection connection)
-{
-    await using var command = new NpgsqlCommand("""
-        select coalesce(max(nullif(regexp_replace(mrn, '\D', '', 'g'), '')::int), 0) + 1
-        from patients
-        """, connection);
-
-    var next = (int)(await command.ExecuteScalarAsync() ?? 1);
-    return $"MRN-{next:0000}";
-}
-
-static PatientDto ReadPatient(NpgsqlDataReader reader)
-{
-    var photoContentType = NullableString(reader, "photo_content_type");
-    var photoData = reader["photo_data"] as byte[];
-    var photoDataUrl = photoData is { Length: > 0 } && !string.IsNullOrWhiteSpace(photoContentType)
-        ? $"data:{photoContentType};base64,{Convert.ToBase64String(photoData)}"
-        : null;
-
-    return new PatientDto(
-        reader.GetGuid(reader.GetOrdinal("id")),
-        reader.GetString(reader.GetOrdinal("mrn")),
-        reader.GetString(reader.GetOrdinal("first_name")),
-        reader.GetString(reader.GetOrdinal("last_name")),
-        reader.GetString(reader.GetOrdinal("phone")),
-        reader.GetString(reader.GetOrdinal("gender")),
-        reader.GetFieldValue<DateOnly>(reader.GetOrdinal("date_of_birth")),
-        NullableString(reader, "address"),
-        NullableString(reader, "blood_type"),
-        NullableString(reader, "emergency_contact_name"),
-        NullableString(reader, "emergency_contact_phone"),
-        photoDataUrl);
-}
-
-static string? NullableString(NpgsqlDataReader reader, string columnName)
-{
-    var ordinal = reader.GetOrdinal(columnName);
-    return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-}
-
-static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
-
 static (string? ContentType, byte[]? Data) ParsePhoto(string? photoDataUrl)
 {
     if (string.IsNullOrWhiteSpace(photoDataUrl))
@@ -293,3 +447,18 @@ static (string? ContentType, byte[]? Data) ParsePhoto(string? photoDataUrl)
     var base64 = photoDataUrl[(commaIndex + 1)..];
     return (contentType, Convert.FromBase64String(base64));
 }
+
+static DateTime ToUtc(DateTime value) => value.Kind switch
+{
+    DateTimeKind.Utc => value,
+    DateTimeKind.Local => value.ToUniversalTime(),
+    _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+};
+
+static string Clean(string? value, string fallback) =>
+    string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+static string? CleanOrNull(string? value) =>
+    string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+static string NormalizeCode(string value) => value.Trim().ToUpperInvariant().Replace(' ', '_');

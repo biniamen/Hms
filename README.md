@@ -1,13 +1,8 @@
-# HMS Platform MVP
+# HMS Platform
 
-Fresh HMS microservice MVP built with:
+Hospital Management System platform built with ASP.NET Core Web API services, Angular, Tailwind CSS, YARP API Gateway, PostgreSQL, RabbitMQ, Redis, and Docker Compose.
 
-- ASP.NET Core Web API services on `net9.0`
-- Angular standalone frontend
-- Tailwind CSS enterprise UI shell
-- YARP API Gateway
-- Docker Compose
-- Local PostgreSQL, pgAdmin, RabbitMQ, and Redis prepared for next-stage development
+The first-phase product covers identity and administration, patient management, clinical workflow, billing, and an Enterprise HMS operations desk for cross-department hospital work.
 
 ## Project Layout
 
@@ -15,50 +10,92 @@ Fresh HMS microservice MVP built with:
 hms-platform/
   backend/
     HMS.sln
+    NuGet.Config
     src/
       ApiGateway/HMS.ApiGateway
       BuildingBlocks/HMS.SharedKernel
       BuildingBlocks/HMS.Contracts
       Services/Identity
       Services/Patients
-      Services/Appointments
       Services/Clinical
       Services/Billing
   frontend/
     hms-web
   deploy/
     docker-compose.yml
+    postgres/init/01-hms-seed.sql
   docs/
+    HMS_ARCHITECTURE_CEO_BRIEF.md
+    ENTERPRISE_OPERATIONS_WORKFLOW.md
 ```
 
-## Current MVP Services
+## Core Services
 
 | Service | Port | Responsibility |
 |---|---:|---|
-| API Gateway | 5000 | Single frontend entry point |
-| Identity API | 5101 | Login and employees |
-| Patients API | 5102 | Patient registration/list |
-| Appointments API | 5103 | Appointments and beds |
-| Clinical API | 5104 | Prescriptions and lab requests |
-| Billing API | 5105 | Invoices and payments |
-| Angular Web | 4200 | HMS UI |
-| RabbitMQ UI | 15672 | Message broker dashboard |
-| PostgreSQL | 5432 | Local PC database used by Patients API |
+| API Gateway | 5200 | Single frontend entry point |
+| Identity/Admin API | 5101 | Login, employees, roles, permissions, password setup/reset, email outbox |
+| Patient Management API | 5102 | Patients, photos, insurance selection, appointments, queue, beds |
+| Clinical API | 5104 | Encounters, vitals, diagnoses, prescriptions, lab requests, enterprise records |
+| Billing API | 5105 | Invoices, service line items, payments, receipts |
+| Angular Web | 4200 | Browser-based HMS workspace |
+| PostgreSQL | 5432 | Service databases |
+| RabbitMQ UI | 15672 | Event broker dashboard |
 | pgAdmin | 5050 | PostgreSQL admin UI |
-| Redis | 6379 | Future cache/session support |
+| Redis | 6379 | Cache/session support |
 
-## PostgreSQL / pgAdmin
+Appointments are handled inside the Patient Management service. The old standalone Appointments project is not part of the active solution.
 
-This setup now targets the PostgreSQL server installed on your PC. Docker containers reach it through `host.docker.internal`.
+## Prerequisites
+
+Install these before running without Docker:
+
+- .NET 9 SDK
+- Node.js and npm
+- PostgreSQL running on `localhost:5432`
+- PowerShell
+
+Docker users only need Docker Desktop.
+
+## Database Configuration
+
+Default local PostgreSQL connection:
 
 ```text
-Host from Docker services: host.docker.internal
-Host from local machine / pgAdmin on Windows: localhost
+Host: localhost
 Port: 5432
 Username: postgres
 Password: Amen@2461
-Default database: hms_identity_db
 ```
+
+Databases used by the services:
+
+```text
+hms_identity_db
+hms_patient_management_db
+hms_clinical_db
+hms_billing_db
+```
+
+When using Docker Compose, the PostgreSQL container and init script create the required databases automatically.
+
+Persistence standard:
+
+- Each active backend service uses EF Core with its own PostgreSQL database.
+- Each service applies its EF Core migrations on startup.
+- Each service seeds the default data required for local testing.
+- The Docker PostgreSQL init script only creates database shells; EF Core owns schemas, migrations, and seed behavior.
+
+EF Core migration projects:
+
+```text
+Identity  -> backend/src/Services/Identity/HMS.Identity.Infrastructure
+Patients  -> backend/src/Services/Patients/HMS.Patients.Infrastructure
+Clinical  -> backend/src/Services/Clinical/HMS.Clinical.Infrastructure
+Billing   -> backend/src/Services/Billing/HMS.Billing.Infrastructure
+```
+
+For a clean first run on a developer machine, keep these service databases empty or drop and recreate them once before starting the services. This avoids conflicts with older raw-SQL tables that were created before EF Core migrations were introduced.
 
 pgAdmin:
 
@@ -68,54 +105,76 @@ Email: admin@hms.dev
 Password: PgAdmin@123
 ```
 
-When adding the server in pgAdmin, use:
+When registering the Docker PostgreSQL server in pgAdmin:
 
 ```text
-Host name/address: host.docker.internal
+Host name/address: postgres
 Port: 5432
 Maintenance database: hms_identity_db
 Username: postgres
 Password: Amen@2461
 ```
 
-The Compose file also contains an optional PostgreSQL container for isolated testing. It is disabled by default. Start it only when you explicitly want a Docker-owned database:
+## SMTP Configuration
+
+The application supports secure user onboarding. When an administrator creates a user, the Identity service sends a one-time password setup link. If SMTP is not configured, the link is saved in the Email Outbox for local testing.
+
+Create a private SMTP file:
 
 ```powershell
-docker compose --profile docker-db up -d postgres
+cd "D:\Mine Only\Private\hms-platform"
+Copy-Item .\smtp.local.example.ps1 .\smtp.local.ps1
+notepad .\smtp.local.ps1
 ```
 
-## Seeded Login Users
+Set your Gmail address and Gmail App Password:
 
-All seeded users use:
+```powershell
+$env:Email__FromAddress = "your-gmail-address@gmail.com"
+$env:Email__Smtp__Username = "your-gmail-address@gmail.com"
+$env:Email__Smtp__Password = "your-gmail-app-password"
+$env:Email__ExposeLocalSetupLinks = "false"
+```
+
+Notes:
+
+- Use a Gmail App Password, not the normal Gmail login password.
+- The startup script removes spaces from the app password automatically.
+- `smtp.local.ps1` is ignored by Git and must not be pushed.
+- Keep real credentials out of `smtp.local.example.ps1`.
+
+## Run Without Docker
+
+Recommended local startup:
+
+```powershell
+cd "D:\Mine Only\Private\hms-platform"
+powershell -ExecutionPolicy Bypass -File .\start-hms.ps1
+```
+
+The script will:
+
+1. Load SMTP settings from `smtp.local.ps1` when present.
+2. Restore packages using `backend/NuGet.Config`.
+3. Build the backend solution.
+4. Install frontend packages when `node_modules` is missing.
+5. Start Identity, Patients, Clinical, Billing, and API Gateway.
+6. Start Angular.
+7. Write runtime logs to `.runtime-logs`.
+
+Open the system:
 
 ```text
-Admin@123
+http://localhost:4200
 ```
+
+API Gateway:
 
 ```text
-admin@hms.local
-doctor@hms.local
-receptionist@hms.local
-nurse@hms.local
-pharmacist@hms.local
-lab@hms.local
-accountant@hms.local
+http://localhost:5200
 ```
 
-## Build Backend
-
-```powershell
-cd "D:\Mine Only\Private\hms-platform\backend"
-dotnet build .\HMS.sln
-```
-
-## Build Frontend
-
-```powershell
-cd "D:\Mine Only\Private\hms-platform\frontend\hms-web"
-npm.cmd install --cache .\.npm-cache
-npm.cmd run build
-```
+Wait about 60-90 seconds for Angular to compile after starting the script.
 
 ## Run With Docker
 
@@ -130,125 +189,181 @@ Then open:
 http://localhost:4200
 ```
 
-The frontend calls the gateway at:
+## Build Commands
 
-```text
-http://localhost:5000
-```
-
-## Run Without Docker
-
-Make sure PostgreSQL is running on your PC:
-
-```text
-Host: localhost
-Port: 5432
-Database: hms_identity_db
-Username: postgres
-Password: Amen@2461
-```
-
-Open separate PowerShell windows:
+Backend:
 
 ```powershell
 cd "D:\Mine Only\Private\hms-platform\backend"
-$env:ASPNETCORE_ENVIRONMENT="Development"
-dotnet run --project .\src\Services\Identity\HMS.Identity.Api\HMS.Identity.Api.csproj --urls http://localhost:5101
+$env:APPDATA = Join-Path (Get-Location) ".appdata"
+dotnet restore .\HMS.sln --configfile .\NuGet.Config
+dotnet build .\HMS.sln --no-restore
 ```
 
-```powershell
-cd "D:\Mine Only\Private\hms-platform\backend"
-$env:ASPNETCORE_ENVIRONMENT="Development"
-dotnet run --project .\src\Services\Patients\HMS.Patients.Api\HMS.Patients.Api.csproj --urls http://localhost:5102
-```
-
-```powershell
-cd "D:\Mine Only\Private\hms-platform\backend"
-$env:ASPNETCORE_ENVIRONMENT="Development"
-dotnet run --project .\src\Services\Appointments\HMS.Appointments.Api\HMS.Appointments.Api.csproj --urls http://localhost:5103
-```
-
-```powershell
-cd "D:\Mine Only\Private\hms-platform\backend"
-$env:ASPNETCORE_ENVIRONMENT="Development"
-dotnet run --project .\src\Services\Clinical\HMS.Clinical.Api\HMS.Clinical.Api.csproj --urls http://localhost:5104
-```
-
-```powershell
-cd "D:\Mine Only\Private\hms-platform\backend"
-$env:ASPNETCORE_ENVIRONMENT="Development"
-dotnet run --project .\src\Services\Billing\HMS.Billing.Api\HMS.Billing.Api.csproj --urls http://localhost:5105
-```
-
-```powershell
-cd "D:\Mine Only\Private\hms-platform\backend"
-$env:ASPNETCORE_ENVIRONMENT="Development"
-dotnet run --project .\src\ApiGateway\HMS.ApiGateway\HMS.ApiGateway.csproj --urls http://localhost:5000
-```
-
-Then start Angular:
+Frontend:
 
 ```powershell
 cd "D:\Mine Only\Private\hms-platform\frontend\hms-web"
-npm.cmd start
+npm.cmd install --cache .\.npm-cache
+npm.cmd run build -- --no-progress
 ```
 
-Open:
+## Default Login Users
+
+Default password:
 
 ```text
-http://localhost:4200
+Admin@123
+```
+
+Users:
+
+```text
+admin@hms.local
+doctor@hms.local
+receptionist@hms.local
+nurse@hms.local
+pharmacist@hms.local
+lab@hms.local
+accountant@hms.local
+```
+
+## User Onboarding Flow
+
+1. Admin opens Administration.
+2. Admin creates an employee/system user.
+3. Identity service creates the account as pending.
+4. The setup link is sent by SMTP or saved in Email Outbox.
+5. The user opens the link and creates a password.
+6. The user signs in and sees role-specific modules.
+
+## Enterprise HMS Workspace
+
+Enterprise HMS is the hospital-wide operations desk. It is used for work that needs ownership, priority, due date, patient reference, department handoff, financial value, print/export, or management visibility.
+
+Covered areas:
+
+```text
+Pharmacy
+Laboratory
+Radiology
+Inpatient
+Emergency
+Operating Theatre
+Inventory
+Procurement
+Asset Management
+Biomedical Maintenance
+Insurance Claims
+Security Audit
+Notifications
+Documents
+Reporting
+Integration
+```
+
+Workflow:
+
+```text
+Create record -> assign owner -> set priority and due date -> update status -> review -> close -> report/export
+```
+
+Full workflow documentation:
+
+```text
+docs/ENTERPRISE_OPERATIONS_WORKFLOW.md
+```
+
+## RabbitMQ Event Flow
+
+RabbitMQ is used for asynchronous communication between services. The Patients API publishes a `PatientRegistered` event when a patient is registered.
+
+RabbitMQ:
+
+```text
+URL: http://localhost:15672
+Username: guest
+Password: guest
+```
+
+Check:
+
+```text
+Exchange: hms.events
+Queue: hms.patient-registered
+Routing key: patient.registered
 ```
 
 ## Quick API Test
 
 ```powershell
 Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:5000/api/auth/login" `
+  -Uri "http://localhost:5200/api/auth/login" `
   -ContentType "application/json" `
   -Body '{"emailAddress":"admin@hms.local","password":"Admin@123"}'
 ```
 
-## RabbitMQ Event Demo
+## GitLab Handoff
 
-RabbitMQ is used for asynchronous communication between services. In this MVP, the Patients API publishes a `PatientRegistered` event whenever a new patient is registered.
+The repository is prepared to push source code, scripts, seed data, and selected documentation only.
 
-Open RabbitMQ:
-
-```text
-http://localhost:15672
-Username: guest
-Password: guest
-```
-
-Then check:
+Included:
 
 ```text
-Exchanges: hms.events
-Queues: hms.patient-registered
-Routing key: patient.registered
+README.md
+start-hms.ps1
+smtp.local.example.ps1
+backend/
+frontend/
+deploy/docker-compose.yml
+deploy/postgres/init/01-hms-seed.sql
+docs/HMS_ARCHITECTURE_CEO_BRIEF.md
+docs/ENTERPRISE_OPERATIONS_WORKFLOW.md
 ```
 
-Register a patient in the Angular Patients module. The queue message count will increase.
+Excluded by `.gitignore`:
 
-## Next Development Steps
+```text
+smtp.local.ps1
+.runtime-logs/
+bin/
+obj/
+dist/
+node_modules/
+.angular/
+.npm-cache/
+*.log
+generated Word/PDF/image/report files under docs/
+```
 
-1. Replace in-memory lists with EF Core DbContexts per service.
-2. Add real JWT authentication and authorization policies.
-3. Add migrations for:
-   - `hms_identity_db`
-   - `hms_patients_db`
-   - `hms_appointments_db`
-   - `hms_clinical_db`
-   - `hms_billing_db`
-4. Add RabbitMQ integration events:
-   - `PatientRegistered`
-   - `AppointmentCreated`
-   - `LabRequestCreated`
-   - `InvoicePaid`
-5. Expand Angular feature modules into real CRUD screens.
-
-For PostgreSQL EF Core, use the Npgsql provider in each infrastructure project:
+Push steps:
 
 ```powershell
-dotnet add .\src\Services\Identity\HMS.Identity.Infrastructure\HMS.Identity.Infrastructure.csproj package Npgsql.EntityFrameworkCore.PostgreSQL
+cd "D:\Mine Only\Private\hms-platform"
+git status --short
+git add .
+git status --short
+git commit -m "Finalize HMS first phase"
+git branch -M main
+git remote add origin <your-gitlab-repository-url>
+git push -u origin main
 ```
+
+If `origin` already exists:
+
+```powershell
+git remote set-url origin <your-gitlab-repository-url>
+git push -u origin main
+```
+
+## Production Hardening Backlog
+
+Recommended work before live hospital rollout:
+
+1. Add signed JWT authentication and authorization policies.
+2. Add audit trail and immutable activity history.
+3. Add production notification provider for email and SMS.
+4. Add CI/CD pipeline in GitLab.
+5. Add centralized logging, health checks, metrics, and alerts.
+6. Add database backup, restore, and disaster recovery procedures.
+7. Add hospital-specific roles, approval flows, reports, and regulatory templates.
