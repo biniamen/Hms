@@ -40,6 +40,11 @@ services:
       dockerfile: src/Services/Identity/HMS.Identity.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__IdentityDb: Host=host.docker.internal;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461
+      JwtSettings__SecretKey: HMS-SuperSecret-JWT-Key-Min32Chars-Long!!
+      JwtSettings__Issuer: Hms.Identity
+      JwtSettings__Audience: Hms.Api
+      JwtSettings__TokenExpiryHours: 8
     ports:
       - "5101:8080"
 
@@ -49,7 +54,11 @@ services:
       dockerfile: src/Services/Patients/HMS.Patients.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__PatientsDb: Host=host.docker.internal;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461
+      ConnectionStrings__PatientsDb: Host=host.docker.internal;Port=5432;Database=hms_patients_db;Username=postgres;Password=Amen@2461
+      JwtSettings__SecretKey: HMS-SuperSecret-JWT-Key-Min32Chars-Long!!
+      JwtSettings__Issuer: Hms.Identity
+      JwtSettings__Audience: Hms.Api
+      JwtSettings__TokenExpiryHours: 8
       RabbitMq__ManagementUrl: http://rabbitmq:15672
       RabbitMq__Username: guest
       RabbitMq__Password: guest
@@ -64,6 +73,11 @@ services:
       dockerfile: src/Services/Appointments/HMS.Appointments.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__AppointmentsDb: Host=host.docker.internal;Port=5432;Database=hms_appointments_db;Username=postgres;Password=Amen@2461
+      JwtSettings__SecretKey: HMS-SuperSecret-JWT-Key-Min32Chars-Long!!
+      JwtSettings__Issuer: Hms.Identity
+      JwtSettings__Audience: Hms.Api
+      JwtSettings__TokenExpiryHours: 8
     ports:
       - "5103:8080"
 
@@ -73,6 +87,11 @@ services:
       dockerfile: src/Services/Clinical/HMS.Clinical.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__ClinicalDb: Host=host.docker.internal;Port=5432;Database=hms_clinical_db;Username=postgres;Password=Amen@2461
+      JwtSettings__SecretKey: HMS-SuperSecret-JWT-Key-Min32Chars-Long!!
+      JwtSettings__Issuer: Hms.Identity
+      JwtSettings__Audience: Hms.Api
+      JwtSettings__TokenExpiryHours: 8
     ports:
       - "5104:8080"
 
@@ -82,6 +101,11 @@ services:
       dockerfile: src/Services/Billing/HMS.Billing.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__BillingDb: Host=host.docker.internal;Port=5432;Database=hms_billing_db;Username=postgres;Password=Amen@2461
+      JwtSettings__SecretKey: HMS-SuperSecret-JWT-Key-Min32Chars-Long!!
+      JwtSettings__Issuer: Hms.Identity
+      JwtSettings__Audience: Hms.Api
+      JwtSettings__TokenExpiryHours: 8
     ports:
       - "5105:8080"
 

@@ -1,6 +1,10 @@
 using HMS.Contracts;
+using HMS.Patients.Infrastructure.Data;
+using HMS.Patients.Infrastructure.Entities;
 using HMS.SharedKernel;
-using Npgsql;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
@@ -11,11 +15,40 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
-var connectionString = builder.Configuration.GetConnectionString("PatientsDb")
-    ?? "Host=localhost;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461";
+var patientsAssembly = typeof(Program).Assembly.GetName().Name;
+builder.Services.AddDbContext<AppPatientsDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("PatientsDb"),
+        b => b.MigrationsAssembly(patientsAssembly)));
 
-builder.Services.AddSingleton(new NpgsqlDataSourceBuilder(connectionString).Build());
 builder.Services.AddHttpClient("rabbitmq");
+
+// ── JWT Authentication ──
+var jwtSection = builder.Configuration.GetSection("JwtSettings");
+var secretKey = jwtSection["SecretKey"]!;
+var issuer = jwtSection["Issuer"]!;
+var audience = jwtSection["Audience"]!;
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = issuer,
+        ValidAudience = audience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+        ClockSkew = TimeSpan.Zero
+    };
+});
+
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
@@ -25,55 +58,73 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
 
-await EnsureDatabaseAsync(app.Services.GetRequiredService<NpgsqlDataSource>());
+// Auto-migrate on startup
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppPatientsDbContext>();
+    await db.Database.MigrateAsync();
+}
+
 await EnsureRabbitMqAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration);
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patients", status = "healthy" })));
 
-app.MapGet("/api/patients", async (NpgsqlDataSource dataSource) =>
+// ── Patients endpoints ──
+app.MapGet("/api/patients", async (AppPatientsDbContext db) =>
 {
-    var patients = new List<PatientDto>();
-    await using var connection = await dataSource.OpenConnectionAsync();
-    await using var command = new NpgsqlCommand("""
-        select id, mrn, first_name, last_name, phone, gender, date_of_birth,
-               address, blood_type, emergency_contact_name, emergency_contact_phone,
-               photo_content_type, photo_data
-        from patients
-        order by created_at desc, mrn
-        """, connection);
+    var patients = await db.Patients
+        .OrderByDescending(p => p.CreatedAtUtc)
+        .ThenBy(p => p.Mrn)
+        .ToListAsync();
 
-    await using var reader = await command.ExecuteReaderAsync();
-    while (await reader.ReadAsync())
-    {
-        patients.Add(ReadPatient(reader));
-    }
+    var result = patients.Select(p => new PatientDto(
+        p.Id,
+        p.Mrn,
+        p.FirstName,
+        p.LastName,
+        p.Phone,
+        p.Gender,
+        p.DateOfBirth,
+        p.Address,
+        p.BloodType,
+        p.EmergencyContactName,
+        p.EmergencyContactPhone,
+        p.PhotoData is { Length: > 0 } && !string.IsNullOrWhiteSpace(p.PhotoContentType)
+            ? $"data:{p.PhotoContentType};base64,{Convert.ToBase64String(p.PhotoData)}"
+            : null));
 
-    return Results.Ok(ApiResponse<IEnumerable<PatientDto>>.Ok(patients));
-});
+    return Results.Ok(ApiResponse<IEnumerable<PatientDto>>.Ok(result));
+})
+.RequireAuthorization(policy => policy.RequireRole("ADMIN", "DOCTOR", "NURSE", "RECEPTIONIST"));
 
-app.MapGet("/api/patients/{id:guid}", async (Guid id, NpgsqlDataSource dataSource) =>
+app.MapGet("/api/patients/{id:guid}", async (Guid id, AppPatientsDbContext db) =>
 {
-    await using var connection = await dataSource.OpenConnectionAsync();
-    await using var command = new NpgsqlCommand("""
-        select id, mrn, first_name, last_name, phone, gender, date_of_birth,
-               address, blood_type, emergency_contact_name, emergency_contact_phone,
-               photo_content_type, photo_data
-        from patients
-        where id = @id
-        """, connection);
-    command.Parameters.AddWithValue("id", id);
-
-    await using var reader = await command.ExecuteReaderAsync();
-    if (!await reader.ReadAsync())
+    var patient = await db.Patients.FindAsync(id);
+    if (patient is null)
     {
         return Results.NotFound(ApiResponse<object>.Fail("Patient not found."));
     }
 
-    return Results.Ok(ApiResponse<PatientDto>.Ok(ReadPatient(reader)));
-});
+    var photoDataUrl = patient.PhotoData is { Length: > 0 } && !string.IsNullOrWhiteSpace(patient.PhotoContentType)
+        ? $"data:{patient.PhotoContentType};base64,{Convert.ToBase64String(patient.PhotoData)}"
+        : null;
 
-app.MapPost("/api/patients", async (CreatePatientRequest request, NpgsqlDataSource dataSource) =>
+    var dto = new PatientDto(
+        patient.Id, patient.Mrn, patient.FirstName, patient.LastName,
+        patient.Phone, patient.Gender, patient.DateOfBirth,
+        patient.Address, patient.BloodType,
+        patient.EmergencyContactName, patient.EmergencyContactPhone,
+        photoDataUrl);
+
+    return Results.Ok(ApiResponse<PatientDto>.Ok(dto));
+})
+.RequireAuthorization(policy => policy.RequireRole("ADMIN", "DOCTOR", "NURSE", "RECEPTIONIST"));
+
+app.MapPost("/api/patients", async (CreatePatientRequest request, AppPatientsDbContext db,
+    IHttpClientFactory httpClientFactory, IConfiguration configuration) =>
 {
     if (string.IsNullOrWhiteSpace(request.FirstName) ||
         string.IsNullOrWhiteSpace(request.LastName) ||
@@ -84,85 +135,58 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, NpgsqlDataSour
     }
 
     var (photoContentType, photoData) = ParsePhoto(request.PhotoDataUrl);
-    var id = Guid.NewGuid();
 
-    await using var connection = await dataSource.OpenConnectionAsync();
-    var mrn = await NextMrnAsync(connection);
+    // Generate next MRN
+    var maxMrn = await db.Patients
+        .OrderByDescending(p => p.Mrn)
+        .Select(p => p.Mrn)
+        .FirstOrDefaultAsync();
 
-    await using var command = new NpgsqlCommand("""
-        insert into patients
-            (id, mrn, first_name, last_name, phone, gender, date_of_birth,
-             address, blood_type, emergency_contact_name, emergency_contact_phone,
-             photo_content_type, photo_data)
-        values
-            (@id, @mrn, @first_name, @last_name, @phone, @gender, @date_of_birth,
-             @address, @blood_type, @emergency_contact_name, @emergency_contact_phone,
-             @photo_content_type, @photo_data)
-        returning id, mrn, first_name, last_name, phone, gender, date_of_birth,
-                  address, blood_type, emergency_contact_name, emergency_contact_phone,
-                  photo_content_type, photo_data
-        """, connection);
+    var nextNumber = 1;
+    if (maxMrn != null && int.TryParse(maxMrn.Replace("MRN-", ""), out var lastNumber))
+    {
+        nextNumber = lastNumber + 1;
+    }
+    var mrn = $"MRN-{nextNumber:0000}";
 
-    command.Parameters.AddWithValue("id", id);
-    command.Parameters.AddWithValue("mrn", mrn);
-    command.Parameters.AddWithValue("first_name", request.FirstName.Trim());
-    command.Parameters.AddWithValue("last_name", request.LastName.Trim());
-    command.Parameters.AddWithValue("phone", request.Phone.Trim());
-    command.Parameters.AddWithValue("gender", request.Gender.Trim());
-    command.Parameters.AddWithValue("date_of_birth", request.DateOfBirth);
-    command.Parameters.AddWithValue("address", DbValue(request.Address));
-    command.Parameters.AddWithValue("blood_type", DbValue(request.BloodType));
-    command.Parameters.AddWithValue("emergency_contact_name", DbValue(request.EmergencyContactName));
-    command.Parameters.AddWithValue("emergency_contact_phone", DbValue(request.EmergencyContactPhone));
-    command.Parameters.AddWithValue("photo_content_type", DbValue(photoContentType));
-    command.Parameters.AddWithValue("photo_data", photoData is null ? DBNull.Value : photoData);
+    var patient = new Patient
+    {
+        Mrn = mrn,
+        FirstName = request.FirstName.Trim(),
+        LastName = request.LastName.Trim(),
+        Phone = request.Phone.Trim(),
+        Gender = request.Gender.Trim(),
+        DateOfBirth = request.DateOfBirth,
+        Address = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim(),
+        BloodType = string.IsNullOrWhiteSpace(request.BloodType) ? null : request.BloodType.Trim(),
+        EmergencyContactName = string.IsNullOrWhiteSpace(request.EmergencyContactName) ? null : request.EmergencyContactName.Trim(),
+        EmergencyContactPhone = string.IsNullOrWhiteSpace(request.EmergencyContactPhone) ? null : request.EmergencyContactPhone.Trim(),
+        PhotoContentType = photoContentType,
+        PhotoData = photoData
+    };
 
-    await using var reader = await command.ExecuteReaderAsync();
-    await reader.ReadAsync();
-    var patient = ReadPatient(reader);
-    await reader.DisposeAsync();
+    db.Patients.Add(patient);
+    await db.SaveChangesAsync();
 
-    await PublishPatientRegisteredAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration, patient);
+    var photoDataUrl = photoData is { Length: > 0 } && !string.IsNullOrWhiteSpace(photoContentType)
+        ? $"data:{photoContentType};base64,{Convert.ToBase64String(photoData)}"
+        : null;
 
-    return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(patient, "Patient registered."));
-});
+    var dto = new PatientDto(
+        patient.Id, patient.Mrn, patient.FirstName, patient.LastName,
+        patient.Phone, patient.Gender, patient.DateOfBirth,
+        patient.Address, patient.BloodType,
+        patient.EmergencyContactName, patient.EmergencyContactPhone,
+        photoDataUrl);
+
+    // Publish RabbitMQ event asynchronously (fire-and-forget)
+    _ = PublishPatientRegisteredAsync(httpClientFactory, configuration, dto);
+
+    return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(dto, "Patient registered."));
+})
+.RequireAuthorization(policy => policy.RequireRole("ADMIN", "RECEPTIONIST", "NURSE"));
 
 app.Run();
-
-static async Task EnsureDatabaseAsync(NpgsqlDataSource dataSource)
-{
-    await using var connection = await dataSource.OpenConnectionAsync();
-    await using var command = new NpgsqlCommand("""
-        create extension if not exists pgcrypto;
-
-        create table if not exists patients (
-            id uuid primary key,
-            mrn varchar(32) not null unique,
-            first_name varchar(96) not null,
-            last_name varchar(96) not null,
-            phone varchar(32) not null,
-            gender varchar(32) not null,
-            date_of_birth date not null,
-            created_at timestamptz not null default now()
-        );
-
-        alter table patients add column if not exists address text;
-        alter table patients add column if not exists blood_type varchar(16);
-        alter table patients add column if not exists emergency_contact_name varchar(160);
-        alter table patients add column if not exists emergency_contact_phone varchar(32);
-        alter table patients add column if not exists photo_content_type varchar(80);
-        alter table patients add column if not exists photo_data bytea;
-
-        insert into patients
-            (id, mrn, first_name, last_name, phone, gender, date_of_birth, address, blood_type, emergency_contact_name, emergency_contact_phone)
-        values
-            ('f64d3368-a4da-4d44-9612-5c302b0ec29a', 'MRN-0001', 'Sara', 'Bekele', '0920000001', 'Female', '1995-05-10', 'Bole, Addis Ababa', 'O+', 'Meron Bekele', '0921000001'),
-            ('d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80', 'MRN-0002', 'Dawit', 'Alemu', '0920000002', 'Male', '1988-02-20', 'CMC, Addis Ababa', 'A+', 'Alem Alemu', '0921000002')
-        on conflict (mrn) do nothing;
-        """, connection);
-
-    await command.ExecuteNonQueryAsync();
-}
 
 static async Task EnsureRabbitMqAsync(IHttpClientFactory httpClientFactory, IConfiguration configuration)
 {
@@ -175,7 +199,7 @@ static async Task EnsureRabbitMqAsync(IHttpClientFactory httpClientFactory, ICon
     }
     catch
     {
-        // RabbitMQ is optional for local development; API writes should not fail if the broker is warming up.
+        // RabbitMQ is optional for local development
     }
 }
 
@@ -232,48 +256,6 @@ static async Task PostJsonAsync(HttpClient client, string path, object payload)
     using var response = await client.PostAsJsonAsync(path, payload);
     response.EnsureSuccessStatusCode();
 }
-
-static async Task<string> NextMrnAsync(NpgsqlConnection connection)
-{
-    await using var command = new NpgsqlCommand("""
-        select coalesce(max(nullif(regexp_replace(mrn, '\D', '', 'g'), '')::int), 0) + 1
-        from patients
-        """, connection);
-
-    var next = (int)(await command.ExecuteScalarAsync() ?? 1);
-    return $"MRN-{next:0000}";
-}
-
-static PatientDto ReadPatient(NpgsqlDataReader reader)
-{
-    var photoContentType = NullableString(reader, "photo_content_type");
-    var photoData = reader["photo_data"] as byte[];
-    var photoDataUrl = photoData is { Length: > 0 } && !string.IsNullOrWhiteSpace(photoContentType)
-        ? $"data:{photoContentType};base64,{Convert.ToBase64String(photoData)}"
-        : null;
-
-    return new PatientDto(
-        reader.GetGuid(reader.GetOrdinal("id")),
-        reader.GetString(reader.GetOrdinal("mrn")),
-        reader.GetString(reader.GetOrdinal("first_name")),
-        reader.GetString(reader.GetOrdinal("last_name")),
-        reader.GetString(reader.GetOrdinal("phone")),
-        reader.GetString(reader.GetOrdinal("gender")),
-        reader.GetFieldValue<DateOnly>(reader.GetOrdinal("date_of_birth")),
-        NullableString(reader, "address"),
-        NullableString(reader, "blood_type"),
-        NullableString(reader, "emergency_contact_name"),
-        NullableString(reader, "emergency_contact_phone"),
-        photoDataUrl);
-}
-
-static string? NullableString(NpgsqlDataReader reader, string columnName)
-{
-    var ordinal = reader.GetOrdinal(columnName);
-    return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-}
-
-static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
 
 static (string? ContentType, byte[]? Data) ParsePhoto(string? photoDataUrl)
 {

@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHandlerFn, HttpInterceptorFn, HttpRequest, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { Injectable, signal } from '@angular/core';
 
 export interface ApiResponse<T> {
@@ -123,10 +123,22 @@ export interface Invoice {
   createdAtUtc: string;
 }
 
+// ── HTTP Interceptor for JWT Bearer tokens ──
+export const jwtInterceptor: HttpInterceptorFn = (req: HttpRequest<unknown>, next: HttpHandlerFn) => {
+  const token = sessionStorage.getItem('hms_token');
+  if (token) {
+    const cloned = req.clone({
+      headers: req.headers.set('Authorization', `Bearer ${token}`),
+    });
+    return next(cloned);
+  }
+  return next(req);
+};
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly baseUrl = 'http://localhost:5000';
-  readonly session = signal<LoginResponse | null>(null);
+  readonly session = signal<LoginResponse | null>(this.loadSession());
 
   constructor(private http: HttpClient) {}
 
@@ -135,6 +147,23 @@ export class ApiService {
       emailAddress,
       password,
     });
+  }
+
+  /** Persist session to sessionStorage after login */
+  setSession(response: LoginResponse | null) {
+    this.session.set(response);
+    if (response?.accessToken) {
+      sessionStorage.setItem('hms_token', response.accessToken);
+      sessionStorage.setItem('hms_session', JSON.stringify(response));
+    } else {
+      sessionStorage.removeItem('hms_token');
+      sessionStorage.removeItem('hms_session');
+    }
+  }
+
+  private loadSession(): LoginResponse | null {
+    const raw = sessionStorage.getItem('hms_session');
+    return raw ? JSON.parse(raw) : null;
   }
 
   getEmployees() {

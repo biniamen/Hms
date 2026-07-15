@@ -102,7 +102,7 @@ export class AppComponent {
     this.api.login(this.emailAddress, this.password).subscribe({
       next: (res) => {
         this.loading.set(false);
-        this.api.session.set(res.data);
+        this.api.setSession(res.data);
         this.toast('success', `Welcome ${res.data.role}`);
         this.loadAll();
       },
@@ -115,7 +115,7 @@ export class AppComponent {
 
   logout() {
     this.stopCamera();
-    this.api.session.set(null);
+    this.api.setSession(null);
     this.active.set('dashboard');
   }
 
