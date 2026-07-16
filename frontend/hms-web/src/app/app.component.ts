@@ -65,7 +65,7 @@ export class AppComponent {
   @ViewChild('cameraCanvas') cameraCanvas?: ElementRef<HTMLCanvasElement>;
 
   emailAddress = 'admin@hms.local';
-  password = 'Admin@123';
+  password = '';
   active = signal<Section>('dashboard');
   modal = signal<Modal>(null);
   adminTab = signal<AdminTab>('users');
@@ -227,7 +227,7 @@ export class AppComponent {
     this.api.login(this.emailAddress, this.password).subscribe({
       next: (res) => {
         this.loading.set(false);
-        this.api.session.set(res.data);
+        this.api.storeSession(res.data);
         this.toast('success', `Welcome ${res.data.role}`);
         this.loadAll();
       },
@@ -291,7 +291,7 @@ export class AppComponent {
 
   logout() {
     this.stopCamera();
-    this.api.session.set(null);
+    this.api.clearSession();
     this.active.set('dashboard');
   }
 

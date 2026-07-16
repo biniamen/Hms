@@ -2,8 +2,7 @@ using HMS.Contracts;
 using HMS.Patients.Infrastructure;
 using HMS.SharedKernel;
 using Microsoft.EntityFrameworkCore;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
+using RabbitMQ.Client;
 using System.Text;
 using System.Text.Json;
 
@@ -12,15 +11,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
-builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddHmsCors(builder.Configuration);
 
-var connectionString = builder.Configuration.GetConnectionString("PatientManagementDb")
-    ?? builder.Configuration.GetConnectionString("PatientsDb")
-    ?? "Host=localhost;Port=5432;Database=hms_patient_management_db;Username=postgres;Password=Amen@2461";
+var connectionString = builder.Configuration.RequireConnectionString("PatientManagementDb", "PatientsDb");
 
 await PatientsDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
 builder.Services.AddDbContext<PatientsDbContext>(options => options.UseNpgsql(connectionString));
-builder.Services.AddHttpClient("rabbitmq");
 
 var app = builder.Build();
 
@@ -30,6 +26,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseHmsJwtAuthentication("/health", "/openapi");
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
@@ -38,7 +35,7 @@ await using (var scope = app.Services.CreateAsyncScope())
     await PatientsSeedData.SeedAsync(db);
 }
 
-await EnsureRabbitMqAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration);
+await EnsureRabbitMqAsync(app.Configuration);
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patient-management", status = "healthy" })));
 
@@ -163,7 +160,7 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, PatientsDbCont
 
     patient = (await db.Patients.AsNoTracking().Include(item => item.InsuranceCompany).FirstAsync(item => item.Id == patient.Id))!;
     var dto = ToPatientDto(patient);
-    await PublishPatientRegisteredAsync(app.Services.GetRequiredService<IHttpClientFactory>(), app.Configuration, dto);
+    await PublishPatientRegisteredAsync(app.Configuration, dto);
 
     return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(dto, "Patient registered."));
 });
@@ -360,26 +357,40 @@ static async Task<string> NextMrnAsync(PatientsDbContext db)
     return $"MRN-{next:0000}";
 }
 
-static async Task EnsureRabbitMqAsync(IHttpClientFactory httpClientFactory, IConfiguration configuration)
+static async Task EnsureRabbitMqAsync(IConfiguration configuration)
 {
     try
     {
-        var client = RabbitClient(httpClientFactory, configuration);
-        await PutJsonAsync(client, "/api/exchanges/%2f/hms.events", new { type = "topic", durable = true });
-        await PutJsonAsync(client, "/api/queues/%2f/hms.patient-registered", new { durable = true });
-        await PostJsonAsync(client, "/api/bindings/%2f/e/hms.events/q/hms.patient-registered", new { routing_key = "patient.registered", arguments = new { } });
+        var settings = RabbitMqSettings.FromConfiguration(configuration);
+        if (settings is null)
+        {
+            return;
+        }
+
+        await using var connection = await CreateRabbitConnectionAsync(settings);
+        await using var channel = await connection.CreateChannelAsync();
+        await channel.ExchangeDeclareAsync(settings.Exchange, ExchangeType.Topic, durable: true);
+        await channel.QueueDeclareAsync(settings.Queue, durable: true, exclusive: false, autoDelete: false);
+        await channel.QueueBindAsync(settings.Queue, settings.Exchange, settings.RoutingKey);
     }
     catch
     {
-        // RabbitMQ is optional for local development; API writes should not fail if the broker is warming up.
+        // Patient registration must remain available while the broker starts or recovers.
     }
 }
 
-static async Task PublishPatientRegisteredAsync(IHttpClientFactory httpClientFactory, IConfiguration configuration, PatientDto patient)
+static async Task PublishPatientRegisteredAsync(IConfiguration configuration, PatientDto patient)
 {
     try
     {
-        var client = RabbitClient(httpClientFactory, configuration);
+        var settings = RabbitMqSettings.FromConfiguration(configuration);
+        if (settings is null)
+        {
+            return;
+        }
+
+        await using var connection = await CreateRabbitConnectionAsync(settings);
+        await using var channel = await connection.CreateChannelAsync();
         var payload = JsonSerializer.Serialize(new
         {
             eventType = "PatientRegistered",
@@ -392,13 +403,11 @@ static async Task PublishPatientRegisteredAsync(IHttpClientFactory httpClientFac
             patient.Gender
         });
 
-        await PostJsonAsync(client, "/api/exchanges/%2f/hms.events/publish", new
-        {
-            properties = new { content_type = "application/json" },
-            routing_key = "patient.registered",
-            payload,
-            payload_encoding = "string"
-        });
+        await channel.BasicPublishAsync(
+            exchange: settings.Exchange,
+            routingKey: settings.RoutingKey,
+            mandatory: false,
+            body: Encoding.UTF8.GetBytes(payload));
     }
     catch
     {
@@ -406,27 +415,18 @@ static async Task PublishPatientRegisteredAsync(IHttpClientFactory httpClientFac
     }
 }
 
-static HttpClient RabbitClient(IHttpClientFactory httpClientFactory, IConfiguration configuration)
+static Task<IConnection> CreateRabbitConnectionAsync(RabbitMqSettings settings)
 {
-    var client = httpClientFactory.CreateClient("rabbitmq");
-    client.BaseAddress = new Uri(configuration["RabbitMq:ManagementUrl"] ?? "http://localhost:15672");
-    var username = configuration["RabbitMq:Username"] ?? "guest";
-    var password = configuration["RabbitMq:Password"] ?? "guest";
-    var token = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{username}:{password}"));
-    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
-    return client;
-}
+    var factory = new ConnectionFactory
+    {
+        HostName = settings.HostName,
+        Port = settings.Port,
+        VirtualHost = settings.VirtualHost,
+        UserName = settings.Username,
+        Password = settings.Password
+    };
 
-static async Task PutJsonAsync(HttpClient client, string path, object payload)
-{
-    using var response = await client.PutAsJsonAsync(path, payload);
-    response.EnsureSuccessStatusCode();
-}
-
-static async Task PostJsonAsync(HttpClient client, string path, object payload)
-{
-    using var response = await client.PostAsJsonAsync(path, payload);
-    response.EnsureSuccessStatusCode();
+    return factory.CreateConnectionAsync();
 }
 
 static (string? ContentType, byte[]? Data) ParsePhoto(string? photoDataUrl)
@@ -462,3 +462,40 @@ static string? CleanOrNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 static string NormalizeCode(string value) => value.Trim().ToUpperInvariant().Replace(' ', '_');
+
+sealed record RabbitMqSettings(
+    string HostName,
+    int Port,
+    string VirtualHost,
+    string Username,
+    string Password,
+    string Exchange,
+    string Queue,
+    string RoutingKey)
+{
+    public static RabbitMqSettings? FromConfiguration(IConfiguration configuration)
+    {
+        var hostName = configuration["RabbitMq:HostName"];
+        if (string.IsNullOrWhiteSpace(hostName))
+        {
+            return null;
+        }
+
+        var username = configuration["RabbitMq:Username"];
+        var password = configuration["RabbitMq:Password"];
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+        {
+            throw new InvalidOperationException("RabbitMq:Username and RabbitMq:Password must be configured when RabbitMQ is enabled.");
+        }
+
+        return new RabbitMqSettings(
+            hostName,
+            configuration.GetValue("RabbitMq:Port", 5672),
+            configuration["RabbitMq:VirtualHost"] ?? "/",
+            username,
+            password,
+            configuration["RabbitMq:Exchange"] ?? "hms.events",
+            configuration["RabbitMq:PatientRegisteredQueue"] ?? "hms.patient-registered",
+            configuration["RabbitMq:PatientRegisteredRoutingKey"] ?? "patient.registered");
+    }
+}

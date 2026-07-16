@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using Npgsql;
+using HMS.SharedKernel;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -196,12 +196,12 @@ public sealed class EmailOutboxMessage
 
 public static class IdentitySeedData
 {
-    public static async Task SeedAsync(IdentityDbContext db)
+    public static async Task SeedAsync(IdentityDbContext db, string? defaultPassword)
     {
         await UpsertPermissionsAsync(db);
         await UpsertRolesAsync(db);
         await UpsertDepartmentsAsync(db);
-        await UpsertEmployeesAsync(db);
+        await UpsertEmployeesAsync(db, defaultPassword);
         await db.SaveChangesAsync();
     }
 
@@ -322,8 +322,15 @@ public static class IdentitySeedData
         }
     }
 
-    private static async Task UpsertEmployeesAsync(IdentityDbContext db)
+    private static async Task UpsertEmployeesAsync(IdentityDbContext db, string? defaultPassword)
     {
+        var seedPassword = string.IsNullOrWhiteSpace(defaultPassword) ? null : defaultPassword.Trim();
+        var passwordError = seedPassword is null ? null : IdentitySecurity.ValidatePassword(seedPassword);
+        if (passwordError is not null)
+        {
+            throw new InvalidOperationException($"Seed:DefaultPassword is invalid. {passwordError}");
+        }
+
         var employees = new[]
         {
             new Employee { Id = Guid.Parse("fe89d0c5-6232-421b-9926-05eff4433bd9"), EmployeeNo = "EMP-0001", FirstName = "System", LastName = "Administrator", EmailAddress = "admin@hms.local", Phone = "0900000001", RoleCode = "ADMIN", Department = "Administration", Specialization = "Platform Administration" },
@@ -340,9 +347,9 @@ public static class IdentitySeedData
             var existing = await db.Employees.FirstOrDefaultAsync(item => item.EmailAddress == employee.EmailAddress);
             if (existing is null)
             {
-                employee.PasswordHash = IdentitySecurity.HashPassword("Admin@123");
+                employee.PasswordHash = seedPassword is null ? "" : IdentitySecurity.HashPassword(seedPassword);
                 employee.IsActive = true;
-                employee.PasswordSetupCompleted = true;
+                employee.PasswordSetupCompleted = seedPassword is not null;
                 db.Employees.Add(employee);
             }
             else
@@ -355,6 +362,11 @@ public static class IdentitySeedData
                 existing.Department = employee.Department;
                 existing.Specialization = employee.Specialization;
                 existing.IsActive = true;
+                if (!existing.PasswordSetupCompleted && string.IsNullOrWhiteSpace(existing.PasswordHash) && seedPassword is not null)
+                {
+                    existing.PasswordHash = IdentitySecurity.HashPassword(seedPassword);
+                    existing.PasswordSetupCompleted = true;
+                }
             }
         }
     }
@@ -391,9 +403,7 @@ public static class IdentitySecurity
     {
         if (IsLegacyPassword(storedHash))
         {
-            return CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(password),
-                Encoding.UTF8.GetBytes(storedHash));
+            return false;
         }
 
         var parts = storedHash.Split('$');
@@ -408,7 +418,8 @@ public static class IdentitySecurity
         return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
     }
 
-    public static bool IsLegacyPassword(string storedHash) => !storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal);
+    public static bool IsLegacyPassword(string storedHash) =>
+        !string.IsNullOrWhiteSpace(storedHash) && !storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal);
 
     public static string? ValidatePassword(string password)
     {
@@ -428,44 +439,19 @@ public static class IdentitySecurity
 
 public static class IdentityDatabaseBootstrapper
 {
-    public static async Task EnsureDatabaseExistsAsync(string connectionString)
-    {
-        var targetBuilder = new NpgsqlConnectionStringBuilder(connectionString);
-        var databaseName = targetBuilder.Database;
-        if (string.IsNullOrWhiteSpace(databaseName))
-        {
-            return;
-        }
-
-        var adminBuilder = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false
-        };
-
-        await using var connection = new NpgsqlConnection(adminBuilder.ConnectionString);
-        await connection.OpenAsync();
-        await using var existsCommand = new NpgsqlCommand(
-            "select exists(select 1 from pg_database where datname = @database_name)",
-            connection);
-        existsCommand.Parameters.AddWithValue("database_name", databaseName);
-        var exists = (bool)(await existsCommand.ExecuteScalarAsync() ?? false);
-        if (!exists)
-        {
-            await using var createCommand = new NpgsqlCommand($"create database {QuoteIdentifier(databaseName)}", connection);
-            await createCommand.ExecuteNonQueryAsync();
-        }
-    }
-
-    private static string QuoteIdentifier(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+    public static Task EnsureDatabaseExistsAsync(string connectionString) =>
+        PostgresDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
 }
 
 public sealed class IdentityDbContextFactory : IDesignTimeDbContextFactory<IdentityDbContext>
 {
     public IdentityDbContext CreateDbContext(string[] args)
     {
+        var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__IdentityDb")
+            ?? throw new InvalidOperationException("Set ConnectionStrings__IdentityDb before running EF Core design-time commands.");
+
         var options = new DbContextOptionsBuilder<IdentityDbContext>()
-            .UseNpgsql("Host=localhost;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461")
+            .UseNpgsql(connectionString)
             .Options;
 
         return new IdentityDbContext(options);

@@ -10,13 +10,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
-});
+builder.Services.AddHmsCors(builder.Configuration);
 
-var connectionString = builder.Configuration.GetConnectionString("IdentityDb")
-    ?? "Host=localhost;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461";
+var connectionString = builder.Configuration.RequireConnectionString("IdentityDb");
 
 await IdentityDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
 builder.Services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(connectionString));
@@ -29,12 +25,18 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseHmsJwtAuthentication(
+    "/health",
+    "/openapi",
+    "/api/auth/login",
+    "/api/auth/setup-password",
+    "/api/auth/forgot-password");
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
     await db.Database.MigrateAsync();
-    await IdentitySeedData.SeedAsync(db);
+    await IdentitySeedData.SeedAsync(db, app.Configuration["Seed:DefaultPassword"]);
     await UpgradeLegacyPasswordsAsync(db);
 }
 
@@ -59,14 +61,9 @@ app.MapPost("/api/auth/login", async (LoginRequest request, IdentityDbContext db
         return Results.BadRequest(ApiResponse<object>.Fail("Invalid email address or password."));
     }
 
-    if (IdentitySecurity.IsLegacyPassword(employee.PasswordHash))
-    {
-        employee.PasswordHash = IdentitySecurity.HashPassword(request.Password);
-        await db.SaveChangesAsync();
-    }
-
     var permission = await PermissionTextAsync(db, employee.RoleCode);
-    var token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{employee.Id}:{employee.EmailAddress}:{employee.RoleCode}"));
+    var permissions = await PermissionsForRoleAsync(db, employee.RoleCode);
+    var token = HmsSecurity.CreateAccessToken(app.Configuration, employee.Id.ToString("D"), employee.EmailAddress, employee.RoleCode, permissions);
     var response = new LoginResponse(token, employee.Id, employee.EmailAddress, employee.RoleCode, permission);
     return Results.Ok(ApiResponse<LoginResponse>.Ok(response, "Login successful."));
 });
@@ -153,7 +150,7 @@ app.MapPost("/api/employees", async (CreateEmployeeRequest request, IdentityDbCo
     return Results.Created($"/api/employees/{employee.Id}", ApiResponse<EmployeeInviteResponse>.Ok(
         new EmployeeInviteResponse(ToEmployeeDto(employee, permission, latestToken), setupUrl),
         "Employee created. Password setup invitation prepared."));
-});
+}).RequireHmsRoles("ADMIN", "HR_MANAGER");
 
 app.MapPost("/api/employees/{id:guid}/invite", async (Guid id, IdentityDbContext db) =>
 {
@@ -182,7 +179,7 @@ app.MapPost("/api/employees/{id:guid}/invite", async (Guid id, IdentityDbContext
     return Results.Ok(ApiResponse<EmployeeInviteResponse>.Ok(
         new EmployeeInviteResponse(ToEmployeeDto(employee, permission, latestToken), setupUrl),
         "Password setup invitation prepared."));
-});
+}).RequireHmsRoles("ADMIN", "HR_MANAGER");
 
 app.MapPost("/api/auth/forgot-password", async (ForgotPasswordRequest request, IdentityDbContext db) =>
 {
@@ -281,7 +278,7 @@ app.MapGet("/api/auth/email-outbox", async (string? recipient, IdentityDbContext
         message.SentAtUtc,
         message.Error,
         ExtractFirstUrl(message.Body)))));
-});
+}).RequireHmsRoles("ADMIN", "HR_MANAGER");
 
 app.MapGet("/api/auth/email-outbox/latest-link", async (string recipient, IdentityDbContext db) =>
 {
@@ -296,7 +293,7 @@ app.MapGet("/api/auth/email-outbox/latest-link", async (string recipient, Identi
     return string.IsNullOrWhiteSpace(setupUrl)
         ? Results.NotFound(ApiResponse<object>.Fail("No setup link found."))
         : Results.Ok(ApiResponse<object>.Ok(new { setupUrl }));
-});
+}).RequireHmsRoles("ADMIN", "HR_MANAGER");
 
 app.MapGet("/api/roles", async (IdentityDbContext db) =>
 {
@@ -345,7 +342,7 @@ app.MapPost("/api/roles", async (CreateRoleRequest request, IdentityDbContext db
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/roles/{roleCode}", ApiResponse<object>.Ok(new { role = roleCode }, "Role saved."));
-});
+}).RequireHmsRoles("ADMIN");
 
 app.MapPut("/api/roles/{roleCode}", async (string roleCode, UpdateRolePermissionRequest request, IdentityDbContext db) =>
 {
@@ -361,7 +358,7 @@ app.MapPut("/api/roles/{roleCode}", async (string roleCode, UpdateRolePermission
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<object>.Ok(new { role = normalizedRole }, "Role permissions updated."));
-});
+}).RequireHmsRoles("ADMIN");
 
 app.MapGet("/api/permissions", async (IdentityDbContext db) =>
 {
@@ -395,7 +392,7 @@ app.MapPost("/api/permissions", async (CreatePermissionRequest request, Identity
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/permissions/{key}", ApiResponse<PermissionDto>.Ok(new PermissionDto(permission.Key, permission.Description, permission.Module), "Permission saved."));
-});
+}).RequireHmsRoles("ADMIN");
 
 app.MapGet("/api/departments", async (IdentityDbContext db) =>
 {
@@ -431,7 +428,7 @@ app.MapPost("/api/departments", async (CreateDepartmentRequest request, Identity
     return Results.Created($"/api/departments/{department.Id}", ApiResponse<DepartmentDto>.Ok(
         new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location),
         "Department saved."));
-});
+}).RequireHmsRoles("ADMIN");
 
 app.MapGet("/api/doctors", async (IdentityDbContext db) =>
 {
@@ -489,6 +486,14 @@ static async Task<string> PermissionTextAsync(IdentityDbContext db, string role)
 
     return string.Join(", ", permissions);
 }
+
+static async Task<string[]> PermissionsForRoleAsync(IdentityDbContext db, string role) =>
+    await db.RolePermissions
+        .AsNoTracking()
+        .Where(permission => permission.RoleCode == role)
+        .OrderBy(permission => permission.PermissionKey)
+        .Select(permission => permission.PermissionKey)
+        .ToArrayAsync();
 
 static async Task<Dictionary<Guid, PasswordSetupToken>> LatestOpenTokensByEmployeeAsync(IdentityDbContext db)
 {

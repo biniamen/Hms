@@ -8,10 +8,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
-builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddHmsCors(builder.Configuration);
 
-var connectionString = builder.Configuration.GetConnectionString("ClinicalDb")
-    ?? "Host=localhost;Port=5432;Database=hms_clinical_db;Username=postgres;Password=Amen@2461";
+var connectionString = builder.Configuration.RequireConnectionString("ClinicalDb");
 
 await ClinicalDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
 builder.Services.AddDbContext<ClinicalDbContext>(options => options.UseNpgsql(connectionString));
@@ -24,6 +23,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseHmsJwtAuthentication("/health", "/openapi");
 
 await using (var scope = app.Services.CreateAsyncScope())
 {

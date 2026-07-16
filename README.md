@@ -64,8 +64,8 @@ Default local PostgreSQL connection:
 ```text
 Host: localhost
 Port: 5432
-Username: postgres
-Password: Amen@2461
+Username: configured locally
+Password: configured locally
 ```
 
 Databases used by the services:
@@ -101,8 +101,8 @@ pgAdmin:
 
 ```text
 URL: http://localhost:5050
-Email: admin@hms.dev
-Password: PgAdmin@123
+Email: configured in deploy/.env
+Password: configured in deploy/.env
 ```
 
 When registering the Docker PostgreSQL server in pgAdmin:
@@ -111,9 +111,27 @@ When registering the Docker PostgreSQL server in pgAdmin:
 Host name/address: postgres
 Port: 5432
 Maintenance database: hms_identity_db
-Username: postgres
-Password: Amen@2461
+Username: configured locally
+Password: configured locally
 ```
+
+Create a private local runtime config before starting without Docker:
+
+```powershell
+cd "D:\Mine Only\Private\hms-platform"
+Copy-Item .\hms.local.example.ps1 .\hms.local.ps1
+notepad .\hms.local.ps1
+```
+
+Set:
+
+```powershell
+$env:HMS_POSTGRES_PASSWORD = "your-postgres-password"
+$env:Security__Jwt__SigningKey = "at-least-32-random-characters"
+$env:Seed__DefaultPassword = "your-local-bootstrap-password"
+```
+
+`hms.local.ps1` is ignored by Git.
 
 ## SMTP Configuration
 
@@ -154,13 +172,14 @@ powershell -ExecutionPolicy Bypass -File .\start-hms.ps1
 
 The script will:
 
-1. Load SMTP settings from `smtp.local.ps1` when present.
-2. Restore packages using `backend/NuGet.Config`.
-3. Build the backend solution.
-4. Install frontend packages when `node_modules` is missing.
-5. Start Identity, Patients, Clinical, Billing, and API Gateway.
-6. Start Angular.
-7. Write runtime logs to `.runtime-logs`.
+1. Load local runtime settings from `hms.local.ps1` when present.
+2. Load SMTP settings from `smtp.local.ps1` when present.
+3. Restore packages using `backend/NuGet.Config`.
+4. Build the backend solution.
+5. Install frontend packages when `node_modules` is missing.
+6. Start Identity, Patients, Clinical, Billing, and API Gateway.
+7. Start Angular.
+8. Write runtime logs to `.runtime-logs`.
 
 Open the system:
 
@@ -180,6 +199,8 @@ Wait about 60-90 seconds for Angular to compile after starting the script.
 
 ```powershell
 cd "D:\Mine Only\Private\hms-platform\deploy"
+Copy-Item .\docker.env.example .\.env
+notepad .\.env
 docker compose up --build
 ```
 
@@ -208,12 +229,12 @@ npm.cmd install --cache .\.npm-cache
 npm.cmd run build -- --no-progress
 ```
 
-## Default Login Users
+## Seeded Login Users
 
-Default password:
+The seed password is not stored in source code. Set it in `hms.local.ps1` for local startup or `deploy/.env` for Docker:
 
 ```text
-Admin@123
+Seed__DefaultPassword / HMS_SEED_DEFAULT_PASSWORD
 ```
 
 Users:
@@ -282,8 +303,8 @@ RabbitMQ:
 
 ```text
 URL: http://localhost:15672
-Username: guest
-Password: guest
+Username: configured locally
+Password: configured locally
 ```
 
 Check:
@@ -300,7 +321,7 @@ Routing key: patient.registered
 Invoke-RestMethod -Method Post `
   -Uri "http://localhost:5200/api/auth/login" `
   -ContentType "application/json" `
-  -Body '{"emailAddress":"admin@hms.local","password":"Admin@123"}'
+  -Body (@{ emailAddress = "admin@hms.local"; password = $env:Seed__DefaultPassword } | ConvertTo-Json)
 ```
 
 ## GitLab Handoff
@@ -312,10 +333,12 @@ Included:
 ```text
 README.md
 start-hms.ps1
+hms.local.example.ps1
 smtp.local.example.ps1
 backend/
 frontend/
 deploy/docker-compose.yml
+deploy/docker.env.example
 deploy/postgres/init/01-hms-seed.sql
 docs/HMS_ARCHITECTURE_CEO_BRIEF.md
 docs/ENTERPRISE_OPERATIONS_WORKFLOW.md
@@ -325,6 +348,8 @@ Excluded by `.gitignore`:
 
 ```text
 smtp.local.ps1
+hms.local.ps1
+deploy/.env
 .runtime-logs/
 bin/
 obj/
@@ -360,7 +385,7 @@ git push -u origin main
 
 Recommended work before live hospital rollout:
 
-1. Add signed JWT authentication and authorization policies.
+1. Add refresh-token/session revocation and optional external identity provider integration.
 2. Add audit trail and immutable activity history.
 3. Add production notification provider for email and SMS.
 4. Add CI/CD pipeline in GitLab.

@@ -2,8 +2,8 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: Amen@2461
+      POSTGRES_USER: ${HMS_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
       POSTGRES_DB: hms_identity_db
     ports:
       - "5432:5432"
@@ -14,20 +14,20 @@ services:
   postgres-init:
     image: postgres:16-alpine
     environment:
-      PGPASSWORD: Amen@2461
+      PGPASSWORD: ${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
     depends_on:
       - postgres
     volumes:
       - ./postgres/init:/seed:ro
     command: >
-      sh -c "until pg_isready -h postgres -U postgres; do sleep 1; done;
-      psql -h postgres -U postgres -d hms_identity_db -f /seed/01-hms-seed.sql"
+      sh -c "until pg_isready -h postgres -U ${HMS_POSTGRES_USER:-postgres}; do sleep 1; done;
+      psql -h postgres -U ${HMS_POSTGRES_USER:-postgres} -d hms_identity_db -f /seed/01-hms-seed.sql"
 
   pgadmin:
     image: dpage/pgadmin4:8.14
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@hms.dev
-      PGADMIN_DEFAULT_PASSWORD: PgAdmin@123
+      PGADMIN_DEFAULT_EMAIL: ${HMS_PGADMIN_EMAIL:-admin@hms.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${HMS_PGADMIN_PASSWORD:?Set HMS_PGADMIN_PASSWORD in deploy/.env}
     ports:
       - "5050:80"
     depends_on:
@@ -38,6 +38,9 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${HMS_RABBITMQ_USERNAME:?Set HMS_RABBITMQ_USERNAME in deploy/.env}
+      RABBITMQ_DEFAULT_PASS: ${HMS_RABBITMQ_PASSWORD:?Set HMS_RABBITMQ_PASSWORD in deploy/.env}
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -53,7 +56,9 @@ services:
       dockerfile: src/Services/Identity/HMS.Identity.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__IdentityDb: Host=postgres;Port=5432;Database=hms_identity_db;Username=postgres;Password=Amen@2461
+      ConnectionStrings__IdentityDb: Host=postgres;Port=5432;Database=hms_identity_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
+      Seed__DefaultPassword: ${HMS_SEED_DEFAULT_PASSWORD:?Set HMS_SEED_DEFAULT_PASSWORD in deploy/.env}
     ports:
       - "5101:8080"
     depends_on:
@@ -66,10 +71,11 @@ services:
       dockerfile: src/Services/Patients/HMS.Patients.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__PatientManagementDb: Host=postgres;Port=5432;Database=hms_patient_management_db;Username=postgres;Password=Amen@2461
-      RabbitMq__ManagementUrl: http://rabbitmq:15672
-      RabbitMq__Username: guest
-      RabbitMq__Password: guest
+      ConnectionStrings__PatientManagementDb: Host=postgres;Port=5432;Database=hms_patient_management_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Username: ${HMS_RABBITMQ_USERNAME:?Set HMS_RABBITMQ_USERNAME in deploy/.env}
+      RabbitMq__Password: ${HMS_RABBITMQ_PASSWORD:?Set HMS_RABBITMQ_PASSWORD in deploy/.env}
     ports:
       - "5102:8080"
     depends_on:
@@ -84,7 +90,8 @@ services:
       dockerfile: src/Services/Clinical/HMS.Clinical.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__ClinicalDb: Host=postgres;Port=5432;Database=hms_clinical_db;Username=postgres;Password=Amen@2461
+      ConnectionStrings__ClinicalDb: Host=postgres;Port=5432;Database=hms_clinical_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
     ports:
       - "5104:8080"
     depends_on:
@@ -97,7 +104,8 @@ services:
       dockerfile: src/Services/Billing/HMS.Billing.Api/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__BillingDb: Host=postgres;Port=5432;Database=hms_billing_db;Username=postgres;Password=Amen@2461
+      ConnectionStrings__BillingDb: Host=postgres;Port=5432;Database=hms_billing_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
     ports:
       - "5105:8080"
     depends_on:
@@ -110,6 +118,7 @@ services:
       dockerfile: src/ApiGateway/HMS.ApiGateway/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
+      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
     ports:
       - "5200:8080"
     depends_on:

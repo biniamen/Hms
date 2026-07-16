@@ -4,6 +4,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backend = Join-Path $root "backend"
 $frontend = Join-Path $root "frontend\hms-web"
 $logDir = Join-Path $root ".runtime-logs"
+$localConfig = Join-Path $root "hms.local.ps1"
 $smtpLocalConfig = Join-Path $root "smtp.local.ps1"
 $dotnetHome = Join-Path $backend ".dotnet-home"
 $dotnetAppData = Join-Path $backend ".appdata"
@@ -19,6 +20,60 @@ if (-not (Test-Path $nugetConfigDir)) {
     New-Item -ItemType Directory -Path $nugetConfigDir -Force | Out-Null
 }
 Copy-Item -LiteralPath (Join-Path $backend "NuGet.Config") -Destination (Join-Path $nugetConfigDir "NuGet.Config") -Force
+
+if (Test-Path $localConfig) {
+    . $localConfig
+}
+
+function New-Base64Secret {
+    param([int]$ByteCount = 48)
+
+    $bytes = New-Object byte[] $ByteCount
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
+
+    [Convert]::ToBase64String($bytes)
+}
+
+if ([string]::IsNullOrWhiteSpace($env:Security__Jwt__SigningKey)) {
+    $env:Security__Jwt__SigningKey = New-Base64Secret
+    Write-Warning "Security__Jwt__SigningKey was not configured. A temporary development signing key was generated for this run."
+}
+
+if ([string]::IsNullOrWhiteSpace($env:Seed__DefaultPassword)) {
+    $env:Seed__DefaultPassword = "Hms-" + ([Guid]::NewGuid().ToString("N").Substring(0, 12)) + "A1"
+    Write-Warning "Seed__DefaultPassword was not configured. Temporary development password: $env:Seed__DefaultPassword"
+}
+
+$pgHost = if ([string]::IsNullOrWhiteSpace($env:HMS_POSTGRES_HOST)) { "localhost" } else { $env:HMS_POSTGRES_HOST }
+$pgPort = if ([string]::IsNullOrWhiteSpace($env:HMS_POSTGRES_PORT)) { "5432" } else { $env:HMS_POSTGRES_PORT }
+$pgUser = if ([string]::IsNullOrWhiteSpace($env:HMS_POSTGRES_USER)) { "postgres" } else { $env:HMS_POSTGRES_USER }
+
+if ([string]::IsNullOrWhiteSpace($env:ConnectionStrings__IdentityDb) -or
+    [string]::IsNullOrWhiteSpace($env:ConnectionStrings__PatientManagementDb) -or
+    [string]::IsNullOrWhiteSpace($env:ConnectionStrings__ClinicalDb) -or
+    [string]::IsNullOrWhiteSpace($env:ConnectionStrings__BillingDb)) {
+
+    if ([string]::IsNullOrWhiteSpace($env:HMS_POSTGRES_PASSWORD)) {
+        throw "Database password is not configured. Copy hms.local.example.ps1 to hms.local.ps1 and set HMS_POSTGRES_PASSWORD, or set the ConnectionStrings__* environment variables."
+    }
+
+    $env:ConnectionStrings__IdentityDb = "Host=$pgHost;Port=$pgPort;Database=hms_identity_db;Username=$pgUser;Password=$env:HMS_POSTGRES_PASSWORD"
+    $env:ConnectionStrings__PatientManagementDb = "Host=$pgHost;Port=$pgPort;Database=hms_patient_management_db;Username=$pgUser;Password=$env:HMS_POSTGRES_PASSWORD"
+    $env:ConnectionStrings__ClinicalDb = "Host=$pgHost;Port=$pgPort;Database=hms_clinical_db;Username=$pgUser;Password=$env:HMS_POSTGRES_PASSWORD"
+    $env:ConnectionStrings__BillingDb = "Host=$pgHost;Port=$pgPort;Database=hms_billing_db;Username=$pgUser;Password=$env:HMS_POSTGRES_PASSWORD"
+}
+
+if (-not [string]::IsNullOrWhiteSpace($env:HMS_RABBITMQ_HOST)) {
+    $env:RabbitMq__HostName = $env:HMS_RABBITMQ_HOST
+    $env:RabbitMq__Port = if ([string]::IsNullOrWhiteSpace($env:HMS_RABBITMQ_PORT)) { "5672" } else { $env:HMS_RABBITMQ_PORT }
+    $env:RabbitMq__Username = $env:HMS_RABBITMQ_USERNAME
+    $env:RabbitMq__Password = $env:HMS_RABBITMQ_PASSWORD
+}
 
 $env:Email__FromName = "HMS Platform"
 $env:Email__Smtp__Host = "smtp.gmail.com"

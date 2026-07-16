@@ -292,7 +292,30 @@ export class ApiService {
   private readonly baseUrl = 'http://localhost:5200';
   readonly session = signal<LoginResponse | null>(null);
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    const savedSession = localStorage.getItem('hms_session');
+    if (savedSession) {
+      try {
+        const session = JSON.parse(savedSession) as LoginResponse;
+        this.session.set(session);
+        localStorage.setItem('hms_access_token', session.accessToken);
+      } catch {
+        this.clearSession();
+      }
+    }
+  }
+
+  storeSession(session: LoginResponse) {
+    this.session.set(session);
+    localStorage.setItem('hms_session', JSON.stringify(session));
+    localStorage.setItem('hms_access_token', session.accessToken);
+  }
+
+  clearSession() {
+    this.session.set(null);
+    localStorage.removeItem('hms_session');
+    localStorage.removeItem('hms_access_token');
+  }
 
   login(emailAddress: string, password: string) {
     return this.http.post<ApiResponse<LoginResponse>>(`${this.baseUrl}/api/auth/login`, {

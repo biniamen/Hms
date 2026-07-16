@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using Npgsql;
+using HMS.SharedKernel;
 
 namespace HMS.Billing.Infrastructure;
 
@@ -182,44 +182,19 @@ public static class BillingSeedData
 
 public static class BillingDatabaseBootstrapper
 {
-    public static async Task EnsureDatabaseExistsAsync(string connectionString)
-    {
-        var targetBuilder = new NpgsqlConnectionStringBuilder(connectionString);
-        var databaseName = targetBuilder.Database;
-        if (string.IsNullOrWhiteSpace(databaseName))
-        {
-            return;
-        }
-
-        var adminBuilder = new NpgsqlConnectionStringBuilder(connectionString)
-        {
-            Database = "postgres",
-            Pooling = false
-        };
-
-        await using var connection = new NpgsqlConnection(adminBuilder.ConnectionString);
-        await connection.OpenAsync();
-        await using var existsCommand = new NpgsqlCommand(
-            "select exists(select 1 from pg_database where datname = @database_name)",
-            connection);
-        existsCommand.Parameters.AddWithValue("database_name", databaseName);
-        var exists = (bool)(await existsCommand.ExecuteScalarAsync() ?? false);
-        if (!exists)
-        {
-            await using var createCommand = new NpgsqlCommand($"create database {QuoteIdentifier(databaseName)}", connection);
-            await createCommand.ExecuteNonQueryAsync();
-        }
-    }
-
-    private static string QuoteIdentifier(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+    public static Task EnsureDatabaseExistsAsync(string connectionString) =>
+        PostgresDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
 }
 
 public sealed class BillingDbContextFactory : IDesignTimeDbContextFactory<BillingDbContext>
 {
     public BillingDbContext CreateDbContext(string[] args)
     {
+        var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__BillingDb")
+            ?? throw new InvalidOperationException("Set ConnectionStrings__BillingDb before running EF Core design-time commands.");
+
         var options = new DbContextOptionsBuilder<BillingDbContext>()
-            .UseNpgsql("Host=localhost;Port=5432;Database=hms_billing_db;Username=postgres;Password=Amen@2461")
+            .UseNpgsql(connectionString)
             .Options;
 
         return new BillingDbContext(options);

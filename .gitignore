@@ -44,6 +44,8 @@ logs/
 !.env.example
 smtp.local.ps1
 smtp.local.*.ps1
+hms.local.ps1
+hms.local.*.ps1
 *.pfx
 *.p12
 *.pem
@@ -76,4 +78,5 @@ docs/*
 
 # Keep templates and scripts that are part of the codebase
 !smtp.local.example.ps1
+!hms.local.example.ps1
 !start-hms.ps1

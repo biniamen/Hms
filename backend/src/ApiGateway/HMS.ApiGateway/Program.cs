@@ -1,3 +1,4 @@
+using HMS.SharedKernel;
 using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -5,7 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
-builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddHmsCors(builder.Configuration);
 builder.Services.AddHttpClient();
 builder.Services.AddReverseProxy().LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
@@ -17,6 +18,12 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseHmsJwtAuthentication(
+    "/health",
+    "/openapi",
+    "/api/auth/login",
+    "/api/auth/setup-password",
+    "/api/auth/forgot-password");
 
 app.MapGet("/health", () => Results.Ok(new { service = "api-gateway", status = "healthy" }));
 
@@ -45,7 +52,7 @@ app.MapGet("/api/operations/services", async (IHttpClientFactory httpClientFacto
     });
 
     return Results.Ok(await Task.WhenAll(checks));
-});
+}).RequireHmsRoles("ADMIN");
 
 app.MapPost("/api/operations/services/{id}/start", (string id, IWebHostEnvironment environment) =>
 {
@@ -88,7 +95,7 @@ app.MapPost("/api/operations/services/{id}/start", (string id, IWebHostEnvironme
 
     Process.Start(startInfo);
     return Results.Accepted($"/api/operations/services/{service.Id}", new { message = $"{service.Name} start requested.", service.Url });
-});
+}).RequireHmsRoles("ADMIN");
 
 app.MapReverseProxy();
 
