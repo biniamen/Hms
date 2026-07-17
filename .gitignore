@@ -46,6 +46,8 @@ smtp.local.ps1
 smtp.local.*.ps1
 hms.local.ps1
 hms.local.*.ps1
+hms.local.sh
+hms.local.*.sh
 *.pfx
 *.p12
 *.pem
