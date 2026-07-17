@@ -1,132 +1,222 @@
+# =============================================================================
+# HMS Platform — Docker Compose
+# =============================================================================
+# Usage:
+#   Production: docker compose --profile prod up --build -d
+#   Development: docker compose --profile dev up --build -d
+#   With external infra: docker compose --profile dev-ext up --build -d
+# =============================================================================
+
+x-postgres-env: &postgres-env
+  POSTGRES_USER: ${HMS_POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+
+x-jwt-env: &jwt-env
+  Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
+
+x-api-base: &api-base
+  ASPNETCORE_URLS: http://+:8080
+  ASPNETCORE_ENVIRONMENT: Production
+
+x-healthcheck: &healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 5
+  start_period: 40s
+
+x-resources: &resources
+  resources:
+    limits:
+      memory: 256M
+    reservations:
+      memory: 128M
+
+# =============================================================================
+# Infrastructure services
+# =============================================================================
 services:
   postgres:
     image: postgres:16-alpine
+    <<: *resources
     environment:
-      POSTGRES_USER: ${HMS_POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      <<: *postgres-env
       POSTGRES_DB: hms_identity_db
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
-
-  postgres-init:
-    image: postgres:16-alpine
-    environment:
-      PGPASSWORD: ${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
-    depends_on:
-      - postgres
-    volumes:
-      - ./postgres/init:/seed:ro
-    command: >
-      sh -c "until pg_isready -h postgres -U ${HMS_POSTGRES_USER:-postgres}; do sleep 1; done;
-      psql -h postgres -U ${HMS_POSTGRES_USER:-postgres} -d hms_identity_db -f /seed/01-hms-seed.sql"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HMS_POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   pgadmin:
     image: dpage/pgadmin4:8.14
+    <<: *resources
+    profiles: ["dev", "prod"]
     environment:
       PGADMIN_DEFAULT_EMAIL: ${HMS_PGADMIN_EMAIL:-admin@hms.dev}
       PGADMIN_DEFAULT_PASSWORD: ${HMS_PGADMIN_PASSWORD:?Set HMS_PGADMIN_PASSWORD in deploy/.env}
     ports:
       - "5050:80"
     depends_on:
-      postgres-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     volumes:
       - pgadmin-data:/var/lib/pgadmin
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:3-management-alpine
+    <<: *resources
+    profiles: ["dev", "prod"]
     environment:
       RABBITMQ_DEFAULT_USER: ${HMS_RABBITMQ_USERNAME:?Set HMS_RABBITMQ_USERNAME in deploy/.env}
       RABBITMQ_DEFAULT_PASS: ${HMS_RABBITMQ_PASSWORD:?Set HMS_RABBITMQ_PASSWORD in deploy/.env}
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   redis:
     image: redis:7-alpine
+    <<: *resources
+    profiles: ["dev", "prod"]
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
+# =============================================================================
+# Backend API services
+# =============================================================================
   identity-api:
     build:
       context: ../backend
-      dockerfile: src/Services/Identity/HMS.Identity.Api/Dockerfile
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Identity/HMS.Identity.Api/HMS.Identity.Api.csproj
+        SERVICE_DLL: HMS.Identity.Api.dll
+    <<: *resources
     environment:
-      ASPNETCORE_URLS: http://+:8080
+      <<: *api-base
+      <<: *jwt-env
       ConnectionStrings__IdentityDb: Host=postgres;Port=5432;Database=hms_identity_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
-      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
       Seed__DefaultPassword: ${HMS_SEED_DEFAULT_PASSWORD:?Set HMS_SEED_DEFAULT_PASSWORD in deploy/.env}
     ports:
       - "5101:8080"
     depends_on:
-      postgres-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
 
   patients-api:
     build:
       context: ../backend
-      dockerfile: src/Services/Patients/HMS.Patients.Api/Dockerfile
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Patients/HMS.Patients.Api/HMS.Patients.Api.csproj
+        SERVICE_DLL: HMS.Patients.Api.dll
+    <<: *resources
     environment:
-      ASPNETCORE_URLS: http://+:8080
+      <<: *api-base
+      <<: *jwt-env
       ConnectionStrings__PatientManagementDb: Host=postgres;Port=5432;Database=hms_patient_management_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
-      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
       RabbitMq__HostName: rabbitmq
       RabbitMq__Username: ${HMS_RABBITMQ_USERNAME:?Set HMS_RABBITMQ_USERNAME in deploy/.env}
       RabbitMq__Password: ${HMS_RABBITMQ_PASSWORD:?Set HMS_RABBITMQ_PASSWORD in deploy/.env}
     ports:
       - "5102:8080"
     depends_on:
-      postgres-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_started
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
 
   clinical-api:
     build:
       context: ../backend
-      dockerfile: src/Services/Clinical/HMS.Clinical.Api/Dockerfile
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Clinical/HMS.Clinical.Api/HMS.Clinical.Api.csproj
+        SERVICE_DLL: HMS.Clinical.Api.dll
+    <<: *resources
     environment:
-      ASPNETCORE_URLS: http://+:8080
+      <<: *api-base
+      <<: *jwt-env
       ConnectionStrings__ClinicalDb: Host=postgres;Port=5432;Database=hms_clinical_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
-      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
     ports:
       - "5104:8080"
     depends_on:
-      postgres-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
 
   billing-api:
     build:
       context: ../backend
-      dockerfile: src/Services/Billing/HMS.Billing.Api/Dockerfile
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/Services/Billing/HMS.Billing.Api/HMS.Billing.Api.csproj
+        SERVICE_DLL: HMS.Billing.Api.dll
+    <<: *resources
     environment:
-      ASPNETCORE_URLS: http://+:8080
+      <<: *api-base
+      <<: *jwt-env
       ConnectionStrings__BillingDb: Host=postgres;Port=5432;Database=hms_billing_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
-      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
     ports:
       - "5105:8080"
     depends_on:
-      postgres-init:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
 
   api-gateway:
     build:
       context: ../backend
-      dockerfile: src/ApiGateway/HMS.ApiGateway/Dockerfile
+      dockerfile: Dockerfile
+      args:
+        SERVICE_PROJECT: src/ApiGateway/HMS.ApiGateway/HMS.ApiGateway.csproj
+        SERVICE_DLL: HMS.ApiGateway.dll
+    <<: *resources
     environment:
-      ASPNETCORE_URLS: http://+:8080
-      Security__Jwt__SigningKey: ${HMS_JWT_SIGNING_KEY:?Set HMS_JWT_SIGNING_KEY in deploy/.env}
+      <<: *api-base
+      <<: *jwt-env
     ports:
       - "5200:8080"
     depends_on:
-      - identity-api
-      - patients-api
-      - clinical-api
-      - billing-api
+      identity-api:
+        condition: service_started
+      patients-api:
+        condition: service_started
+      clinical-api:
+        condition: service_started
+      billing-api:
+        condition: service_started
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
 
+# =============================================================================
+# Frontend
+# =============================================================================
   hms-web:
     build:
       context: ../frontend/hms-web
@@ -134,7 +224,8 @@ services:
     ports:
       - "4200:80"
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_started
 
 volumes:
   postgres-data:
