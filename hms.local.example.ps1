@@ -5,6 +5,7 @@ $env:HMS_POSTGRES_PASSWORD = "replace-with-your-postgres-password"
 
 $env:Security__Jwt__SigningKey = "replace-with-at-least-32-random-characters"
 $env:Seed__DefaultPassword = "replace-with-a-local-dev-password"
+$env:Database__ResetLegacySchemaOnStartup = "true"
 
 # Optional local RabbitMQ configuration. Leave unset when RabbitMQ is not running locally.
 # $env:HMS_RABBITMQ_HOST = "localhost"

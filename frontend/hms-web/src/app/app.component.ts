@@ -29,7 +29,7 @@ import {
 } from './api.service';
 
 type Section = 'dashboard' | 'operations' | 'admin' | 'enterprise' | 'employees' | 'patients' | 'insurance' | 'appointments' | 'clinical' | 'billing';
-type Modal = 'role' | 'newRole' | 'permission' | 'department' | 'insurance' | 'employee' | 'patient' | 'appointment' | 'encounter' | 'vitals' | 'diagnosis' | 'prescription' | 'lab' | 'invoice' | 'payment' | 'enterpriseRecord' | null;
+type Modal = 'role' | 'newRole' | 'permission' | 'department' | 'insurance' | 'employee' | 'employeeEdit' | 'patient' | 'patientView' | 'patientEdit' | 'patientHistory' | 'appointment' | 'encounter' | 'vitals' | 'diagnosis' | 'prescription' | 'lab' | 'invoice' | 'payment' | 'enterpriseRecord' | 'enterpriseRecordEdit' | null;
 type AdminTab = 'users' | 'roles' | 'permissions' | 'departments' | 'emails';
 type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'labs';
 type BillingTab = 'invoices' | 'payments' | 'receipts';
@@ -51,6 +51,46 @@ interface Toast {
   id: number;
   kind: ToastKind;
   message: string;
+}
+
+interface EncounterForm {
+  patientId: string;
+  doctorId: string;
+  visitType: string;
+  chiefComplaint: string;
+  assessment: string;
+  plan: string;
+}
+
+interface VitalsForm {
+  patientId: string;
+  temperatureC: number | null;
+  pulse: number | null;
+  respiratoryRate: number | null;
+  bloodPressure: string;
+  weightKg: number | null;
+  heightCm: number | null;
+}
+
+interface DiagnosisForm {
+  patientId: string;
+  doctorId: string;
+  code: string;
+  description: string;
+  severity: string;
+}
+
+interface PrescriptionForm {
+  patientId: string;
+  doctorId: string;
+  medication: string;
+  instructions: string;
+}
+
+interface LabForm {
+  patientId: string;
+  doctorId: string;
+  testName: string;
 }
 
 @Component({
@@ -76,6 +116,7 @@ export class AppComponent {
   saving = signal(false);
   search = signal('');
   cameraOn = signal(false);
+  showLoginPassword = signal(false);
   toasts = signal<Toast[]>([]);
   setupMode = signal(false);
   forgotMode = signal(false);
@@ -105,6 +146,11 @@ export class AppComponent {
   emailOutbox = signal<EmailOutboxMessage[]>([]);
   enterpriseRecords = signal<EnterpriseRecord[]>([]);
   lastReceipt = signal<Receipt | null>(null);
+  selectedPatient = signal<Patient | null>(null);
+  editingEmployeeId = '';
+  editingPatientId = '';
+  editingEnterpriseRecordId = '';
+  readonly visitTypes = ['Outpatient', 'Follow-up', 'Emergency', 'Inpatient Review', 'Procedure Review', 'Teleconsultation'];
 
   employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
   newRoleForm = { role: '', description: '', permissionsText: '' };
@@ -118,30 +164,144 @@ export class AppComponent {
     doctorId: '',
     startsAtUtc: this.localDateTimeValue(1),
     reason: '',
-    department: 'Outpatient',
+    department: '',
     appointmentType: 'Consultation',
     priority: 'Normal',
     notes: '',
   };
-  encounterForm = { patientId: '', doctorId: '', visitType: 'Outpatient', chiefComplaint: '', assessment: '', plan: '' };
-  vitalsForm = { patientId: '', temperatureC: 37, pulse: 80, respiratoryRate: 18, bloodPressure: '120/80', weightKg: 60, heightCm: 165 };
-  diagnosisForm = { patientId: '', doctorId: '', code: '', description: '', severity: 'Mild' };
-  prescriptionForm = { patientId: '', doctorId: '', medication: '', instructions: '' };
-  labForm = { patientId: '', doctorId: '', testName: '' };
+  encounterForm: EncounterForm = this.emptyEncounterForm();
+  vitalsForm: VitalsForm = this.emptyVitalsForm();
+  diagnosisForm: DiagnosisForm = this.emptyDiagnosisForm();
+  prescriptionForm: PrescriptionForm = this.emptyPrescriptionForm();
+  labForm: LabForm = this.emptyLabForm();
   invoiceForm = { patientId: '', description: 'Outpatient service invoice', serviceCode: 'CONS', serviceDescription: 'General consultation', quantity: 1, unitPrice: 350, lineDiscount: 0, discount: 0, tax: 0, paymentType: 'Cash', insuranceProvider: '' };
-  paymentForm = { invoiceId: '', amount: 0, method: 'Cash', reference: '', receivedBy: 'Cashier' };
+  paymentForm = { invoiceId: '', amount: 0, method: '', reference: '', receivedBy: 'Cashier' };
   enterpriseRecordForm = { area: 'Pharmacy', patientId: '', title: '', department: 'Pharmacy', owner: '', priority: 'Normal', status: 'Open', amount: 0, dueAtUtc: this.localDateTimeValue(1), details: '' };
 
   readonly session = computed(() => this.api.session());
-  readonly doctors = computed(() => this.employees().filter((employee) => employee.role === 'DOCTOR'));
+  readonly doctors = computed<Employee[]>(() => {
+    const profiles = this.doctorProfiles();
+    if (profiles.length) {
+      return profiles.map((doctor) => ({
+        id: doctor.id,
+        employeeNo: '',
+        firstName: doctor.firstName,
+        lastName: doctor.lastName,
+        emailAddress: doctor.emailAddress,
+        role: 'DOCTOR',
+        permission: '',
+        department: doctor.department,
+        specialization: doctor.specialization,
+        isActive: doctor.isActive,
+        passwordSetupCompleted: true,
+      }));
+    }
+
+    return this.employees().filter((employee) => employee.role === 'DOCTOR');
+  });
+  readonly assignedDoctorPatientIds = computed(() => {
+    const doctorId = this.loggedDoctorId();
+    if (!doctorId) {
+      return new Set<string>();
+    }
+
+    return new Set(this.appointments()
+      .filter((appointment) => appointment.doctorId === doctorId)
+      .map((appointment) => appointment.patientId));
+  });
+  readonly visiblePatients = computed(() => {
+    if (!this.hasRole('DOCTOR')) {
+      return this.patients();
+    }
+
+    const assignedPatientIds = this.assignedDoctorPatientIds();
+    return this.patients().filter((patient) => assignedPatientIds.has(patient.id));
+  });
+  readonly visibleAppointments = computed(() => {
+    if (!this.hasRole('DOCTOR')) {
+      return this.appointments();
+    }
+
+    const doctorId = this.loggedDoctorId();
+    return this.appointments().filter((appointment) => appointment.doctorId === doctorId);
+  });
+  readonly clinicalKpis = computed(() => {
+    const patients = this.visiblePatients();
+    const appointments = this.visibleAppointments();
+    const activeQueue = appointments.filter((appointment) => ['Scheduled', 'Waiting', 'In Service'].includes(appointment.queueStatus));
+    const patientIds = new Set(patients.map((patient) => patient.id));
+
+    return [
+      { label: this.hasRole('DOCTOR') ? 'My Patients' : 'Patients', value: patients.length, hint: this.hasRole('DOCTOR') ? 'Patients assigned through appointment queue' : 'Patients available in the clinical workspace', tone: 'bg-blue-50 text-blue-700' },
+      { label: 'Active Queue', value: activeQueue.length, hint: 'Scheduled, waiting, or in-service patients', tone: 'bg-cyan-50 text-cyan-700' },
+      { label: 'Patient History', value: this.encounters().filter((item) => patientIds.has(item.patientId)).length + this.vitals().filter((item) => patientIds.has(item.patientId)).length + this.diagnoses().filter((item) => patientIds.has(item.patientId)).length, hint: 'Clinical records available for assigned patients', tone: 'bg-emerald-50 text-emerald-700' },
+      { label: 'Open Orders', value: this.labRequests().filter((item) => patientIds.has(item.patientId) && item.status !== 'Completed').length + this.prescriptions().filter((item) => patientIds.has(item.patientId)).length, hint: 'Lab and prescription workload', tone: 'bg-violet-50 text-violet-700' },
+    ];
+  });
+  readonly doctorClinicalChart = computed(() => this.chartRows([
+    ['Encounters', this.visibleClinicalRows(this.encounters()).length],
+    ['Vitals', this.visibleClinicalRows(this.vitals()).length],
+    ['Diagnoses', this.visibleClinicalRows(this.diagnoses()).length],
+    ['Rx', this.visibleClinicalRows(this.prescriptions()).length],
+    ['Labs', this.visibleClinicalRows(this.labRequests()).length],
+  ]));
   readonly activeTitle = computed(() => this.active() === 'admin' ? 'Administration' : this.title(this.active()));
-  readonly stats = computed(() => [
-    { label: 'Employees', value: this.employees().length, tone: 'bg-blue-50 text-blue-700' },
-    { label: 'Patients', value: this.patients().length, tone: 'bg-emerald-50 text-emerald-700' },
-    { label: 'Queued Today', value: this.appointments().filter((appointment) => ['Scheduled', 'Waiting', 'In Service'].includes(appointment.queueStatus)).length, tone: 'bg-cyan-50 text-cyan-700' },
-    { label: 'Clinical Orders', value: this.prescriptions().length + this.labRequests().length, tone: 'bg-violet-50 text-violet-700' },
-    { label: 'Open Balance', value: this.invoices().filter((invoice) => invoice.status !== 'Paid').reduce((sum, invoice) => sum + invoice.balance, 0), tone: 'bg-amber-50 text-amber-700' },
-  ]);
+  readonly stats = computed(() => {
+    const role = this.session()?.role ?? '';
+    const today = new Date().toISOString().slice(0, 10);
+    const activeQueue = this.appointments().filter((appointment) => ['Scheduled', 'Waiting', 'In Service'].includes(appointment.queueStatus));
+    const openBalance = this.invoices().filter((invoice) => invoice.status !== 'Paid').reduce((sum, invoice) => sum + invoice.balance, 0);
+    const currentDoctorId = this.session()?.employeeId;
+
+    if (role === 'RECEPTIONIST') {
+      return [
+        { label: 'Registered Patients', value: this.patients().length, tone: 'bg-emerald-50 text-emerald-700' },
+        { label: 'Today Queue', value: activeQueue.length, tone: 'bg-cyan-50 text-cyan-700' },
+        { label: 'Appointments Today', value: this.appointments().filter((item) => item.startsAtUtc.slice(0, 10) === today).length, tone: 'bg-blue-50 text-blue-700' },
+        { label: 'Insurance Companies', value: this.insuranceCompanies().length, tone: 'bg-violet-50 text-violet-700' },
+        { label: 'Available Beds', value: this.beds().filter((bed) => bed.isAvailable).length, tone: 'bg-amber-50 text-amber-700' },
+      ];
+    }
+
+    if (role === 'DOCTOR') {
+      const assigned = this.appointments().filter((item) => item.doctorId === currentDoctorId);
+      return [
+        { label: 'Assigned Today', value: assigned.filter((item) => item.startsAtUtc.slice(0, 10) === today).length, tone: 'bg-blue-50 text-blue-700' },
+        { label: 'Waiting', value: assigned.filter((item) => ['Scheduled', 'Waiting'].includes(item.queueStatus)).length, tone: 'bg-cyan-50 text-cyan-700' },
+        { label: 'Encounters', value: this.encounters().filter((item) => item.doctorId === currentDoctorId).length, tone: 'bg-emerald-50 text-emerald-700' },
+        { label: 'Prescriptions', value: this.prescriptions().filter((item) => item.doctorId === currentDoctorId).length, tone: 'bg-violet-50 text-violet-700' },
+        { label: 'Lab Requests', value: this.labRequests().filter((item) => item.doctorId === currentDoctorId).length, tone: 'bg-amber-50 text-amber-700' },
+      ];
+    }
+
+    if (['ACCOUNTANT', 'CASHIER'].includes(role)) {
+      return [
+        { label: 'Invoices', value: this.invoices().length, tone: 'bg-blue-50 text-blue-700' },
+        { label: 'Collected', value: this.money(this.totalCollected()), tone: 'bg-emerald-50 text-emerald-700' },
+        { label: 'Open Balance', value: this.money(openBalance), tone: 'bg-amber-50 text-amber-700' },
+        { label: 'Receipts', value: this.receipts().length, tone: 'bg-cyan-50 text-cyan-700' },
+        { label: 'Paid Invoices', value: this.invoices().filter((invoice) => invoice.status === 'Paid').length, tone: 'bg-violet-50 text-violet-700' },
+      ];
+    }
+
+    if (['NURSE', 'LAB_TECHNICIAN', 'PHARMACIST'].includes(role)) {
+      return [
+        { label: 'Patients', value: this.patients().length, tone: 'bg-emerald-50 text-emerald-700' },
+        { label: 'Vitals', value: this.vitals().length, tone: 'bg-blue-50 text-blue-700' },
+        { label: 'Prescriptions', value: this.prescriptions().length, tone: 'bg-violet-50 text-violet-700' },
+        { label: 'Lab Requests', value: this.labRequests().length, tone: 'bg-cyan-50 text-cyan-700' },
+        { label: 'Open Work', value: this.enterpriseRecords().filter((record) => !['Completed', 'Closed'].includes(record.status)).length, tone: 'bg-amber-50 text-amber-700' },
+      ];
+    }
+
+    return [
+      { label: 'Employees', value: this.employees().length, tone: 'bg-blue-50 text-blue-700' },
+      { label: 'Patients', value: this.patients().length, tone: 'bg-emerald-50 text-emerald-700' },
+      { label: 'Queued Today', value: activeQueue.length, tone: 'bg-cyan-50 text-cyan-700' },
+      { label: 'Clinical Orders', value: this.prescriptions().length + this.labRequests().length, tone: 'bg-violet-50 text-violet-700' },
+      { label: 'Open Balance', value: this.money(openBalance), tone: 'bg-amber-50 text-amber-700' },
+    ];
+  });
   readonly queueChart = computed(() => this.chartRows([
     ['Waiting', this.appointments().filter((item) => item.queueStatus === 'Waiting').length],
     ['In Service', this.appointments().filter((item) => item.queueStatus === 'In Service').length],
@@ -299,15 +459,41 @@ export class AppComponent {
     return !!session && (item.roles.includes('ALL') || item.roles.includes(session.role));
   }
 
+  canAccess(section: Section) {
+    const item = this.nav.find((navItem) => navItem.id === section);
+    return item ? this.canSee(item, this.session()) : false;
+  }
+
+  hasRole(...roles: string[]) {
+    const role = this.session()?.role;
+    return !!role && roles.includes(role);
+  }
+
+  loggedDoctorId() {
+    const session = this.session();
+    return session?.role === 'DOCTOR' ? session.employeeId : '';
+  }
+
   load(section: Section) {
+    if (!this.canAccess(section)) {
+      this.toast('error', 'This role is not allowed to open that workspace.');
+      return;
+    }
+
     this.active.set(section);
     this.search.set('');
     this.loadAll();
   }
 
   loadAll() {
+    const session = this.session();
+    if (!session) {
+      return;
+    }
+
     this.loading.set(true);
-    let pending = 21;
+    let pending = 0;
+    let failed = false;
     const done = () => {
       pending -= 1;
       if (pending === 0) {
@@ -316,34 +502,87 @@ export class AppComponent {
       }
     };
     const fail = () => {
-      this.toast('error', 'Some data could not load. Check backend services.');
+      if (!failed) {
+        failed = true;
+        this.toast('error', 'Some data could not load. Check backend services.');
+      }
       done();
     };
+    const load = <T>(request: Observable<T>, next: (res: T) => void) => {
+      pending += 1;
+      request.subscribe({ next: (res) => { next(res); done(); }, error: fail });
+    };
 
-    this.api.getEmployees().subscribe({ next: (res) => { this.employees.set(res.data ?? []); done(); }, error: fail });
-    this.api.getRoles().subscribe({ next: (res) => { this.roles.set(res.data ?? []); done(); }, error: fail });
-    this.api.getPermissions().subscribe({ next: (res) => { this.permissions.set(res.data ?? []); done(); }, error: fail });
-    this.api.getDepartments().subscribe({ next: (res) => { this.departments.set(res.data ?? []); done(); }, error: fail });
-    this.api.getDoctors().subscribe({ next: (res) => { this.doctorProfiles.set(res.data ?? []); done(); }, error: fail });
-    this.api.getPatients().subscribe({ next: (res) => { this.patients.set(res.data ?? []); done(); }, error: fail });
-    this.api.getInsuranceCompanies().subscribe({ next: (res) => { this.insuranceCompanies.set(res.data ?? []); done(); }, error: fail });
-    this.api.getAppointments().subscribe({ next: (res) => { this.appointments.set(res.data ?? []); done(); }, error: fail });
-    this.api.getQueueSummary().subscribe({ next: (res) => { this.queueSummary.set(res.data ?? []); done(); }, error: fail });
-    this.api.getBeds().subscribe({ next: (res) => { this.beds.set(res.data ?? []); done(); }, error: fail });
-    this.api.getEncounters().subscribe({ next: (res) => { this.encounters.set(res.data ?? []); done(); }, error: fail });
-    this.api.getVitals().subscribe({ next: (res) => { this.vitals.set(res.data ?? []); done(); }, error: fail });
-    this.api.getDiagnoses().subscribe({ next: (res) => { this.diagnoses.set(res.data ?? []); done(); }, error: fail });
-    this.api.getPrescriptions().subscribe({ next: (res) => { this.prescriptions.set(res.data ?? []); done(); }, error: fail });
-    this.api.getLabRequests().subscribe({ next: (res) => { this.labRequests.set(res.data ?? []); done(); }, error: fail });
-    this.api.getInvoices().subscribe({ next: (res) => { this.invoices.set(res.data ?? []); done(); }, error: fail });
-    this.api.getPayments().subscribe({ next: (res) => { this.payments.set(res.data ?? []); done(); }, error: fail });
-    this.api.getReceipts().subscribe({ next: (res) => { this.receipts.set(res.data ?? []); done(); }, error: fail });
-    this.api.getServiceStatuses().subscribe({ next: (res) => { this.services.set(res ?? []); done(); }, error: fail });
-    this.api.getEmailOutbox().subscribe({ next: (res) => { this.emailOutbox.set(res.data ?? []); done(); }, error: fail });
-    this.api.getEnterpriseRecords().subscribe({ next: (res) => { this.enterpriseRecords.set(res.data ?? []); done(); }, error: fail });
+    const needsPatients = this.canAccess('patients') || this.canAccess('appointments') || this.canAccess('clinical') || this.canAccess('billing') || this.canAccess('enterprise');
+    const needsAppointments = this.canAccess('appointments') || this.canAccess('patients') || this.canAccess('clinical');
+    const needsClinical = this.canAccess('clinical') || this.canAccess('enterprise');
+    const needsBilling = this.canAccess('billing') || this.canAccess('enterprise');
+    const needsInsurance = this.canAccess('insurance') || this.canAccess('patients') || this.canAccess('billing');
+    const needsEmployees = this.canAccess('employees') || this.canAccess('admin') || this.canAccess('appointments') || this.canAccess('clinical') || this.hasRole('ADMIN', 'HR_MANAGER');
+
+    load(this.api.getDepartments(), (res) => this.departments.set(res.data ?? []));
+    load(this.api.getDoctors(), (res) => this.doctorProfiles.set(res.data ?? []));
+
+    if (needsEmployees) {
+      load(this.api.getEmployees(), (res) => this.employees.set(res.data ?? []));
+    }
+
+    if (this.hasRole('ADMIN', 'HR_MANAGER')) {
+      load(this.api.getRoles(), (res) => this.roles.set(res.data ?? []));
+      load(this.api.getEmailOutbox(), (res) => this.emailOutbox.set(res.data ?? []));
+    }
+
+    if (this.hasRole('ADMIN')) {
+      load(this.api.getPermissions(), (res) => this.permissions.set(res.data ?? []));
+      load(this.api.getServiceStatuses(), (res) => this.services.set(res ?? []));
+    }
+
+    if (needsPatients) {
+      load(this.api.getPatients(), (res) => this.patients.set(res.data ?? []));
+    }
+
+    if (needsInsurance) {
+      load(this.api.getInsuranceCompanies(), (res) => this.insuranceCompanies.set(res.data ?? []));
+    }
+
+    if (needsAppointments) {
+      load(this.api.getAppointments(), (res) => this.appointments.set(res.data ?? []));
+      load(this.api.getQueueSummary(), (res) => this.queueSummary.set(res.data ?? []));
+      load(this.api.getBeds(), (res) => this.beds.set(res.data ?? []));
+    }
+
+    if (needsClinical) {
+      load(this.api.getEncounters(), (res) => this.encounters.set(res.data ?? []));
+      load(this.api.getVitals(), (res) => this.vitals.set(res.data ?? []));
+      load(this.api.getDiagnoses(), (res) => this.diagnoses.set(res.data ?? []));
+      load(this.api.getPrescriptions(), (res) => this.prescriptions.set(res.data ?? []));
+      load(this.api.getLabRequests(), (res) => this.labRequests.set(res.data ?? []));
+      load(this.api.getEnterpriseRecords(), (res) => this.enterpriseRecords.set(res.data ?? []));
+    }
+
+    if (needsBilling) {
+      load(this.api.getInvoices(), (res) => this.invoices.set(res.data ?? []));
+      load(this.api.getPayments(), (res) => this.payments.set(res.data ?? []));
+      load(this.api.getReceipts(), (res) => this.receipts.set(res.data ?? []));
+    }
+
+    if (pending === 0) {
+      this.loading.set(false);
+    }
+  }
+
+  openCreateEmployee() {
+    this.editingEmployeeId = '';
+    this.employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
+    this.modal.set('employee');
   }
 
   createEmployee() {
+    if (!this.employeeForm.firstName.trim() || !this.employeeForm.lastName.trim() || !this.employeeForm.emailAddress.trim() || !this.employeeForm.role.trim()) {
+      this.toast('error', 'First name, last name, email, and role are required.');
+      return;
+    }
+
     this.saving.set(true);
     this.api.createEmployee(this.employeeForm).subscribe({
       next: (res) => {
@@ -357,6 +596,53 @@ export class AppComponent {
       error: () => {
         this.saving.set(false);
         this.toast('error', 'User creation failed. Check required fields and duplicate email.');
+      },
+    });
+  }
+
+  openEmployeeEditor(employee: Employee) {
+    this.editingEmployeeId = employee.id;
+    this.employeeForm = {
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      emailAddress: employee.emailAddress,
+      phone: employee.phone ?? '',
+      role: employee.role,
+      department: employee.department ?? '',
+      specialization: employee.specialization ?? '',
+    };
+    this.modal.set('employeeEdit');
+  }
+
+  updateEmployee() {
+    if (!this.editingEmployeeId) {
+      this.toast('error', 'No employee selected for editing.');
+      return;
+    }
+
+    if (!this.employeeForm.firstName.trim() || !this.employeeForm.lastName.trim() || !this.employeeForm.emailAddress.trim() || !this.employeeForm.role.trim()) {
+      this.toast('error', 'First name, last name, email, and role are required.');
+      return;
+    }
+
+    this.save(this.api.updateEmployee(this.editingEmployeeId, this.employeeForm), 'Employee updated.', () => {
+      this.editingEmployeeId = '';
+      this.employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
+    });
+  }
+
+  toggleEmployeeStatus(employee: Employee) {
+    const nextState = !employee.isActive;
+    this.saving.set(true);
+    this.api.updateEmployeeStatus(employee.id, nextState).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.toast('success', nextState ? 'Employee enabled.' : 'Employee disabled.');
+        this.loadAll();
+      },
+      error: () => {
+        this.saving.set(false);
+        this.toast('error', 'Employee status could not be updated.');
       },
     });
   }
@@ -386,6 +672,7 @@ export class AppComponent {
 
   openEnterpriseRecord() {
     const module = this.activeEnterpriseModule();
+    this.editingEnterpriseRecordId = '';
     this.enterpriseRecordForm = {
       area: module.area,
       patientId: '',
@@ -402,6 +689,11 @@ export class AppComponent {
   }
 
   createEnterpriseRecord() {
+    if (!this.enterpriseRecordForm.title.trim()) {
+      this.toast('error', 'Record title is required.');
+      return;
+    }
+
     const payload = {
       ...this.enterpriseRecordForm,
       patientId: this.enterpriseRecordForm.patientId || undefined,
@@ -410,6 +702,48 @@ export class AppComponent {
     };
 
     this.save(this.api.createEnterpriseRecord(payload), 'Operational record saved.', () => {
+      const module = this.activeEnterpriseModule();
+      this.enterpriseRecordForm = { area: module.area, patientId: '', title: '', department: module.department, owner: module.owner, priority: 'Normal', status: 'Open', amount: 0, dueAtUtc: this.localDateTimeValue(1), details: '' };
+    });
+  }
+
+  openEnterpriseRecordEditor(record: EnterpriseRecord) {
+    this.editingEnterpriseRecordId = record.id;
+    this.enterpriseRecordForm = {
+      area: record.area,
+      patientId: record.patientId ?? '',
+      title: record.title,
+      department: record.department,
+      owner: record.owner,
+      priority: record.priority,
+      status: record.status,
+      amount: record.amount,
+      dueAtUtc: this.toLocalDateTimeInput(record.dueAtUtc),
+      details: record.details,
+    };
+    this.modal.set('enterpriseRecordEdit');
+  }
+
+  updateEnterpriseRecord() {
+    if (!this.editingEnterpriseRecordId) {
+      this.toast('error', 'No operational record selected for editing.');
+      return;
+    }
+
+    if (!this.enterpriseRecordForm.title.trim()) {
+      this.toast('error', 'Record title is required.');
+      return;
+    }
+
+    const payload = {
+      ...this.enterpriseRecordForm,
+      patientId: this.enterpriseRecordForm.patientId || undefined,
+      amount: Number(this.enterpriseRecordForm.amount) || 0,
+      dueAtUtc: new Date(this.enterpriseRecordForm.dueAtUtc).toISOString(),
+    };
+
+    this.save(this.api.updateEnterpriseRecord(this.editingEnterpriseRecordId, payload), 'Operational record updated.', () => {
+      this.editingEnterpriseRecordId = '';
       const module = this.activeEnterpriseModule();
       this.enterpriseRecordForm = { area: module.area, patientId: '', title: '', department: module.department, owner: module.owner, priority: 'Normal', status: 'Open', amount: 0, dueAtUtc: this.localDateTimeValue(1), details: '' };
     });
@@ -488,7 +822,18 @@ export class AppComponent {
     });
   }
 
+  openCreatePatient() {
+    this.editingPatientId = '';
+    this.selectedPatient.set(null);
+    this.patientForm = this.emptyPatient();
+    this.modal.set('patient');
+  }
+
   createPatient() {
+    if (!this.validatePatientForm()) {
+      return;
+    }
+
     const payload = {
       ...this.patientForm,
       insuranceCompanyId: this.patientForm.insuranceCompanyId || undefined,
@@ -498,11 +843,76 @@ export class AppComponent {
     });
   }
 
+  openPatientDetails(patient: Patient) {
+    this.selectedPatient.set(patient);
+    this.modal.set('patientView');
+  }
+
+  openPatientEditor(patient: Patient) {
+    this.editingPatientId = patient.id;
+    this.selectedPatient.set(patient);
+    this.patientForm = this.patientToForm(patient);
+    this.modal.set('patientEdit');
+  }
+
+  updatePatient() {
+    if (!this.editingPatientId) {
+      this.toast('error', 'No patient selected for editing.');
+      return;
+    }
+
+    if (!this.validatePatientForm()) {
+      return;
+    }
+
+    const payload = {
+      ...this.patientForm,
+      insuranceCompanyId: this.patientForm.insuranceCompanyId || undefined,
+    };
+
+    this.save(this.api.updatePatient(this.editingPatientId, payload), 'Patient information updated.', () => {
+      this.editingPatientId = '';
+      this.selectedPatient.set(null);
+      this.patientForm = this.emptyPatient();
+    });
+  }
+
+  openAppointmentModal() {
+    this.appointmentForm = {
+      patientId: '',
+      doctorId: '',
+      startsAtUtc: this.localDateTimeValue(1),
+      reason: '',
+      department: '',
+      appointmentType: 'Consultation',
+      priority: 'Normal',
+      notes: '',
+    };
+    this.modal.set('appointment');
+  }
+
   createAppointment() {
+    if (!this.appointmentForm.patientId || !this.appointmentForm.department || !this.appointmentForm.doctorId || !this.appointmentForm.reason.trim()) {
+      this.toast('error', 'Select patient, department, doctor, and enter the visit reason.');
+      return;
+    }
+
+    if (!this.appointmentDoctors().some((doctor) => doctor.id === this.appointmentForm.doctorId)) {
+      this.toast('error', 'Selected doctor does not belong to the selected department.');
+      return;
+    }
+
     this.save(this.api.createAppointment({ ...this.appointmentForm, startsAtUtc: new Date(this.appointmentForm.startsAtUtc).toISOString() }), 'Appointment booked.', () => {
-      this.appointmentForm.reason = '';
-      this.appointmentForm.notes = '';
-      this.appointmentForm.startsAtUtc = this.localDateTimeValue(1);
+      this.appointmentForm = {
+        patientId: '',
+        doctorId: '',
+        startsAtUtc: this.localDateTimeValue(1),
+        reason: '',
+        department: '',
+        appointmentType: 'Consultation',
+        priority: 'Normal',
+        notes: '',
+      };
     });
   }
 
@@ -525,35 +935,117 @@ export class AppComponent {
     });
   }
 
+  openClinicalModal(kind: 'encounter' | 'vitals' | 'diagnosis' | 'prescription' | 'lab') {
+    if (!this.clinicalPatientOptions().length) {
+      this.toast('info', 'No assigned patients are available for clinical entry.');
+      return;
+    }
+
+    if (kind === 'encounter') this.encounterForm = this.emptyEncounterForm();
+    if (kind === 'vitals') this.vitalsForm = this.emptyVitalsForm();
+    if (kind === 'diagnosis') this.diagnosisForm = this.emptyDiagnosisForm();
+    if (kind === 'prescription') this.prescriptionForm = this.emptyPrescriptionForm();
+    if (kind === 'lab') this.labForm = this.emptyLabForm();
+
+    this.modal.set(kind);
+  }
+
   createEncounter() {
-    this.save(this.api.createEncounter(this.encounterForm), 'Clinical encounter saved.', () => {
-      this.encounterForm.chiefComplaint = '';
-      this.encounterForm.assessment = '';
-      this.encounterForm.plan = '';
+    const doctorId = this.resolveClinicalDoctorId(this.encounterForm.doctorId);
+    if (!this.validateRequiredClinicalFields([
+      [this.encounterForm.patientId, 'Select the patient.'],
+      [doctorId, 'Select the doctor.'],
+      [this.encounterForm.visitType, 'Select the visit type.'],
+      [this.encounterForm.chiefComplaint, 'Chief complaint is required.'],
+      [this.encounterForm.assessment, 'Assessment is required.'],
+      [this.encounterForm.plan, 'Plan is required.'],
+    ])) {
+      return;
+    }
+
+    this.save(this.api.createEncounter({ ...this.encounterForm, doctorId }), 'Clinical encounter saved.', () => {
+      this.encounterForm = this.emptyEncounterForm();
     });
   }
 
   createVitals() {
-    this.save(this.api.createVitals(this.vitalsForm), 'Vitals recorded.', () => {});
+    if (!this.validateRequiredClinicalFields([
+      [this.vitalsForm.patientId, 'Select the patient.'],
+      [this.vitalsForm.bloodPressure, 'Blood pressure is required.'],
+    ])) {
+      return;
+    }
+
+    const temperatureC = Number(this.vitalsForm.temperatureC);
+    const pulse = Number(this.vitalsForm.pulse);
+    const respiratoryRate = Number(this.vitalsForm.respiratoryRate);
+    const weightKg = Number(this.vitalsForm.weightKg);
+    const heightCm = Number(this.vitalsForm.heightCm);
+
+    if (!this.validRange(temperatureC, 30, 45, 'Temperature must be between 30 and 45 C.')) return;
+    if (!this.validRange(pulse, 20, 240, 'Pulse must be between 20 and 240.')) return;
+    if (!this.validRange(respiratoryRate, 5, 80, 'Respiratory rate must be between 5 and 80.')) return;
+    if (!this.validRange(weightKg, 1, 350, 'Weight must be between 1 and 350 kg.')) return;
+    if (!this.validRange(heightCm, 30, 250, 'Height must be between 30 and 250 cm.')) return;
+
+    this.save(this.api.createVitals({
+      patientId: this.vitalsForm.patientId,
+      temperatureC,
+      pulse,
+      respiratoryRate,
+      bloodPressure: this.vitalsForm.bloodPressure.trim(),
+      weightKg,
+      heightCm,
+    }), 'Vitals recorded.', () => {
+      this.vitalsForm = this.emptyVitalsForm();
+    });
   }
 
   createDiagnosis() {
-    this.save(this.api.createDiagnosis(this.diagnosisForm), 'Diagnosis added.', () => {
-      this.diagnosisForm.code = '';
-      this.diagnosisForm.description = '';
+    const doctorId = this.resolveClinicalDoctorId(this.diagnosisForm.doctorId);
+    if (!this.validateRequiredClinicalFields([
+      [this.diagnosisForm.patientId, 'Select the patient.'],
+      [doctorId, 'Select the doctor.'],
+      [this.diagnosisForm.code, 'Diagnosis code is required.'],
+      [this.diagnosisForm.description, 'Diagnosis description is required.'],
+      [this.diagnosisForm.severity, 'Select the severity.'],
+    ])) {
+      return;
+    }
+
+    this.save(this.api.createDiagnosis({ ...this.diagnosisForm, doctorId }), 'Diagnosis added.', () => {
+      this.diagnosisForm = this.emptyDiagnosisForm();
     });
   }
 
   createPrescription() {
-    this.save(this.api.createPrescription(this.prescriptionForm), 'Prescription issued.', () => {
-      this.prescriptionForm.medication = '';
-      this.prescriptionForm.instructions = '';
+    const doctorId = this.resolveClinicalDoctorId(this.prescriptionForm.doctorId);
+    if (!this.validateRequiredClinicalFields([
+      [this.prescriptionForm.patientId, 'Select the patient.'],
+      [doctorId, 'Select the doctor.'],
+      [this.prescriptionForm.medication, 'Medication is required.'],
+      [this.prescriptionForm.instructions, 'Prescription instructions are required.'],
+    ])) {
+      return;
+    }
+
+    this.save(this.api.createPrescription({ ...this.prescriptionForm, doctorId }), 'Prescription issued.', () => {
+      this.prescriptionForm = this.emptyPrescriptionForm();
     });
   }
 
   createLabRequest() {
-    this.save(this.api.createLabRequest(this.labForm), 'Lab request created.', () => {
-      this.labForm.testName = '';
+    const doctorId = this.resolveClinicalDoctorId(this.labForm.doctorId);
+    if (!this.validateRequiredClinicalFields([
+      [this.labForm.patientId, 'Select the patient.'],
+      [doctorId, 'Select the doctor.'],
+      [this.labForm.testName, 'Lab test name is required.'],
+    ])) {
+      return;
+    }
+
+    this.save(this.api.createLabRequest({ ...this.labForm, doctorId }), 'Lab request created.', () => {
+      this.labForm = this.emptyLabForm();
     });
   }
 
@@ -587,7 +1079,45 @@ export class AppComponent {
     });
   }
 
+  openPaymentModal() {
+    this.paymentForm = { invoiceId: '', amount: 0, method: '', reference: '', receivedBy: 'Cashier' };
+    this.modal.set('payment');
+  }
+
   recordPayment() {
+    const invoice = this.invoiceFor(this.paymentForm.invoiceId);
+    const amount = Number(this.paymentForm.amount);
+
+    if (!invoice) {
+      this.toast('error', 'Select an unpaid invoice before recording payment.');
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      this.toast('error', 'Payment amount must be greater than zero.');
+      return;
+    }
+
+    if (amount > invoice.balance) {
+      this.toast('error', 'Payment amount cannot exceed the invoice balance.');
+      return;
+    }
+
+    if (!this.paymentForm.method.trim()) {
+      this.toast('error', 'Select the payment method.');
+      return;
+    }
+
+    if (this.paymentForm.method !== 'Cash' && !this.paymentForm.reference.trim()) {
+      this.toast('error', 'Reference is required for non-cash payments.');
+      return;
+    }
+
+    if (!this.paymentForm.receivedBy.trim()) {
+      this.toast('error', 'Received by is required.');
+      return;
+    }
+
     this.saving.set(true);
     this.api.recordPayment(this.paymentForm).subscribe({
       next: (res) => {
@@ -676,7 +1206,10 @@ export class AppComponent {
 
   doctorName(id: string) {
     const doctor = this.employees().find((item) => item.id === id);
-    return doctor ? `${doctor.firstName} ${doctor.lastName}` : id;
+    if (doctor) return `${doctor.firstName} ${doctor.lastName}`;
+
+    const profile = this.doctorProfiles().find((item) => item.id === id);
+    return profile ? `${profile.firstName} ${profile.lastName}` : id;
   }
 
   employeeById(id: string) {
@@ -685,6 +1218,104 @@ export class AppComponent {
 
   patientById(id: string) {
     return this.patients().find((patient) => patient.id === id);
+  }
+
+  clinicalPatientOptions() {
+    return this.visiblePatients();
+  }
+
+  appointmentDoctorCards() {
+    if (!this.hasRole('DOCTOR')) {
+      return this.doctors();
+    }
+
+    const doctorId = this.loggedDoctorId();
+    return this.doctors().filter((doctor) => doctor.id === doctorId);
+  }
+
+  visibleClinicalRows<T extends { patientId: string }>(rows: T[]) {
+    if (!this.hasRole('DOCTOR')) {
+      return rows;
+    }
+
+    const assignedPatientIds = this.assignedDoctorPatientIds();
+    return rows.filter((row) => assignedPatientIds.has(row.patientId));
+  }
+
+  currentClinicalRows() {
+    if (this.clinicalTab() === 'encounters') return this.visibleClinicalRows(this.encounters());
+    if (this.clinicalTab() === 'vitals') return this.visibleClinicalRows(this.vitals());
+    if (this.clinicalTab() === 'diagnoses') return this.visibleClinicalRows(this.diagnoses());
+    if (this.clinicalTab() === 'prescriptions') return this.visibleClinicalRows(this.prescriptions());
+    return this.visibleClinicalRows(this.labRequests());
+  }
+
+  openPatientHistory(patientOrId: Patient | string) {
+    const patient = typeof patientOrId === 'string' ? this.patientById(patientOrId) : patientOrId;
+    if (!patient) {
+      this.toast('error', 'Patient record could not be found.');
+      return;
+    }
+
+    if (this.hasRole('DOCTOR') && !this.assignedDoctorPatientIds().has(patient.id)) {
+      this.toast('error', 'This patient is not assigned to the logged-in doctor.');
+      return;
+    }
+
+    this.selectedPatient.set(patient);
+    this.modal.set('patientHistory');
+  }
+
+  patientAppointments(patientId: string) {
+    return this.appointments()
+      .filter((appointment) => appointment.patientId === patientId)
+      .sort((a, b) => new Date(b.startsAtUtc).getTime() - new Date(a.startsAtUtc).getTime());
+  }
+
+  patientEncounters(patientId: string) {
+    return this.encounters()
+      .filter((encounter) => encounter.patientId === patientId)
+      .sort((a, b) => new Date(b.encounterAtUtc).getTime() - new Date(a.encounterAtUtc).getTime());
+  }
+
+  patientVitals(patientId: string) {
+    return this.vitals()
+      .filter((vital) => vital.patientId === patientId)
+      .sort((a, b) => new Date(b.recordedAtUtc).getTime() - new Date(a.recordedAtUtc).getTime());
+  }
+
+  patientDiagnoses(patientId: string) {
+    return this.diagnoses()
+      .filter((diagnosis) => diagnosis.patientId === patientId)
+      .sort((a, b) => new Date(b.diagnosedAtUtc).getTime() - new Date(a.diagnosedAtUtc).getTime());
+  }
+
+  patientPrescriptions(patientId: string) {
+    return this.prescriptions()
+      .filter((prescription) => prescription.patientId === patientId)
+      .sort((a, b) => new Date(b.orderedAtUtc).getTime() - new Date(a.orderedAtUtc).getTime());
+  }
+
+  patientLabRequests(patientId: string) {
+    return this.labRequests()
+      .filter((request) => request.patientId === patientId)
+      .sort((a, b) => new Date(b.orderedAtUtc).getTime() - new Date(a.orderedAtUtc).getTime());
+  }
+
+  patientInvoices(patientId: string) {
+    return this.invoices()
+      .filter((invoice) => invoice.patientId === patientId)
+      .sort((a, b) => new Date(b.dueAtUtc).getTime() - new Date(a.dueAtUtc).getTime());
+  }
+
+  patientHistoryChart(patientId: string) {
+    return this.chartRows([
+      ['Visits', this.patientEncounters(patientId).length],
+      ['Vitals', this.patientVitals(patientId).length],
+      ['Diagnoses', this.patientDiagnoses(patientId).length],
+      ['Rx', this.patientPrescriptions(patientId).length],
+      ['Labs', this.patientLabRequests(patientId).length],
+    ]);
   }
 
   insuranceName(id?: string) {
@@ -696,17 +1327,21 @@ export class AppComponent {
     this.patientForm.insuranceCompanyId = companyId || undefined;
     this.patientForm.insuranceProvider = company?.name ?? '';
     this.patientForm.insurancePlan = company?.coverageType ?? '';
+    this.patientForm.insurancePolicyNumber = '';
   }
 
   appointmentDoctors() {
     const department = this.appointmentForm.department;
-    const filtered = this.doctors().filter((doctor) => !department || doctor.department === department);
-    return filtered.length ? filtered : this.doctors();
+    return this.doctors().filter((doctor) => {
+      if (!doctor.isActive) return false;
+      return !department || doctor.department === department;
+    });
   }
 
   onAppointmentDepartmentChange() {
-    const firstDoctor = this.appointmentDoctors()[0];
-    this.appointmentForm.doctorId = firstDoctor?.id ?? '';
+    if (!this.appointmentDoctors().some((doctor) => doctor.id === this.appointmentForm.doctorId)) {
+      this.appointmentForm.doctorId = '';
+    }
   }
 
   doctorQueueCount(doctorId: string) {
@@ -897,23 +1532,95 @@ export class AppComponent {
 
   private syncDefaultSelections() {
     const firstPatientId = this.patients()[0]?.id ?? '';
-    const firstDoctorId = this.doctors()[0]?.id ?? this.employees()[0]?.id ?? '';
-    const firstInvoice = this.invoices().find((invoice) => invoice.status !== 'Paid') ?? this.invoices()[0];
-    this.appointmentForm.patientId ||= firstPatientId;
-    this.appointmentForm.doctorId ||= firstDoctorId;
-    this.encounterForm.patientId ||= firstPatientId;
-    this.encounterForm.doctorId ||= firstDoctorId;
-    this.vitalsForm.patientId ||= firstPatientId;
-    this.diagnosisForm.patientId ||= firstPatientId;
-    this.diagnosisForm.doctorId ||= firstDoctorId;
-    this.prescriptionForm.patientId ||= firstPatientId;
-    this.prescriptionForm.doctorId ||= firstDoctorId;
-    this.labForm.patientId ||= firstPatientId;
-    this.labForm.doctorId ||= firstDoctorId;
     this.invoiceForm.patientId ||= firstPatientId;
-    this.paymentForm.invoiceId ||= firstInvoice?.id ?? '';
-    this.paymentForm.amount ||= firstInvoice?.balance ?? 0;
     this.invoiceForm.insuranceProvider ||= this.patients().find((patient) => patient.id === this.invoiceForm.patientId)?.insuranceProvider ?? '';
+  }
+
+  private validatePatientForm() {
+    if (!this.patientForm.firstName.trim() || !this.patientForm.lastName.trim() || !this.patientForm.phone.trim() || !this.patientForm.gender.trim()) {
+      this.toast('error', 'First name, last name, phone, and gender are required.');
+      return false;
+    }
+
+    if (this.patientForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.patientForm.email)) {
+      this.toast('error', 'Enter a valid patient email address or leave it empty.');
+      return false;
+    }
+
+    return true;
+  }
+
+  private resolveClinicalDoctorId(selectedDoctorId: string) {
+    return this.loggedDoctorId() || selectedDoctorId;
+  }
+
+  private validateRequiredClinicalFields(fields: Array<[unknown, string]>) {
+    for (const [value, message] of fields) {
+      if (typeof value === 'string' && !value.trim()) {
+        this.toast('error', message);
+        return false;
+      }
+
+      if (value === null || value === undefined) {
+        this.toast('error', message);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private validRange(value: number, min: number, max: number, message: string) {
+    if (!Number.isFinite(value) || value < min || value > max) {
+      this.toast('error', message);
+      return false;
+    }
+
+    return true;
+  }
+
+  private emptyEncounterForm(): EncounterForm {
+    return { patientId: '', doctorId: '', visitType: '', chiefComplaint: '', assessment: '', plan: '' };
+  }
+
+  private emptyVitalsForm(): VitalsForm {
+    return { patientId: '', temperatureC: null, pulse: null, respiratoryRate: null, bloodPressure: '', weightKg: null, heightCm: null };
+  }
+
+  private emptyDiagnosisForm(): DiagnosisForm {
+    return { patientId: '', doctorId: '', code: '', description: '', severity: '' };
+  }
+
+  private emptyPrescriptionForm(): PrescriptionForm {
+    return { patientId: '', doctorId: '', medication: '', instructions: '' };
+  }
+
+  private emptyLabForm(): LabForm {
+    return { patientId: '', doctorId: '', testName: '' };
+  }
+
+  private patientToForm(patient: Patient): Omit<Patient, 'id' | 'mrn'> {
+    return {
+      firstName: patient.firstName,
+      lastName: patient.lastName,
+      email: patient.email ?? '',
+      phone: patient.phone,
+      gender: patient.gender,
+      dateOfBirth: patient.dateOfBirth,
+      nationalId: patient.nationalId ?? '',
+      maritalStatus: patient.maritalStatus ?? 'Single',
+      occupation: patient.occupation ?? '',
+      address: patient.address ?? '',
+      bloodType: patient.bloodType ?? 'O+',
+      insuranceCompanyId: patient.insuranceCompanyId,
+      employerName: patient.employerName ?? '',
+      insurancePlan: patient.insurancePlan ?? '',
+      insuranceProvider: patient.insuranceProvider ?? patient.insuranceCompanyName ?? '',
+      insurancePolicyNumber: patient.insurancePolicyNumber ?? '',
+      emergencyContactName: patient.emergencyContactName ?? '',
+      emergencyContactPhone: patient.emergencyContactPhone ?? '',
+      photoDataUrl: patient.photoDataUrl ?? '',
+    };
   }
 
   private emptyPatient(): Omit<Patient, 'id' | 'mrn'> {
@@ -968,7 +1675,7 @@ export class AppComponent {
         <div><strong>${this.cell(patient.mrn)}</strong><br>${this.cell(patient.firstName)} ${this.cell(patient.lastName)}</div>
         <div><strong>Phone</strong><br>${this.cell(patient.phone)}</div>
         <div><strong>Insurance</strong><br>${this.cell(patient.insuranceCompanyName || patient.insuranceProvider || 'Self Pay')}</div>
-        <div><strong>Policy</strong><br>${this.cell(patient.insurancePolicyNumber || '-')}</div>
+        <div><strong>Plan</strong><br>${this.cell(patient.insurancePlan || '-')}</div>
       </div>`;
   }
 
@@ -1015,6 +1722,14 @@ export class AppComponent {
 
   private localDateTimeValue(daysFromNow: number) {
     const date = new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000);
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    return date.toISOString().slice(0, 16);
+  }
+
+  private toLocalDateTimeInput(value?: string) {
+    if (!value) return this.localDateTimeValue(1);
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return this.localDateTimeValue(1);
     date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
     return date.toISOString().slice(0, 16);
   }

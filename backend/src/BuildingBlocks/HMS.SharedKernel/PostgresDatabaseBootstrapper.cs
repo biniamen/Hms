@@ -36,5 +36,64 @@ public static class PostgresDatabaseBootstrapper
         await createCommand.ExecuteNonQueryAsync();
     }
 
+    public static async Task ResetLegacySchemaIfRequestedAsync(string connectionString, bool resetLegacySchema)
+    {
+        if (!resetLegacySchema)
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        var migrationCount = await ScalarLongAsync(
+            connection,
+            """
+            select count(*)
+            from information_schema.tables
+            where table_schema = 'public'
+              and table_name = '__EFMigrationsHistory'
+            """);
+
+        if (migrationCount > 0)
+        {
+            var appliedMigrations = await ScalarLongAsync(connection, "select count(*) from \"__EFMigrationsHistory\"");
+            if (appliedMigrations > 0)
+            {
+                return;
+            }
+        }
+
+        var tableCount = await ScalarLongAsync(
+            connection,
+            """
+            select count(*)
+            from information_schema.tables
+            where table_schema = 'public'
+              and table_type = 'BASE TABLE'
+              and table_name <> '__EFMigrationsHistory'
+            """);
+
+        if (tableCount == 0)
+        {
+            return;
+        }
+
+        await using var resetCommand = new NpgsqlCommand(
+            """
+            drop schema public cascade;
+            create schema public;
+            """,
+            connection);
+        await resetCommand.ExecuteNonQueryAsync();
+    }
+
     private static string QuoteIdentifier(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+
+    private static async Task<long> ScalarLongAsync(NpgsqlConnection connection, string sql)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+        var value = await command.ExecuteScalarAsync();
+        return Convert.ToInt64(value ?? 0);
+    }
 }

@@ -15,6 +15,9 @@ builder.Services.AddHmsCors(builder.Configuration);
 var connectionString = builder.Configuration.RequireConnectionString("IdentityDb");
 
 await IdentityDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+await PostgresDatabaseBootstrapper.ResetLegacySchemaIfRequestedAsync(
+    connectionString,
+    builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false));
 builder.Services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
@@ -150,6 +153,68 @@ app.MapPost("/api/employees", async (CreateEmployeeRequest request, IdentityDbCo
     return Results.Created($"/api/employees/{employee.Id}", ApiResponse<EmployeeInviteResponse>.Ok(
         new EmployeeInviteResponse(ToEmployeeDto(employee, permission, latestToken), setupUrl),
         "Employee created. Password setup invitation prepared."));
+}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+
+app.MapPut("/api/employees/{id:guid}", async (Guid id, UpdateEmployeeRequest request, IdentityDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.FirstName) ||
+        string.IsNullOrWhiteSpace(request.LastName) ||
+        string.IsNullOrWhiteSpace(request.EmailAddress) ||
+        string.IsNullOrWhiteSpace(request.Role))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("First name, last name, email, and role are required."));
+    }
+
+    var employee = await db.Employees.FirstOrDefaultAsync(item => item.Id == id);
+    if (employee is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Employee not found."));
+    }
+
+    var role = NormalizeKey(request.Role);
+    if (!await db.Roles.AnyAsync(item => item.RoleCode == role))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Selected role does not exist."));
+    }
+
+    var email = request.EmailAddress.Trim();
+    var normalizedEmail = email.ToLowerInvariant();
+    if (await db.Employees.AnyAsync(item => item.Id != id && item.EmailAddress.ToLower() == normalizedEmail))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("An employee with this email already exists."));
+    }
+
+    employee.FirstName = request.FirstName.Trim();
+    employee.LastName = request.LastName.Trim();
+    employee.EmailAddress = email;
+    employee.Phone = CleanOrNull(request.Phone);
+    employee.RoleCode = role;
+    employee.Department = CleanOrNull(request.Department);
+    employee.Specialization = CleanOrNull(request.Specialization);
+
+    await db.SaveChangesAsync();
+
+    var permission = await PermissionTextAsync(db, employee.RoleCode);
+    var latestToken = await LatestOpenTokenAsync(db, employee.Id);
+    return Results.Ok(ApiResponse<EmployeeDto>.Ok(ToEmployeeDto(employee, permission, latestToken), "Employee updated."));
+}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+
+app.MapPut("/api/employees/{id:guid}/status", async (Guid id, UpdateEmployeeStatusRequest request, IdentityDbContext db) =>
+{
+    var employee = await db.Employees.FirstOrDefaultAsync(item => item.Id == id);
+    if (employee is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Employee not found."));
+    }
+
+    employee.IsActive = request.IsActive;
+    await db.SaveChangesAsync();
+
+    var permission = await PermissionTextAsync(db, employee.RoleCode);
+    var latestToken = await LatestOpenTokenAsync(db, employee.Id);
+    return Results.Ok(ApiResponse<EmployeeDto>.Ok(
+        ToEmployeeDto(employee, permission, latestToken),
+        request.IsActive ? "Employee enabled." : "Employee disabled."));
 }).RequireHmsRoles("ADMIN", "HR_MANAGER");
 
 app.MapPost("/api/employees/{id:guid}/invite", async (Guid id, IdentityDbContext db) =>

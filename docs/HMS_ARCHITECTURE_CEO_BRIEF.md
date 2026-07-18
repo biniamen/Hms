@@ -233,7 +233,7 @@ This helps leadership monitor patient flow, workload, revenue, and department ac
 
 Recommended next steps before live hospital rollout:
 
-- Signed JWT authentication and authorization policies
+- Refresh-token/session revocation and optional external identity provider integration
 - Migration review and release governance for each service database
 - Audit trail and immutable activity history
 - Production SMS gateway integration

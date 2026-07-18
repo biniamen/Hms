@@ -332,6 +332,14 @@ export class ApiService {
     return this.http.post<ApiResponse<EmployeeInviteResponse>>(`${this.baseUrl}/api/employees`, payload);
   }
 
+  updateEmployee(id: string, payload: { firstName: string; lastName: string; emailAddress: string; phone?: string; role: string; department?: string; specialization?: string }) {
+    return this.http.put<ApiResponse<Employee>>(`${this.baseUrl}/api/employees/${id}`, payload);
+  }
+
+  updateEmployeeStatus(id: string, isActive: boolean) {
+    return this.http.put<ApiResponse<Employee>>(`${this.baseUrl}/api/employees/${id}/status`, { isActive });
+  }
+
   resendEmployeeInvite(id: string) {
     return this.http.post<ApiResponse<EmployeeInviteResponse>>(`${this.baseUrl}/api/employees/${id}/invite`, {});
   }
@@ -391,6 +399,10 @@ export class ApiService {
 
   createPatient(payload: Omit<Patient, 'id' | 'mrn'>) {
     return this.http.post<ApiResponse<Patient>>(`${this.baseUrl}/api/patients`, payload);
+  }
+
+  updatePatient(id: string, payload: Omit<Patient, 'id' | 'mrn'>) {
+    return this.http.put<ApiResponse<Patient>>(`${this.baseUrl}/api/patients/${id}`, payload);
   }
 
   getInsuranceCompanies() {
@@ -487,6 +499,10 @@ export class ApiService {
 
   createEnterpriseRecord(payload: Partial<EnterpriseRecord>) {
     return this.http.post<ApiResponse<EnterpriseRecord>>(`${this.baseUrl}/api/clinical/enterprise-records`, payload);
+  }
+
+  updateEnterpriseRecord(id: string, payload: Partial<EnterpriseRecord>) {
+    return this.http.put<ApiResponse<EnterpriseRecord>>(`${this.baseUrl}/api/clinical/enterprise-records/${id}`, payload);
   }
 
   updateEnterpriseRecordStatus(id: string, status: string) {

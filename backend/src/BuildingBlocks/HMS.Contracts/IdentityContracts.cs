@@ -27,6 +27,17 @@ public sealed record CreateEmployeeRequest(
     string? Department,
     string? Specialization);
 
+public sealed record UpdateEmployeeRequest(
+    string FirstName,
+    string LastName,
+    string EmailAddress,
+    string? Phone,
+    string Role,
+    string? Department,
+    string? Specialization);
+
+public sealed record UpdateEmployeeStatusRequest(bool IsActive);
+
 public sealed record EmployeeInviteResponse(EmployeeDto Employee, string SetupUrl);
 public sealed record SetupPasswordRequest(string Token, string Password);
 public sealed record ForgotPasswordRequest(string EmailAddress);

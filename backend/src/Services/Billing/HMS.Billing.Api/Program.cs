@@ -13,6 +13,9 @@ builder.Services.AddHmsCors(builder.Configuration);
 var connectionString = builder.Configuration.RequireConnectionString("BillingDb");
 
 await BillingDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+await PostgresDatabaseBootstrapper.ResetLegacySchemaIfRequestedAsync(
+    connectionString,
+    builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false));
 builder.Services.AddDbContext<BillingDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();

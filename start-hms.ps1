@@ -22,7 +22,7 @@ if (-not (Test-Path $nugetConfigDir)) {
 Copy-Item -LiteralPath (Join-Path $backend "NuGet.Config") -Destination (Join-Path $nugetConfigDir "NuGet.Config") -Force
 
 if (Test-Path $localConfig) {
-    . $localConfig
+    Invoke-Expression (Get-Content -LiteralPath $localConfig -Raw)
 }
 
 function New-Base64Secret {
@@ -42,6 +42,11 @@ function New-Base64Secret {
 if ([string]::IsNullOrWhiteSpace($env:Security__Jwt__SigningKey)) {
     $env:Security__Jwt__SigningKey = New-Base64Secret
     Write-Warning "Security__Jwt__SigningKey was not configured. A temporary development signing key was generated for this run."
+}
+
+$env:Database__ResetLegacySchemaOnStartup = if ([string]::IsNullOrWhiteSpace($env:Database__ResetLegacySchemaOnStartup)) { "true" } else { $env:Database__ResetLegacySchemaOnStartup }
+if ($env:Database__ResetLegacySchemaOnStartup -eq "true") {
+    Write-Warning "Legacy database schema reset is enabled for local development. Existing non-migrated HMS tables will be recreated by EF Core."
 }
 
 if ([string]::IsNullOrWhiteSpace($env:Seed__DefaultPassword)) {
@@ -82,7 +87,7 @@ $env:Email__Smtp__EnableSsl = "true"
 $env:Email__ExposeLocalSetupLinks = "false"
 
 if (Test-Path $smtpLocalConfig) {
-    . $smtpLocalConfig
+    Invoke-Expression (Get-Content -LiteralPath $smtpLocalConfig -Raw)
 }
 
 if (-not [string]::IsNullOrWhiteSpace($env:Email__Smtp__Password)) {
@@ -108,16 +113,34 @@ $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue 
 foreach ($connection in $connections) {
     try {
         $process = Get-Process -Id $connection.OwningProcess -ErrorAction Stop
-        if ($process.ProcessName -in @("dotnet", "node")) {
-            Stop-Process -Id $process.Id -Force
-        }
+        Stop-Process -Id $process.Id -Force
     } catch {
     }
 }
 
+$ownPath = $root
+try {
+    Get-CimInstance Win32_Process -ErrorAction Stop |
+        Where-Object {
+            $_.CommandLine -and
+            $_.CommandLine -like "*$ownPath*" -and
+            $_.ProcessId -ne $PID -and
+            $_.Name -in @("dotnet.exe", "node.exe", "npm.cmd", "npm.exe")
+        } |
+        ForEach-Object {
+            try {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+            } catch {
+            }
+        }
+} catch {
+}
+
+Start-Sleep -Seconds 2
+
 Push-Location $backend
-dotnet restore .\HMS.sln --configfile .\NuGet.Config
-dotnet build .\HMS.sln --no-restore
+dotnet restore .\HMS.sln --configfile .\NuGet.Config -p:NuGetAudit=false
+dotnet build .\HMS.sln --no-restore -p:NuGetAudit=false
 Pop-Location
 
 if (-not (Test-Path (Join-Path $frontend "node_modules"))) {
@@ -142,11 +165,20 @@ function Start-HmsApi {
     $stdout = Join-Path $logDir "$Name.out.log"
     $stderr = Join-Path $logDir "$Name.err.log"
 
-    if (Test-Path $stdout) { Remove-Item -LiteralPath $stdout -Force }
-    if (Test-Path $stderr) { Remove-Item -LiteralPath $stderr -Force }
+    if (Test-Path $stdout) {
+        try { Remove-Item -LiteralPath $stdout -Force -ErrorAction Stop } catch { $stdout = Join-Path $logDir "$Name.$([DateTime]::Now.ToString('yyyyMMddHHmmss')).out.log" }
+    }
+    if (Test-Path $stderr) {
+        try { Remove-Item -LiteralPath $stderr -Force -ErrorAction Stop } catch { $stderr = Join-Path $logDir "$Name.$([DateTime]::Now.ToString('yyyyMMddHHmmss')).err.log" }
+    }
 
-    $arguments = '"' + $dllPath + '" --urls http://localhost:' + $Port
-    Start-Process -FilePath "dotnet" -ArgumentList $arguments -WorkingDirectory $workDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr | Out-Null
+    Start-Process `
+        -FilePath "dotnet" `
+        -ArgumentList @("`"$dllPath`"", "--urls", "http://localhost:$Port", "--contentRoot", "`"$workDir`"") `
+        -WorkingDirectory $root `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $stdout `
+        -RedirectStandardError $stderr | Out-Null
 }
 
 Start-HmsApi "identity" "backend\src\Services\Identity\HMS.Identity.Api" "bin\Debug\net9.0\HMS.Identity.Api.dll" 5101
@@ -157,8 +189,12 @@ Start-HmsApi "gateway" "backend\src\ApiGateway\HMS.ApiGateway" "bin\Debug\net9.0
 
 $frontendOut = Join-Path $logDir "frontend.out.log"
 $frontendErr = Join-Path $logDir "frontend.err.log"
-if (Test-Path $frontendOut) { Remove-Item -LiteralPath $frontendOut -Force }
-if (Test-Path $frontendErr) { Remove-Item -LiteralPath $frontendErr -Force }
+if (Test-Path $frontendOut) {
+    try { Remove-Item -LiteralPath $frontendOut -Force -ErrorAction Stop } catch { $frontendOut = Join-Path $logDir "frontend.$([DateTime]::Now.ToString('yyyyMMddHHmmss')).out.log" }
+}
+if (Test-Path $frontendErr) {
+    try { Remove-Item -LiteralPath $frontendErr -Force -ErrorAction Stop } catch { $frontendErr = Join-Path $logDir "frontend.$([DateTime]::Now.ToString('yyyyMMddHHmmss')).err.log" }
+}
 Start-Process -FilePath "npm.cmd" -ArgumentList @("start") -WorkingDirectory $frontend -WindowStyle Hidden -RedirectStandardOutput $frontendOut -RedirectStandardError $frontendErr | Out-Null
 
 Write-Host "HMS services are starting..."

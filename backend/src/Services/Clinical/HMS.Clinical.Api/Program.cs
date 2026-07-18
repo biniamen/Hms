@@ -13,6 +13,9 @@ builder.Services.AddHmsCors(builder.Configuration);
 var connectionString = builder.Configuration.RequireConnectionString("ClinicalDb");
 
 await ClinicalDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+await PostgresDatabaseBootstrapper.ResetLegacySchemaIfRequestedAsync(
+    connectionString,
+    builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false));
 builder.Services.AddDbContext<ClinicalDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
@@ -243,6 +246,36 @@ app.MapPost("/api/clinical/enterprise-records", async (CreateEnterpriseRecordReq
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/clinical/enterprise-records/{record.Id}", ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Record saved."));
+});
+
+app.MapPut("/api/clinical/enterprise-records/{id:guid}", async (Guid id, CreateEnterpriseRecordRequest request, ClinicalDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Area) || string.IsNullOrWhiteSpace(request.Title))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Service area and title are required."));
+    }
+
+    var record = await db.EnterpriseRecords.FirstOrDefaultAsync(item => item.Id == id);
+    if (record is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Record not found."));
+    }
+
+    record.Area = request.Area.Trim();
+    record.PatientId = request.PatientId is Guid patientId && patientId != Guid.Empty ? patientId : null;
+    record.Title = request.Title.Trim();
+    record.Department = Clean(request.Department, request.Area);
+    record.Owner = Clean(request.Owner, "Unassigned");
+    record.Priority = Clean(request.Priority, "Normal");
+    record.Status = Clean(request.Status, record.Status);
+    record.Amount = Math.Max(0, request.Amount);
+    record.DueAtUtc = request.DueAtUtc is null ? record.DueAtUtc : ToUtc(request.DueAtUtc.Value);
+    record.Details = Clean(request.Details, "");
+    record.UpdatedAtUtc = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Record updated."));
 });
 
 app.MapPut("/api/clinical/enterprise-records/{id:guid}/status", async (Guid id, EnterpriseStatusRequest request, ClinicalDbContext db) =>

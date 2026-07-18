@@ -34,7 +34,11 @@
   }
 
   .field-control {
-    @apply min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100;
+    @apply min-h-10 w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none transition placeholder:font-medium placeholder:text-slate-400 hover:border-slate-500 focus:border-brand-600 focus:ring-4 focus:ring-brand-100;
+  }
+
+  .field-control.ng-invalid.ng-touched {
+    @apply border-red-400 bg-red-50/30 focus:border-red-500 focus:ring-red-100;
   }
 
   .btn-primary {

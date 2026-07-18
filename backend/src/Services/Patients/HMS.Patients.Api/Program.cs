@@ -3,6 +3,7 @@ using HMS.Patients.Infrastructure;
 using HMS.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 
@@ -16,6 +17,9 @@ builder.Services.AddHmsCors(builder.Configuration);
 var connectionString = builder.Configuration.RequireConnectionString("PatientManagementDb", "PatientsDb");
 
 await PatientsDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+await PostgresDatabaseBootstrapper.ResetLegacySchemaIfRequestedAsync(
+    connectionString,
+    builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false));
 builder.Services.AddDbContext<PatientsDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
@@ -39,11 +43,19 @@ await EnsureRabbitMqAsync(app.Configuration);
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patient-management", status = "healthy" })));
 
-app.MapGet("/api/patients", async (PatientsDbContext db) =>
+app.MapGet("/api/patients", async (PatientsDbContext db, HttpContext httpContext) =>
 {
-    var patients = await db.Patients
+    IQueryable<Patient> query = db.Patients
         .AsNoTracking()
-        .Include(patient => patient.InsuranceCompany)
+        .Include(patient => patient.InsuranceCompany);
+
+    if (TryGetDoctorId(httpContext, out var doctorId))
+    {
+        query = query.Where(patient => db.Appointments.Any(appointment =>
+            appointment.PatientId == patient.Id && appointment.DoctorId == doctorId));
+    }
+
+    var patients = await query
         .OrderByDescending(patient => patient.CreatedAtUtc)
         .ThenBy(patient => patient.Mrn)
         .ToListAsync();
@@ -51,16 +63,25 @@ app.MapGet("/api/patients", async (PatientsDbContext db) =>
     return Results.Ok(ApiResponse<IEnumerable<PatientDto>>.Ok(patients.Select(ToPatientDto)));
 });
 
-app.MapGet("/api/patients/{id:guid}", async (Guid id, PatientsDbContext db) =>
+app.MapGet("/api/patients/{id:guid}", async (Guid id, PatientsDbContext db, HttpContext httpContext) =>
 {
     var patient = await db.Patients
         .AsNoTracking()
         .Include(item => item.InsuranceCompany)
         .FirstOrDefaultAsync(item => item.Id == id);
 
-    return patient is null
-        ? Results.NotFound(ApiResponse<object>.Fail("Patient not found."))
-        : Results.Ok(ApiResponse<PatientDto>.Ok(ToPatientDto(patient)));
+    if (patient is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Patient not found."));
+    }
+
+    if (TryGetDoctorId(httpContext, out var doctorId) &&
+        !await db.Appointments.AnyAsync(appointment => appointment.PatientId == id && appointment.DoctorId == doctorId))
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Patient not found."));
+    }
+
+    return Results.Ok(ApiResponse<PatientDto>.Ok(ToPatientDto(patient)));
 });
 
 app.MapGet("/api/insurance-companies", async (PatientsDbContext db) =>
@@ -165,24 +186,92 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, PatientsDbCont
     return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(dto, "Patient registered."));
 });
 
-app.MapGet("/api/appointments", async (PatientsDbContext db) =>
+app.MapPut("/api/patients/{id:guid}", async (Guid id, UpdatePatientRequest request, PatientsDbContext db) =>
 {
-    var appointments = await db.Appointments
-        .AsNoTracking()
+    if (string.IsNullOrWhiteSpace(request.FirstName) ||
+        string.IsNullOrWhiteSpace(request.LastName) ||
+        string.IsNullOrWhiteSpace(request.Phone) ||
+        string.IsNullOrWhiteSpace(request.Gender))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("First name, last name, phone, and gender are required."));
+    }
+
+    var patient = await db.Patients
+        .Include(item => item.InsuranceCompany)
+        .FirstOrDefaultAsync(item => item.Id == id);
+    if (patient is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Patient not found."));
+    }
+
+    if (request.InsuranceCompanyId is Guid companyId &&
+        companyId != Guid.Empty &&
+        !await db.InsuranceCompanies.AnyAsync(company => company.Id == companyId && company.IsActive))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Selected insurance company does not exist or is inactive."));
+    }
+
+    patient.FirstName = request.FirstName.Trim();
+    patient.LastName = request.LastName.Trim();
+    patient.Email = CleanOrNull(request.Email);
+    patient.Phone = request.Phone.Trim();
+    patient.Gender = request.Gender.Trim();
+    patient.DateOfBirth = request.DateOfBirth;
+    patient.NationalId = CleanOrNull(request.NationalId);
+    patient.MaritalStatus = CleanOrNull(request.MaritalStatus);
+    patient.Occupation = CleanOrNull(request.Occupation);
+    patient.Address = CleanOrNull(request.Address);
+    patient.BloodType = CleanOrNull(request.BloodType);
+    patient.InsuranceCompanyId = request.InsuranceCompanyId is Guid value && value != Guid.Empty ? value : null;
+    patient.EmployerName = CleanOrNull(request.EmployerName);
+    patient.InsurancePlan = CleanOrNull(request.InsurancePlan);
+    patient.InsuranceProvider = CleanOrNull(request.InsuranceProvider);
+    patient.InsurancePolicyNumber = CleanOrNull(request.InsurancePolicyNumber);
+    patient.EmergencyContactName = CleanOrNull(request.EmergencyContactName);
+    patient.EmergencyContactPhone = CleanOrNull(request.EmergencyContactPhone);
+
+    if (request.PhotoDataUrl is not null)
+    {
+        var (photoContentType, photoData) = ParsePhoto(request.PhotoDataUrl);
+        patient.PhotoContentType = photoContentType;
+        patient.PhotoData = photoData;
+    }
+
+    await db.SaveChangesAsync();
+
+    patient = (await db.Patients.AsNoTracking().Include(item => item.InsuranceCompany).FirstAsync(item => item.Id == patient.Id))!;
+    return Results.Ok(ApiResponse<PatientDto>.Ok(ToPatientDto(patient), "Patient updated."));
+});
+
+app.MapGet("/api/appointments", async (PatientsDbContext db, HttpContext httpContext) =>
+{
+    var query = db.Appointments.AsNoTracking();
+    if (TryGetDoctorId(httpContext, out var doctorId))
+    {
+        query = query.Where(appointment => appointment.DoctorId == doctorId);
+    }
+
+    var appointments = await query
         .OrderByDescending(appointment => appointment.StartsAtUtc)
         .ToListAsync();
 
     return Results.Ok(ApiResponse<IEnumerable<AppointmentDto>>.Ok(ToAppointmentDtos(appointments)));
 });
 
-app.MapGet("/api/appointments/queue", async (PatientsDbContext db) =>
+app.MapGet("/api/appointments/queue", async (PatientsDbContext db, HttpContext httpContext) =>
 {
     var today = DateTime.UtcNow.Date;
     var tomorrow = today.AddDays(1);
-    var appointments = await db.Appointments
+    var query = db.Appointments
         .AsNoTracking()
-        .Where(appointment => appointment.StartsAtUtc >= today && appointment.StartsAtUtc < tomorrow)
-        .ToListAsync();
+        .Where(appointment => appointment.StartsAtUtc >= today && appointment.StartsAtUtc < tomorrow);
+
+    if (TryGetDoctorId(httpContext, out var doctorId))
+    {
+        query = query.Where(appointment => appointment.DoctorId == doctorId);
+    }
+
+    var appointments = await query.ToListAsync();
 
     var summaries = appointments
         .GroupBy(appointment => new { appointment.DoctorId, appointment.Department })
@@ -234,7 +323,7 @@ app.MapPost("/api/appointments", async (CreateAppointmentRequest request, Patien
     return Results.Created($"/api/appointments/{appointment.Id}", ApiResponse<AppointmentDto>.Ok(dto, "Appointment created."));
 });
 
-app.MapPut("/api/appointments/{id:guid}/status", async (Guid id, AppointmentStatusUpdateRequest request, PatientsDbContext db) =>
+app.MapPut("/api/appointments/{id:guid}/status", async (Guid id, AppointmentStatusUpdateRequest request, PatientsDbContext db, HttpContext httpContext) =>
 {
     var allowed = new[] { "Scheduled", "Waiting", "In Service", "Completed", "Cancelled", "No Show" };
     if (!allowed.Contains(request.Status, StringComparer.OrdinalIgnoreCase))
@@ -246,6 +335,11 @@ app.MapPut("/api/appointments/{id:guid}/status", async (Guid id, AppointmentStat
     if (appointment is null)
     {
         return Results.NotFound(ApiResponse<object>.Fail("Appointment not found."));
+    }
+
+    if (TryGetDoctorId(httpContext, out var doctorId) && appointment.DoctorId != doctorId)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
     appointment.Status = allowed.First(item => item.Equals(request.Status, StringComparison.OrdinalIgnoreCase));
@@ -269,6 +363,19 @@ app.MapGet("/api/beds", async (PatientsDbContext db) =>
 });
 
 app.Run();
+
+static bool TryGetDoctorId(HttpContext httpContext, out Guid doctorId)
+{
+    doctorId = Guid.Empty;
+    var role = httpContext.User.FindFirstValue(ClaimTypes.Role) ?? "";
+    if (!role.Equals("DOCTOR", StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    var subject = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    return Guid.TryParse(subject, out doctorId);
+}
 
 static PatientDto ToPatientDto(Patient patient)
 {

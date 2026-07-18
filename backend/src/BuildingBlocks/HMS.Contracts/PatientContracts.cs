@@ -45,6 +45,27 @@ public sealed record CreatePatientRequest(
     string? EmergencyContactPhone,
     string? PhotoDataUrl);
 
+public sealed record UpdatePatientRequest(
+    string FirstName,
+    string LastName,
+    string? Email,
+    string Phone,
+    string Gender,
+    DateOnly DateOfBirth,
+    string? NationalId,
+    string? MaritalStatus,
+    string? Occupation,
+    string? Address,
+    string? BloodType,
+    Guid? InsuranceCompanyId,
+    string? EmployerName,
+    string? InsurancePlan,
+    string? InsuranceProvider,
+    string? InsurancePolicyNumber,
+    string? EmergencyContactName,
+    string? EmergencyContactPhone,
+    string? PhotoDataUrl);
+
 public sealed record InsuranceCompanyDto(
     Guid Id,
     string Name,
