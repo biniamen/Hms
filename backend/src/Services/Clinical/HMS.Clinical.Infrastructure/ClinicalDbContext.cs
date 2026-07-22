@@ -74,6 +74,20 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(request => request.TestName).HasColumnName("test_name").HasMaxLength(240);
             entity.Property(request => request.Status).HasColumnName("status").HasMaxLength(60);
             entity.Property(request => request.OrderedAtUtc).HasColumnName("ordered_at_utc").HasDefaultValueSql("now()");
+            entity.Property(request => request.Category).HasColumnName("category").HasMaxLength(80);
+            entity.Property(request => request.Priority).HasColumnName("priority").HasMaxLength(40);
+            entity.Property(request => request.SpecimenType).HasColumnName("specimen_type").HasMaxLength(120);
+            entity.Property(request => request.ClinicalNote).HasColumnName("clinical_note");
+            entity.Property(request => request.ResultSummary).HasColumnName("result_summary");
+            entity.Property(request => request.ResultValue).HasColumnName("result_value");
+            entity.Property(request => request.ReferenceRange).HasColumnName("reference_range").HasMaxLength(120);
+            entity.Property(request => request.ResultFlag).HasColumnName("result_flag").HasMaxLength(40);
+            entity.Property(request => request.ResultNotes).HasColumnName("result_notes");
+            entity.Property(request => request.PerformedBy).HasColumnName("performed_by").HasMaxLength(120);
+            entity.Property(request => request.VerifiedBy).HasColumnName("verified_by").HasMaxLength(120);
+            entity.Property(request => request.CollectedAtUtc).HasColumnName("collected_at_utc");
+            entity.Property(request => request.ResultedAtUtc).HasColumnName("resulted_at_utc");
+            entity.Property(request => request.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<EnterpriseRecord>(entity =>
@@ -152,6 +166,20 @@ public sealed class LabRequest
     public string TestName { get; set; } = "";
     public string Status { get; set; } = "Requested";
     public DateTime OrderedAtUtc { get; set; } = DateTime.UtcNow;
+    public string Category { get; set; } = "Laboratory";
+    public string Priority { get; set; } = "Routine";
+    public string SpecimenType { get; set; } = "";
+    public string ClinicalNote { get; set; } = "";
+    public string ResultSummary { get; set; } = "";
+    public string ResultValue { get; set; } = "";
+    public string ReferenceRange { get; set; } = "";
+    public string ResultFlag { get; set; } = "Normal";
+    public string ResultNotes { get; set; } = "";
+    public string PerformedBy { get; set; } = "";
+    public string VerifiedBy { get; set; } = "";
+    public DateTime? CollectedAtUtc { get; set; }
+    public DateTime? ResultedAtUtc { get; set; }
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class EnterpriseRecord
@@ -202,7 +230,20 @@ public static class ClinicalSeedData
 
         if (!await db.LabRequests.AnyAsync())
         {
-            db.LabRequests.Add(new LabRequest { Id = Guid.Parse("3cb3eb61-03a4-4fec-8517-9d2778f6e40d"), PatientId = dawitId, DoctorId = doctorId, TestName = "Complete Blood Count", Status = "Requested", OrderedAtUtc = DateTime.UtcNow.AddHours(-2) });
+            db.LabRequests.Add(new LabRequest
+            {
+                Id = Guid.Parse("3cb3eb61-03a4-4fec-8517-9d2778f6e40d"),
+                PatientId = dawitId,
+                DoctorId = doctorId,
+                TestName = "Complete Blood Count",
+                Category = "Hematology",
+                Priority = "Routine",
+                SpecimenType = "Whole blood",
+                ClinicalNote = "Baseline workup before treatment decision.",
+                Status = "Requested",
+                OrderedAtUtc = DateTime.UtcNow.AddHours(-2),
+                UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
+            });
         }
 
         await UpsertEnterpriseRecordsAsync(db);

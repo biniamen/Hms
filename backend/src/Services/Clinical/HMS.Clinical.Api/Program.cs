@@ -169,33 +169,95 @@ app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest requ
 
 app.MapGet("/api/clinical/lab-requests", async (ClinicalDbContext db) =>
 {
-    var labRequests = await db.LabRequests
+    var records = await db.LabRequests
         .AsNoTracking()
         .OrderByDescending(request => request.OrderedAtUtc)
-        .Select(request => new LabRequestDto(request.Id, request.PatientId, request.DoctorId, request.TestName, request.Status, request.OrderedAtUtc))
         .ToListAsync();
+
+    var labRequests = records.Select(ToLabRequestDto).ToList();
 
     return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(labRequests));
 });
 
 app.MapPost("/api/clinical/lab-requests", async (CreateLabRequestRequest request, ClinicalDbContext db) =>
 {
+    if (string.IsNullOrWhiteSpace(request.TestName))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("At least one diagnostic test is required."));
+    }
+
     var labRequest = new LabRequest
     {
         Id = Guid.NewGuid(),
         PatientId = request.PatientId,
         DoctorId = request.DoctorId,
         TestName = Clean(request.TestName, ""),
+        Category = Clean(request.Category, "Laboratory"),
+        Priority = Clean(request.Priority, "Routine"),
+        SpecimenType = Clean(request.SpecimenType, ""),
+        ClinicalNote = Clean(request.ClinicalNote, ""),
         Status = "Requested",
-        OrderedAtUtc = DateTime.UtcNow
+        OrderedAtUtc = DateTime.UtcNow,
+        UpdatedAtUtc = DateTime.UtcNow
     };
 
     db.LabRequests.Add(labRequest);
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(
-        new LabRequestDto(labRequest.Id, labRequest.PatientId, labRequest.DoctorId, labRequest.TestName, labRequest.Status, labRequest.OrderedAtUtc),
+        ToLabRequestDto(labRequest),
         "Lab request created."));
+});
+
+app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (Guid id, UpdateLabResultRequest request, ClinicalDbContext db) =>
+{
+    var allowedStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Requested",
+        "Specimen Collected",
+        "In Progress",
+        "Result Entered",
+        "Verified",
+        "Completed",
+        "Cancelled"
+    };
+
+    if (string.IsNullOrWhiteSpace(request.Status) || !allowedStatuses.Contains(request.Status.Trim()))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Select a valid laboratory status."));
+    }
+
+    var labRequest = await db.LabRequests.FirstOrDefaultAsync(item => item.Id == id);
+    if (labRequest is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Lab request not found."));
+    }
+
+    var nextStatus = request.Status.Trim();
+    var resultRequired = nextStatus is "Result Entered" or "Verified" or "Completed";
+    if (resultRequired && string.IsNullOrWhiteSpace(request.ResultSummary) && string.IsNullOrWhiteSpace(request.ResultValue))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Enter the result summary or result value before releasing the result."));
+    }
+
+    labRequest.Status = nextStatus;
+    labRequest.SpecimenType = Clean(request.SpecimenType, labRequest.SpecimenType);
+    labRequest.ResultSummary = Clean(request.ResultSummary, labRequest.ResultSummary);
+    labRequest.ResultValue = Clean(request.ResultValue, labRequest.ResultValue);
+    labRequest.ReferenceRange = Clean(request.ReferenceRange, labRequest.ReferenceRange);
+    labRequest.ResultFlag = Clean(request.ResultFlag, labRequest.ResultFlag);
+    labRequest.ResultNotes = Clean(request.ResultNotes, labRequest.ResultNotes);
+    labRequest.PerformedBy = Clean(request.PerformedBy, labRequest.PerformedBy);
+    labRequest.VerifiedBy = Clean(request.VerifiedBy, labRequest.VerifiedBy);
+    labRequest.CollectedAtUtc = request.CollectedAtUtc is null ? labRequest.CollectedAtUtc : ToUtc(request.CollectedAtUtc.Value);
+    labRequest.ResultedAtUtc = request.ResultedAtUtc is null
+        ? (resultRequired ? DateTime.UtcNow : labRequest.ResultedAtUtc)
+        : ToUtc(request.ResultedAtUtc.Value);
+    labRequest.UpdatedAtUtc = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<LabRequestDto>.Ok(ToLabRequestDto(labRequest), "Lab result updated."));
 });
 
 app.MapGet("/api/clinical/enterprise-records", async (string? area, ClinicalDbContext db) =>
@@ -315,6 +377,28 @@ static EnterpriseRecordDto ToEnterpriseRecordDto(EnterpriseRecord record) => new
     record.Details,
     record.CreatedAtUtc,
     record.UpdatedAtUtc);
+
+static LabRequestDto ToLabRequestDto(LabRequest request) => new(
+    request.Id,
+    request.PatientId,
+    request.DoctorId,
+    request.TestName,
+    request.Status,
+    request.OrderedAtUtc,
+    request.Category,
+    request.Priority,
+    request.SpecimenType,
+    request.ClinicalNote,
+    request.ResultSummary,
+    request.ResultValue,
+    request.ReferenceRange,
+    request.ResultFlag,
+    request.ResultNotes,
+    request.PerformedBy,
+    request.VerifiedBy,
+    request.CollectedAtUtc,
+    request.ResultedAtUtc,
+    request.UpdatedAtUtc);
 
 static async Task<string> NextRecordNumberAsync(ClinicalDbContext db, string area)
 {

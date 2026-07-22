@@ -206,6 +206,20 @@ export interface LabRequest {
   testName: string;
   status: string;
   orderedAtUtc: string;
+  category: string;
+  priority: string;
+  specimenType: string;
+  clinicalNote: string;
+  resultSummary: string;
+  resultValue: string;
+  referenceRange: string;
+  resultFlag: string;
+  resultNotes: string;
+  performedBy: string;
+  verifiedBy: string;
+  collectedAtUtc?: string | null;
+  resultedAtUtc?: string | null;
+  updatedAtUtc: string;
 }
 
 export interface Invoice {
@@ -469,8 +483,12 @@ export class ApiService {
     return this.http.get<ApiResponse<LabRequest[]>>(`${this.baseUrl}/api/clinical/lab-requests`);
   }
 
-  createLabRequest(payload: { patientId: string; doctorId: string; testName: string }) {
+  createLabRequest(payload: { patientId: string; doctorId: string; testName: string; category?: string; priority?: string; specimenType?: string; clinicalNote?: string }) {
     return this.http.post<ApiResponse<LabRequest>>(`${this.baseUrl}/api/clinical/lab-requests`, payload);
+  }
+
+  updateLabResult(id: string, payload: { status: string; specimenType?: string; resultSummary?: string; resultValue?: string; referenceRange?: string; resultFlag?: string; resultNotes?: string; performedBy?: string; verifiedBy?: string; collectedAtUtc?: string | null; resultedAtUtc?: string | null }) {
+    return this.http.put<ApiResponse<LabRequest>>(`${this.baseUrl}/api/clinical/lab-requests/${id}/result`, payload);
   }
 
   getInvoices() {
@@ -479,6 +497,10 @@ export class ApiService {
 
   createInvoice(payload: { patientId: string; description: string; amount: number; discount: number; tax: number; paymentType: string; insuranceProvider?: string; items?: Array<{ serviceCode: string; description: string; quantity: number; unitPrice: number; discount: number }> }) {
     return this.http.post<ApiResponse<Invoice>>(`${this.baseUrl}/api/billing/invoices`, payload);
+  }
+
+  updateInvoiceStatus(id: string, status: string) {
+    return this.http.put<ApiResponse<Invoice>>(`${this.baseUrl}/api/billing/invoices/${id}/status`, { status });
   }
 
   getPayments() {

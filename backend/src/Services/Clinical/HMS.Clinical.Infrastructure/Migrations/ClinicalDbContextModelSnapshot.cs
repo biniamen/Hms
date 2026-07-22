@@ -205,6 +205,21 @@ namespace HMS.Clinical.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("doctor_id");
 
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("category");
+
+                    b.Property<string>("ClinicalNote")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("clinical_note");
+
+                    b.Property<DateTime?>("CollectedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("collected_at_utc");
+
                     b.Property<DateTime>("OrderedAtUtc")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -214,6 +229,55 @@ namespace HMS.Clinical.Infrastructure.Migrations
                     b.Property<Guid>("PatientId")
                         .HasColumnType("uuid")
                         .HasColumnName("patient_id");
+
+                    b.Property<string>("PerformedBy")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("performed_by");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("priority");
+
+                    b.Property<string>("ReferenceRange")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("reference_range");
+
+                    b.Property<string>("ResultFlag")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("result_flag");
+
+                    b.Property<string>("ResultNotes")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("result_notes");
+
+                    b.Property<string>("ResultSummary")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("result_summary");
+
+                    b.Property<string>("ResultValue")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("result_value");
+
+                    b.Property<DateTime?>("ResultedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resulted_at_utc");
+
+                    b.Property<string>("SpecimenType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("specimen_type");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -226,6 +290,18 @@ namespace HMS.Clinical.Infrastructure.Migrations
                         .HasMaxLength(240)
                         .HasColumnType("character varying(240)")
                         .HasColumnName("test_name");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("VerifiedBy")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("verified_by");
 
                     b.HasKey("Id");
 

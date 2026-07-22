@@ -112,6 +112,37 @@ app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, Billin
     return Results.Created($"/api/billing/invoices/{invoice.Id}", ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice), "Invoice created."));
 });
 
+app.MapPut("/api/billing/invoices/{id:guid}/status", async (Guid id, UpdateInvoiceStatusRequest request, BillingDbContext db) =>
+{
+    var allowedStatuses = new[] { "Unpaid", "Cancelled", "Voided" };
+    var requestedStatus = allowedStatuses.FirstOrDefault(status => status.Equals(request.Status, StringComparison.OrdinalIgnoreCase));
+    if (requestedStatus is null)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Invoice status can be changed only to Unpaid, Cancelled, or Voided. Paid and Partially Paid are controlled by payment collection."));
+    }
+
+    var invoice = await db.Invoices
+        .Include(item => item.Items)
+        .FirstOrDefaultAsync(item => item.Id == id);
+    if (invoice is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Invoice not found."));
+    }
+
+    if ((requestedStatus is "Cancelled" or "Voided") && invoice.Paid > 0)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Paid or partially paid invoices cannot be cancelled or voided."));
+    }
+
+    invoice.Status = requestedStatus == "Unpaid"
+        ? ResolvePaymentStatus(invoice.Total, invoice.Paid)
+        : requestedStatus;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice), "Invoice status updated."));
+});
+
 app.MapGet("/api/billing/payments", async (BillingDbContext db) =>
 {
     var payments = await db.Payments
@@ -144,6 +175,11 @@ app.MapPost("/api/billing/payments", async (PaymentRequest request, BillingDbCon
         return Results.NotFound(ApiResponse<object>.Fail("Invoice not found."));
     }
 
+    if (invoice.Status is "Cancelled" or "Voided")
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Cancelled or voided invoices cannot receive payments."));
+    }
+
     var balance = invoice.Total - invoice.Paid;
     if (request.Amount > balance)
     {
@@ -154,7 +190,7 @@ app.MapPost("/api/billing/payments", async (PaymentRequest request, BillingDbCon
     var paid = invoice.Paid + request.Amount;
     var balanceAfterPayment = invoice.Total - paid;
     invoice.Paid = paid;
-    invoice.Status = balanceAfterPayment <= 0 ? "Paid" : "Partially Paid";
+    invoice.Status = ResolvePaymentStatus(invoice.Total, paid);
 
     var payment = new Payment
     {
@@ -275,6 +311,12 @@ static InvoiceItemDto[] BuildInvoiceItems(CreateInvoiceRequest request)
             0,
             request.Amount)
     ];
+}
+
+static string ResolvePaymentStatus(decimal total, decimal paid)
+{
+    if (paid <= 0) return "Unpaid";
+    return paid >= total ? "Paid" : "Partially Paid";
 }
 
 static async Task<string> NextInvoiceNumberAsync(BillingDbContext db)

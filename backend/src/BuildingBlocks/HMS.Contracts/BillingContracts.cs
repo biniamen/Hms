@@ -20,6 +20,7 @@ public sealed record InvoiceDto(
 
 public sealed record InvoiceItemRequest(string ServiceCode, string Description, int Quantity, decimal UnitPrice, decimal Discount);
 public sealed record CreateInvoiceRequest(Guid PatientId, string Description, decimal Amount, decimal Discount, decimal Tax, string PaymentType, string? InsuranceProvider, InvoiceItemRequest[]? Items);
+public sealed record UpdateInvoiceStatusRequest(string Status);
 
 public sealed record PaymentDto(Guid Id, Guid InvoiceId, string ReceiptNumber, decimal Amount, string Method, string? Reference, string ReceivedBy, DateTime PaidAtUtc);
 public sealed record PaymentRequest(Guid InvoiceId, decimal Amount, string Method, string? Reference, string? ReceivedBy);

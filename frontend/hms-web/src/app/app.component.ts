@@ -29,7 +29,7 @@ import {
 } from './api.service';
 
 type Section = 'dashboard' | 'operations' | 'admin' | 'enterprise' | 'employees' | 'patients' | 'insurance' | 'appointments' | 'clinical' | 'billing';
-type Modal = 'role' | 'newRole' | 'permission' | 'department' | 'insurance' | 'employee' | 'employeeEdit' | 'patient' | 'patientView' | 'patientEdit' | 'patientHistory' | 'appointment' | 'encounter' | 'vitals' | 'diagnosis' | 'prescription' | 'lab' | 'invoice' | 'payment' | 'enterpriseRecord' | 'enterpriseRecordEdit' | null;
+type Modal = 'role' | 'newRole' | 'permission' | 'department' | 'insurance' | 'employee' | 'employeeEdit' | 'patient' | 'patientView' | 'patientEdit' | 'patientHistory' | 'appointment' | 'encounter' | 'vitals' | 'diagnosis' | 'prescription' | 'lab' | 'labResult' | 'invoice' | 'payment' | 'enterpriseRecord' | 'enterpriseRecordEdit' | null;
 type AdminTab = 'users' | 'roles' | 'permissions' | 'departments' | 'emails';
 type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'labs';
 type BillingTab = 'invoices' | 'payments' | 'receipts';
@@ -83,14 +83,57 @@ interface DiagnosisForm {
 interface PrescriptionForm {
   patientId: string;
   doctorId: string;
+  selectedMedications: string[];
+  customMedication: string;
   medication: string;
+  dose: string;
+  route: string;
+  frequency: string;
+  duration: string;
+  quantity: string;
   instructions: string;
 }
 
 interface LabForm {
   patientId: string;
   doctorId: string;
+  selectedTests: string[];
   testName: string;
+  category: string;
+  priority: string;
+  specimenType: string;
+  clinicalNote: string;
+}
+
+interface LabResultForm {
+  id: string;
+  status: string;
+  specimenType: string;
+  resultSummary: string;
+  resultValue: string;
+  referenceRange: string;
+  resultFlag: string;
+  resultNotes: string;
+  performedBy: string;
+  verifiedBy: string;
+  collectedAtUtc: string;
+  resultedAtUtc: string;
+}
+
+interface OptionGroup {
+  category: string;
+  items: string[];
+}
+
+interface PatientIntakeForm {
+  createAppointment: boolean;
+  department: string;
+  doctorId: string;
+  startsAtUtc: string;
+  reason: string;
+  appointmentType: string;
+  priority: string;
+  notes: string;
 }
 
 @Component({
@@ -151,14 +194,49 @@ export class AppComponent {
   editingPatientId = '';
   editingEnterpriseRecordId = '';
   readonly visitTypes = ['Outpatient', 'Follow-up', 'Emergency', 'Inpatient Review', 'Procedure Review', 'Teleconsultation'];
+  readonly staffSpecializationsByRole: Record<string, string[]> = {
+    ADMIN: ['System Administration', 'Platform Operations', 'Information Security'],
+    HR_MANAGER: ['Human Resources', 'Staff Onboarding', 'Training Coordination'],
+    RECEPTIONIST: ['Front Desk', 'Patient Intake', 'Appointment Coordination'],
+    NURSE: ['General Nursing', 'Emergency Nursing', 'Ward Nursing', 'Theatre Nursing', 'Maternal and Child Health'],
+    DOCTOR: ['General Practitioner', 'Internal Medicine', 'Pediatrics', 'Obstetrics and Gynecology', 'Surgery', 'Emergency Medicine', 'Orthopedics', 'Dermatology', 'Ophthalmology', 'ENT', 'Radiology', 'Anesthesiology'],
+    LAB_TECHNICIAN: ['Clinical Laboratory', 'Hematology', 'Clinical Chemistry', 'Microbiology', 'Serology', 'Blood Bank'],
+    PHARMACIST: ['Clinical Pharmacy', 'Dispensing Pharmacy', 'Inventory Pharmacy', 'Medication Safety'],
+    ACCOUNTANT: ['Patient Billing', 'Insurance Claims', 'Revenue Reporting', 'Accounts Receivable'],
+    CASHIER: ['Cash Collection', 'Receipt Control', 'Payment Reconciliation'],
+  };
+  readonly medicationCatalog: OptionGroup[] = [
+    { category: 'Analgesics and Antipyretics', items: ['Paracetamol', 'Ibuprofen', 'Diclofenac', 'Tramadol'] },
+    { category: 'Antibiotics', items: ['Amoxicillin', 'Azithromycin', 'Ceftriaxone', 'Metronidazole', 'Ciprofloxacin', 'Doxycycline'] },
+    { category: 'Gastrointestinal', items: ['Omeprazole', 'ORS', 'Metoclopramide', 'Hyoscine', 'Loperamide'] },
+    { category: 'Respiratory and Allergy', items: ['Salbutamol', 'Prednisolone', 'Cetirizine', 'Chlorpheniramine'] },
+    { category: 'Chronic Care', items: ['Amlodipine', 'Enalapril', 'Hydrochlorothiazide', 'Metformin', 'Insulin'] },
+    { category: 'Vitamins and Supplements', items: ['Ferrous Sulfate', 'Folic Acid', 'Multivitamin', 'Vitamin D'] },
+  ];
+  readonly diagnosticOrderCatalog: OptionGroup[] = [
+    { category: 'Hematology', items: ['Complete Blood Count', 'Hemoglobin', 'ESR', 'Blood Group and Rh', 'Coagulation Profile', 'Peripheral Blood Morphology'] },
+    { category: 'Clinical Chemistry', items: ['Random Blood Sugar', 'Fasting Blood Sugar', 'Urea', 'Creatinine', 'Electrolytes', 'Liver Function Test', 'Lipid Profile', 'HbA1c'] },
+    { category: 'Microbiology', items: ['Urine Culture', 'Blood Culture', 'Wound Swab Culture', 'Gram Stain', 'AFB Smear'] },
+    { category: 'Serology and Infectious Disease', items: ['Malaria RDT', 'Widal Test', 'H. pylori Test', 'HIV Screening', 'HBsAg', 'HCV Antibody'] },
+    { category: 'Urine and Stool', items: ['Urinalysis', 'Stool Examination', 'Pregnancy Test', 'Occult Blood'] },
+    { category: 'Imaging and Cardio Diagnostics', items: ['Chest X-ray', 'Abdominal Ultrasound', 'Obstetric Ultrasound', 'ECG', 'Echocardiography', 'CT Head', 'MRI Spine'] },
+    { category: 'Procedures and Pathology', items: ['Pap Smear', 'Biopsy Request', 'Fine Needle Aspiration', 'Endoscopy Request'] },
+  ];
+  readonly prescriptionRoutes = ['Oral', 'IV', 'IM', 'SC', 'Topical', 'Inhalation', 'Eye', 'Ear'];
+  readonly prescriptionFrequencies = ['Once daily', 'Twice daily', 'Three times daily', 'Every 6 hours', 'Every 8 hours', 'Every 12 hours', 'As needed', 'Stat'];
+  readonly labPriorityOptions = ['Routine', 'Urgent', 'STAT', 'Pre-operative', 'Follow-up'];
+  readonly specimenOptions = ['Whole blood', 'Serum', 'Plasma', 'Urine', 'Stool', 'Sputum', 'Swab', 'Tissue', 'Imaging study', 'Not applicable'];
+  readonly labStatusOptions = ['Requested', 'Specimen Collected', 'In Progress', 'Result Entered', 'Verified', 'Completed', 'Cancelled'];
+  readonly resultFlagOptions = ['Normal', 'Abnormal', 'Critical', 'High', 'Low', 'Reactive', 'Non-reactive'];
 
-  employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
+  employeeForm = this.defaultEmployeeForm();
   newRoleForm = { role: '', description: '', permissionsText: '' };
   roleForm = { role: '', description: '', permissionsText: '' };
   permissionForm = { key: '', description: '', module: 'Administration' };
   departmentForm = { code: '', name: '', type: 'Clinical', location: 'Main Campus' };
   insuranceForm = { name: '', payerCode: '', contactPerson: '', phone: '', email: '', address: '', coverageType: 'Corporate', coveragePercent: 80 };
   patientForm: Omit<Patient, 'id' | 'mrn'> = this.emptyPatient();
+  patientIntakeForm: PatientIntakeForm = this.emptyPatientIntakeForm();
   appointmentForm = {
     patientId: '',
     doctorId: '',
@@ -174,13 +252,14 @@ export class AppComponent {
   diagnosisForm: DiagnosisForm = this.emptyDiagnosisForm();
   prescriptionForm: PrescriptionForm = this.emptyPrescriptionForm();
   labForm: LabForm = this.emptyLabForm();
+  labResultForm: LabResultForm = this.emptyLabResultForm();
   invoiceForm = { patientId: '', description: 'Outpatient service invoice', serviceCode: 'CONS', serviceDescription: 'General consultation', quantity: 1, unitPrice: 350, lineDiscount: 0, discount: 0, tax: 0, paymentType: 'Cash', insuranceProvider: '' };
   paymentForm = { invoiceId: '', amount: 0, method: '', reference: '', receivedBy: 'Cashier' };
   enterpriseRecordForm = { area: 'Pharmacy', patientId: '', title: '', department: 'Pharmacy', owner: '', priority: 'Normal', status: 'Open', amount: 0, dueAtUtc: this.localDateTimeValue(1), details: '' };
 
   readonly session = computed(() => this.api.session());
   readonly doctors = computed<Employee[]>(() => {
-    const profiles = this.doctorProfiles();
+    const profiles = this.uniqueBy(this.doctorProfiles(), (doctor) => this.doctorDisplayKey(doctor));
     if (profiles.length) {
       return profiles.map((doctor) => ({
         id: doctor.id,
@@ -197,7 +276,7 @@ export class AppComponent {
       }));
     }
 
-    return this.employees().filter((employee) => employee.role === 'DOCTOR');
+    return this.uniqueBy(this.employees().filter((employee) => employee.role === 'DOCTOR'), (doctor) => this.doctorDisplayKey(doctor));
   });
   readonly assignedDoctorPatientIds = computed(() => {
     const doctorId = this.loggedDoctorId();
@@ -245,7 +324,7 @@ export class AppComponent {
     ['Rx', this.visibleClinicalRows(this.prescriptions()).length],
     ['Labs', this.visibleClinicalRows(this.labRequests()).length],
   ]));
-  readonly activeTitle = computed(() => this.active() === 'admin' ? 'Administration' : this.title(this.active()));
+  readonly activeTitle = computed(() => this.nav.find((item) => item.id === this.active())?.label ?? this.title(this.active()));
   readonly stats = computed(() => {
     const role = this.session()?.role ?? '';
     const today = new Date().toISOString().slice(0, 10);
@@ -320,6 +399,74 @@ export class AppComponent {
     ['Rx', this.prescriptions().length],
     ['Labs', this.labRequests().length],
   ]));
+  readonly dashboardProfile = computed(() => {
+    const role = this.session()?.role ?? '';
+    const profiles: Record<string, { eyebrow: string; title: string; summary: string }> = {
+      ADMIN: { eyebrow: 'System Control', title: 'Security, users, and platform readiness', summary: 'Review accounts, service health, departments, and operational exceptions.' },
+      HR_MANAGER: { eyebrow: 'HR Desk', title: 'Employee onboarding and staff readiness', summary: 'Maintain employee records, account invitations, department assignment, and staff status.' },
+      RECEPTIONIST: { eyebrow: 'Front Desk', title: 'Patient intake, assignment, and queue flow', summary: 'Register patients, select insurance, book doctors, and manage waiting patients.' },
+      DOCTOR: { eyebrow: 'Doctor Workspace', title: 'Assigned patients and clinical decisions', summary: 'Open assigned patients, review history, record encounters, diagnoses, prescriptions, and lab requests.' },
+      NURSE: { eyebrow: 'Nursing Desk', title: 'Patient preparation and vitals capture', summary: 'Prepare patients for consultation and keep vital signs current for the care team.' },
+      LAB_TECHNICIAN: { eyebrow: 'Laboratory Desk', title: 'Lab request review and result workflow', summary: 'Track requested tests and move laboratory work through the operations queue.' },
+      PHARMACIST: { eyebrow: 'Pharmacy Desk', title: 'Prescription review and dispensing control', summary: 'Review prescriptions, prepare dispensing tasks, and coordinate medication charges.' },
+      ACCOUNTANT: { eyebrow: 'Finance Desk', title: 'Invoice review, balances, and revenue visibility', summary: 'Create invoices, monitor balances, insurance claims, and finance reporting.' },
+      CASHIER: { eyebrow: 'Cashier Desk', title: 'Payment collection and receipt printing', summary: 'Collect payments, print receipts, and keep invoice balances accurate.' },
+    };
+
+    return profiles[role] ?? { eyebrow: 'Hospital Command', title: 'Hospital operations snapshot', summary: 'Follow patient flow, clinical activity, service readiness, and revenue status.' };
+  });
+  readonly dashboardWorkItems = computed(() => {
+    const role = this.session()?.role ?? '';
+    const today = new Date().toISOString().slice(0, 10);
+    const assignedAppointments = this.visibleAppointments().filter((item) => item.startsAtUtc.slice(0, 10) === today);
+    const unpaidInvoices = this.invoices().filter((invoice) => invoice.balance > 0 && !['Cancelled', 'Voided'].includes(invoice.status));
+    const openOperations = this.enterpriseRecords().filter((record) => !['Completed', 'Closed'].includes(record.status));
+
+    if (role === 'RECEPTIONIST') {
+      return [
+        ['Register patient', `${this.patients().length} patients in registry`],
+        ['Book appointment', `${this.appointments().filter((item) => item.startsAtUtc.slice(0, 10) === today).length} appointment(s) today`],
+        ['Queue handoff', `${this.appointments().filter((item) => item.queueStatus === 'Waiting').length} waiting`],
+      ];
+    }
+
+    if (role === 'DOCTOR') {
+      return [
+        ['Assigned queue', `${assignedAppointments.length} appointment(s) today`],
+        ['Clinical history', `${this.visiblePatients().length} assigned patient record(s)`],
+        ['Open orders', `${this.visibleClinicalRows(this.labRequests()).filter((item) => item.status !== 'Completed').length} lab request(s)`],
+      ];
+    }
+
+    if (role === 'NURSE') {
+      return [
+        ['Vitals capture', `${this.vitals().length} vital record(s)`],
+        ['Patient preparation', `${this.appointments().filter((item) => ['Scheduled', 'Waiting'].includes(item.queueStatus)).length} patient(s) waiting`],
+        ['Care handoff', `${this.encounters().length} clinical encounter(s)`],
+      ];
+    }
+
+    if (['ACCOUNTANT', 'CASHIER'].includes(role)) {
+      return [
+        ['Open balances', this.money(unpaidInvoices.reduce((sum, invoice) => sum + invoice.balance, 0))],
+        ['Payments today', `${this.payments().filter((payment) => payment.paidAtUtc.slice(0, 10) === today).length} payment(s)`],
+        ['Receipts', `${this.receipts().length} receipt(s)`],
+      ];
+    }
+
+    return [
+      ['Service readiness', `${this.services().filter((service) => service.status === 'Running').length}/${this.services().length || 5} running`],
+      ['Open operations', `${openOperations.length} work item(s)`],
+      ['Hospital queue', `${this.appointments().filter((item) => ['Scheduled', 'Waiting', 'In Service'].includes(item.queueStatus)).length} active`],
+    ];
+  });
+  readonly communicationWorkflow = computed(() => [
+    { role: 'Reception', action: 'Registers patient, verifies insurance, assigns department and doctor', status: `${this.appointments().filter((item) => item.queueStatus === 'Scheduled' || item.queueStatus === 'Waiting').length} waiting` },
+    { role: 'Nursing', action: 'Captures vitals and prepares the patient for consultation', status: `${this.vitals().length} vitals` },
+    { role: 'Doctor', action: 'Reviews history, records encounter, diagnosis, prescription, and lab orders', status: `${this.encounters().length} visits` },
+    { role: 'Laboratory / Pharmacy', action: 'Processes orders and updates operational worklists', status: `${this.labRequests().length + this.prescriptions().length} orders` },
+    { role: 'Billing / Cashier', action: 'Creates invoice, collects payment, and prints receipt', status: `${this.invoices().filter((invoice) => invoice.balance > 0).length} open` },
+  ]);
   readonly activeEnterpriseModule = computed(() => this.enterpriseModules.find((module) => module.id === this.enterpriseTab()) ?? this.enterpriseModules[0]);
   readonly enterpriseRows = computed(() => this.enterpriseRecords().filter((record) => record.area === this.activeEnterpriseModule().area));
   readonly enterpriseWorkflow = computed(() => this.activeEnterpriseModule().workflow);
@@ -364,10 +511,10 @@ export class AppComponent {
 
   readonly nav: Array<{ id: Section; label: string; roles: string[] }> = [
     { id: 'dashboard', label: 'Dashboard', roles: ['ALL'] },
-    { id: 'operations', label: 'Service Portal', roles: ['ADMIN'] },
-    { id: 'admin', label: 'Administration', roles: ['ADMIN'] },
-    { id: 'enterprise', label: 'Enterprise HMS', roles: ['ADMIN'] },
-    { id: 'employees', label: 'Employees', roles: ['ADMIN', 'HR_MANAGER'] },
+    { id: 'operations', label: 'System Health', roles: ['ADMIN'] },
+    { id: 'admin', label: 'Access Control', roles: ['ADMIN'] },
+    { id: 'enterprise', label: 'Operations Workbench', roles: ['ADMIN'] },
+    { id: 'employees', label: 'Staff Directory', roles: ['ADMIN', 'HR_MANAGER'] },
     { id: 'patients', label: 'Patients', roles: ['ADMIN', 'RECEPTIONIST', 'DOCTOR', 'NURSE'] },
     { id: 'insurance', label: 'Insurance', roles: ['ADMIN', 'ACCOUNTANT', 'RECEPTIONIST'] },
     { id: 'appointments', label: 'Appointments', roles: ['ADMIN', 'RECEPTIONIST', 'DOCTOR'] },
@@ -573,13 +720,12 @@ export class AppComponent {
 
   openCreateEmployee() {
     this.editingEmployeeId = '';
-    this.employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
+    this.employeeForm = this.defaultEmployeeForm();
     this.modal.set('employee');
   }
 
   createEmployee() {
-    if (!this.employeeForm.firstName.trim() || !this.employeeForm.lastName.trim() || !this.employeeForm.emailAddress.trim() || !this.employeeForm.role.trim()) {
-      this.toast('error', 'First name, last name, email, and role are required.');
+    if (!this.validateEmployeeForm()) {
       return;
     }
 
@@ -588,7 +734,7 @@ export class AppComponent {
       next: (res) => {
         this.saving.set(false);
         this.modal.set(null);
-        this.employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
+        this.employeeForm = this.defaultEmployeeForm();
         this.copySetupUrl(res.data.setupUrl);
         this.toast('success', 'User created and password setup invitation prepared.');
         this.loadAll();
@@ -620,14 +766,13 @@ export class AppComponent {
       return;
     }
 
-    if (!this.employeeForm.firstName.trim() || !this.employeeForm.lastName.trim() || !this.employeeForm.emailAddress.trim() || !this.employeeForm.role.trim()) {
-      this.toast('error', 'First name, last name, email, and role are required.');
+    if (!this.validateEmployeeForm()) {
       return;
     }
 
     this.save(this.api.updateEmployee(this.editingEmployeeId, this.employeeForm), 'Employee updated.', () => {
       this.editingEmployeeId = '';
-      this.employeeForm = { firstName: '', lastName: '', emailAddress: '', phone: '', role: 'DOCTOR', department: 'Outpatient', specialization: 'Internal Medicine' };
+      this.employeeForm = this.defaultEmployeeForm();
     });
   }
 
@@ -765,6 +910,11 @@ export class AppComponent {
   }
 
   createRole() {
+    if (!this.newRoleForm.role.trim() || !this.newRoleForm.description.trim()) {
+      this.toast('error', 'Role code and description are required.');
+      return;
+    }
+
     const permissions = this.newRoleForm.permissionsText
       .split(',')
       .map((permission) => permission.trim())
@@ -805,18 +955,43 @@ export class AppComponent {
   }
 
   createPermission() {
+    if (!this.permissionForm.key.trim() || !this.permissionForm.description.trim() || !this.permissionForm.module.trim()) {
+      this.toast('error', 'Permission key, description, and module are required.');
+      return;
+    }
+
     this.save(this.api.createPermission(this.permissionForm), 'Permission saved.', () => {
       this.permissionForm = { key: '', description: '', module: 'Administration' };
     });
   }
 
   createDepartment() {
+    if (!this.departmentForm.code.trim() || !this.departmentForm.name.trim() || !this.departmentForm.type.trim() || !this.departmentForm.location.trim()) {
+      this.toast('error', 'Department code, name, type, and location are required.');
+      return;
+    }
+
     this.save(this.api.createDepartment(this.departmentForm), 'Department saved.', () => {
       this.departmentForm = { code: '', name: '', type: 'Clinical', location: 'Main Campus' };
     });
   }
 
   createInsuranceCompany() {
+    if (!this.insuranceForm.name.trim() || !this.insuranceForm.payerCode.trim() || !this.insuranceForm.phone.trim()) {
+      this.toast('error', 'Insurance company name, payer code, and phone are required.');
+      return;
+    }
+
+    if (this.insuranceForm.email && !this.isValidEmail(this.insuranceForm.email)) {
+      this.toast('error', 'Enter a valid insurance company email address or leave it empty.');
+      return;
+    }
+
+    if (!Number.isFinite(Number(this.insuranceForm.coveragePercent)) || this.insuranceForm.coveragePercent < 0 || this.insuranceForm.coveragePercent > 100) {
+      this.toast('error', 'Coverage percent must be between 0 and 100.');
+      return;
+    }
+
     this.save(this.api.createInsuranceCompany(this.insuranceForm), 'Insurance company registered.', () => {
       this.insuranceForm = { name: '', payerCode: '', contactPerson: '', phone: '', email: '', address: '', coverageType: 'Corporate', coveragePercent: 80 };
     });
@@ -826,6 +1001,7 @@ export class AppComponent {
     this.editingPatientId = '';
     this.selectedPatient.set(null);
     this.patientForm = this.emptyPatient();
+    this.patientIntakeForm = this.emptyPatientIntakeForm();
     this.modal.set('patient');
   }
 
@@ -834,12 +1010,58 @@ export class AppComponent {
       return;
     }
 
+    if (!this.validatePatientIntakeForm()) {
+      return;
+    }
+
     const payload = {
       ...this.patientForm,
       insuranceCompanyId: this.patientForm.insuranceCompanyId || undefined,
     };
-    this.save(this.api.createPatient(payload), 'Patient registered and RabbitMQ event published.', () => {
-      this.patientForm = this.emptyPatient();
+
+    this.saving.set(true);
+    this.api.createPatient(payload).subscribe({
+      next: (res) => {
+        const patient = res.data;
+        if (!this.patientIntakeForm.createAppointment) {
+          this.saving.set(false);
+          this.modal.set(null);
+          this.patientForm = this.emptyPatient();
+          this.patientIntakeForm = this.emptyPatientIntakeForm();
+          this.toast('success', 'Patient registered and RabbitMQ event published.');
+          this.loadAll();
+          return;
+        }
+
+        this.api.createAppointment({
+          patientId: patient.id,
+          doctorId: this.patientIntakeForm.doctorId,
+          startsAtUtc: new Date(this.patientIntakeForm.startsAtUtc).toISOString(),
+          reason: this.patientIntakeForm.reason,
+          department: this.patientIntakeForm.department,
+          appointmentType: this.patientIntakeForm.appointmentType,
+          priority: this.patientIntakeForm.priority,
+          notes: this.patientIntakeForm.notes,
+        }).subscribe({
+          next: () => {
+            this.saving.set(false);
+            this.modal.set(null);
+            this.patientForm = this.emptyPatient();
+            this.patientIntakeForm = this.emptyPatientIntakeForm();
+            this.toast('success', 'Patient registered, doctor assigned, and queue created.');
+            this.loadAll();
+          },
+          error: () => {
+            this.saving.set(false);
+            this.toast('error', 'Patient was registered, but the appointment assignment failed. Book the appointment from Appointments.');
+            this.loadAll();
+          },
+        });
+      },
+      error: () => {
+        this.saving.set(false);
+        this.toast('error', 'Patient registration failed. Check required fields and service logs.');
+      },
     });
   }
 
@@ -950,6 +1172,48 @@ export class AppComponent {
     this.modal.set(kind);
   }
 
+  toggleMedication(name: string, event: Event) {
+    this.toggleStringSelection(this.prescriptionForm.selectedMedications, name, event);
+  }
+
+  toggleDiagnosticTest(name: string, event: Event) {
+    this.toggleStringSelection(this.labForm.selectedTests, name, event);
+    const categories = this.selectedDiagnosticCategories();
+    this.labForm.category = categories.length ? categories.join(', ') : 'Laboratory';
+    if (categories.length && categories.every((category) => category.includes('Imaging'))) {
+      this.labForm.specimenType = 'Imaging study';
+    }
+  }
+
+  isMedicationSelected(name: string) {
+    return this.prescriptionForm.selectedMedications.includes(name);
+  }
+
+  isDiagnosticSelected(name: string) {
+    return this.labForm.selectedTests.includes(name);
+  }
+
+  selectedPrescriptionMedications() {
+    return this.uniqueTextValues([
+      ...this.prescriptionForm.selectedMedications,
+      this.prescriptionForm.customMedication,
+    ]);
+  }
+
+  selectedDiagnosticTests() {
+    return this.uniqueTextValues([
+      ...this.labForm.selectedTests,
+      this.labForm.testName,
+    ]);
+  }
+
+  selectedDiagnosticCategories() {
+    const selected = new Set(this.labForm.selectedTests);
+    return this.diagnosticOrderCatalog
+      .filter((group) => group.items.some((item) => selected.has(item)))
+      .map((group) => group.category);
+  }
+
   createEncounter() {
     const doctorId = this.resolveClinicalDoctorId(this.encounterForm.doctorId);
     if (!this.validateRequiredClinicalFields([
@@ -1020,36 +1284,134 @@ export class AppComponent {
 
   createPrescription() {
     const doctorId = this.resolveClinicalDoctorId(this.prescriptionForm.doctorId);
+    const medications = this.selectedPrescriptionMedications();
+    const medicationText = medications.join('; ');
+    const instructionParts = [
+      this.prescriptionForm.dose.trim() ? `Dose: ${this.prescriptionForm.dose.trim()}` : '',
+      this.prescriptionForm.route.trim() ? `Route: ${this.prescriptionForm.route.trim()}` : '',
+      this.prescriptionForm.frequency.trim() ? `Frequency: ${this.prescriptionForm.frequency.trim()}` : '',
+      this.prescriptionForm.duration.trim() ? `Duration: ${this.prescriptionForm.duration.trim()}` : '',
+      this.prescriptionForm.quantity.trim() ? `Quantity: ${this.prescriptionForm.quantity.trim()}` : '',
+      this.prescriptionForm.instructions.trim() ? `Notes: ${this.prescriptionForm.instructions.trim()}` : '',
+    ].filter(Boolean).join(' | ');
+
     if (!this.validateRequiredClinicalFields([
       [this.prescriptionForm.patientId, 'Select the patient.'],
       [doctorId, 'Select the doctor.'],
-      [this.prescriptionForm.medication, 'Medication is required.'],
-      [this.prescriptionForm.instructions, 'Prescription instructions are required.'],
+      [medicationText, 'Select at least one medication or enter a custom medication.'],
+      [this.prescriptionForm.dose, 'Dose is required.'],
+      [this.prescriptionForm.frequency, 'Frequency is required.'],
+      [this.prescriptionForm.duration, 'Duration is required.'],
+      [instructionParts, 'Prescription instructions are required.'],
     ])) {
       return;
     }
 
-    this.save(this.api.createPrescription({ ...this.prescriptionForm, doctorId }), 'Prescription issued.', () => {
+    this.prescriptionForm.medication = medicationText;
+    this.prescriptionForm.instructions = instructionParts;
+
+    this.save(this.api.createPrescription({
+      patientId: this.prescriptionForm.patientId,
+      doctorId,
+      medication: medicationText,
+      instructions: instructionParts,
+    }), 'Prescription issued.', () => {
       this.prescriptionForm = this.emptyPrescriptionForm();
     });
   }
 
   createLabRequest() {
     const doctorId = this.resolveClinicalDoctorId(this.labForm.doctorId);
+    const selectedTests = this.selectedDiagnosticTests();
+    const testName = selectedTests.join('; ');
+    const category = this.selectedDiagnosticCategories().join(', ') || this.labForm.category;
+
     if (!this.validateRequiredClinicalFields([
       [this.labForm.patientId, 'Select the patient.'],
       [doctorId, 'Select the doctor.'],
-      [this.labForm.testName, 'Lab test name is required.'],
+      [testName, 'Select at least one laboratory, imaging, or diagnostic order.'],
+      [this.labForm.priority, 'Select the order priority.'],
     ])) {
       return;
     }
 
-    this.save(this.api.createLabRequest({ ...this.labForm, doctorId }), 'Lab request created.', () => {
+    this.labForm.testName = testName;
+    this.labForm.category = category;
+
+    this.save(this.api.createLabRequest({
+      patientId: this.labForm.patientId,
+      doctorId,
+      testName,
+      category,
+      priority: this.labForm.priority,
+      specimenType: this.labForm.specimenType,
+      clinicalNote: this.labForm.clinicalNote,
+    }), 'Diagnostic request created.', () => {
       this.labForm = this.emptyLabForm();
     });
   }
 
+  openLabResult(row: LabRequest) {
+    this.labResultForm = {
+      id: row.id,
+      status: row.status === 'Requested' ? 'Specimen Collected' : row.status,
+      specimenType: row.specimenType || 'Whole blood',
+      resultSummary: row.resultSummary || '',
+      resultValue: row.resultValue || '',
+      referenceRange: row.referenceRange || '',
+      resultFlag: row.resultFlag || 'Normal',
+      resultNotes: row.resultNotes || '',
+      performedBy: row.performedBy || this.session()?.emailAddress || '',
+      verifiedBy: row.verifiedBy || '',
+      collectedAtUtc: this.toLocalDateTimeInput(row.collectedAtUtc || new Date().toISOString()),
+      resultedAtUtc: this.toLocalDateTimeInput(row.resultedAtUtc || new Date().toISOString()),
+    };
+    this.modal.set('labResult');
+  }
+
+  updateLabResult() {
+    if (!this.labResultForm.id) {
+      this.toast('error', 'No lab request selected.');
+      return;
+    }
+
+    if (!this.labResultForm.status.trim()) {
+      this.toast('error', 'Select the laboratory status.');
+      return;
+    }
+
+    if (['Result Entered', 'Verified', 'Completed'].includes(this.labResultForm.status) && !this.labResultForm.resultSummary.trim() && !this.labResultForm.resultValue.trim()) {
+      this.toast('error', 'Enter the result summary or value before releasing the result.');
+      return;
+    }
+
+    if (['Verified', 'Completed'].includes(this.labResultForm.status) && !this.labResultForm.verifiedBy.trim()) {
+      this.toast('error', 'Verified by is required before completing the result.');
+      return;
+    }
+
+    this.save(this.api.updateLabResult(this.labResultForm.id, {
+      status: this.labResultForm.status,
+      specimenType: this.labResultForm.specimenType,
+      resultSummary: this.labResultForm.resultSummary,
+      resultValue: this.labResultForm.resultValue,
+      referenceRange: this.labResultForm.referenceRange,
+      resultFlag: this.labResultForm.resultFlag,
+      resultNotes: this.labResultForm.resultNotes,
+      performedBy: this.labResultForm.performedBy,
+      verifiedBy: this.labResultForm.verifiedBy,
+      collectedAtUtc: this.labResultForm.collectedAtUtc ? new Date(this.labResultForm.collectedAtUtc).toISOString() : null,
+      resultedAtUtc: this.labResultForm.resultedAtUtc ? new Date(this.labResultForm.resultedAtUtc).toISOString() : null,
+    }), 'Lab result updated.', () => {
+      this.labResultForm = this.emptyLabResultForm();
+    });
+  }
+
   createInvoice() {
+    if (!this.validateInvoiceForm()) {
+      return;
+    }
+
     const item = {
       serviceCode: this.invoiceForm.serviceCode,
       description: this.invoiceForm.serviceDescription,
@@ -1079,9 +1441,39 @@ export class AppComponent {
     });
   }
 
+  openInvoiceModal() {
+    this.invoiceForm = { patientId: '', description: 'Outpatient service invoice', serviceCode: 'CONS', serviceDescription: 'General consultation', quantity: 1, unitPrice: 350, lineDiscount: 0, discount: 0, tax: 0, paymentType: 'Cash', insuranceProvider: '' };
+    this.modal.set('invoice');
+  }
+
   openPaymentModal() {
     this.paymentForm = { invoiceId: '', amount: 0, method: '', reference: '', receivedBy: 'Cashier' };
     this.modal.set('payment');
+  }
+
+  collectInvoice(invoice: Invoice) {
+    if (invoice.balance <= 0 || ['Cancelled', 'Voided'].includes(invoice.status)) {
+      this.toast('info', 'This invoice has no collectable balance.');
+      return;
+    }
+
+    this.paymentForm = { invoiceId: invoice.id, amount: invoice.balance, method: 'Cash', reference: '', receivedBy: this.session()?.emailAddress ?? 'Cashier' };
+    this.modal.set('payment');
+  }
+
+  updateInvoiceStatus(invoice: Invoice, status: string) {
+    this.saving.set(true);
+    this.api.updateInvoiceStatus(invoice.id, status).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.toast('success', `Invoice marked ${status}.`);
+        this.loadAll();
+      },
+      error: () => {
+        this.saving.set(false);
+        this.toast('error', 'Invoice status could not be changed. Paid invoices must be managed through payments.');
+      },
+    });
   }
 
   recordPayment() {
@@ -1220,6 +1612,10 @@ export class AppComponent {
     return this.patients().find((patient) => patient.id === id);
   }
 
+  labRequestById(id: string) {
+    return this.labRequests().find((request) => request.id === id);
+  }
+
   clinicalPatientOptions() {
     return this.visiblePatients();
   }
@@ -1331,7 +1727,30 @@ export class AppComponent {
   }
 
   appointmentDoctors() {
-    const department = this.appointmentForm.department;
+    return this.doctorsForDepartment(this.appointmentForm.department);
+  }
+
+  patientIntakeDoctors() {
+    return this.doctorsForDepartment(this.patientIntakeForm.department);
+  }
+
+  specializationOptionsForRole(role = this.employeeForm.role) {
+    return this.staffSpecializationsByRole[role] ?? ['General Administration', 'Operations Support'];
+  }
+
+  onEmployeeRoleChange() {
+    const options = this.specializationOptionsForRole();
+    if (!options.includes(this.employeeForm.specialization)) {
+      this.employeeForm.specialization = options[0] ?? '';
+    }
+
+    if (this.employeeForm.role === 'LAB_TECHNICIAN') this.employeeForm.department = 'Laboratory';
+    if (this.employeeForm.role === 'PHARMACIST') this.employeeForm.department = 'Pharmacy';
+    if (this.employeeForm.role === 'ACCOUNTANT' || this.employeeForm.role === 'CASHIER') this.employeeForm.department = 'Finance';
+    if (this.employeeForm.role === 'RECEPTIONIST') this.employeeForm.department = 'Front Desk';
+  }
+
+  doctorsForDepartment(department: string) {
     return this.doctors().filter((doctor) => {
       if (!doctor.isActive) return false;
       return !department || doctor.department === department;
@@ -1341,6 +1760,12 @@ export class AppComponent {
   onAppointmentDepartmentChange() {
     if (!this.appointmentDoctors().some((doctor) => doctor.id === this.appointmentForm.doctorId)) {
       this.appointmentForm.doctorId = '';
+    }
+  }
+
+  onPatientIntakeDepartmentChange() {
+    if (!this.patientIntakeDoctors().some((doctor) => doctor.id === this.patientIntakeForm.doctorId)) {
+      this.patientIntakeForm.doctorId = '';
     }
   }
 
@@ -1355,6 +1780,10 @@ export class AppComponent {
 
   departmentStaffCount(departmentName: string) {
     return this.employees().filter((employee) => employee.department === departmentName).length;
+  }
+
+  availableBedCount() {
+    return this.beds().filter((bed) => bed.isAvailable).length;
   }
 
   totalBilled() {
@@ -1426,6 +1855,33 @@ export class AppComponent {
     return this.invoices().find((invoice) => invoice.id === id);
   }
 
+  printLabResult(request: LabRequest) {
+    const patient = this.patientById(request.patientId);
+    const doctor = this.employeeById(request.doctorId);
+    this.openDocument('Laboratory Result', `
+      <div class="brand"><div class="brand-left"><span class="print-logo">H</span><div><strong>HMS Platform</strong><span>Diagnostic Result Report</span></div></div><b>LAB-${request.id.slice(0, 8).toUpperCase()}</b></div>
+      ${this.patientPrintBlock(patient)}
+      <table><tbody>
+        <tr><th>Ordering Doctor</th><td>Dr. ${this.cell(doctor ? `${doctor.firstName} ${doctor.lastName}` : request.doctorId)}</td></tr>
+        <tr><th>Order Category</th><td>${this.cell(request.category)}</td></tr>
+        <tr><th>Requested Tests</th><td><strong>${this.cell(request.testName)}</strong></td></tr>
+        <tr><th>Priority</th><td>${this.cell(request.priority)}</td></tr>
+        <tr><th>Specimen / Study</th><td>${this.cell(request.specimenType || 'Not specified')}</td></tr>
+        <tr><th>Status</th><td>${this.cell(request.status)}</td></tr>
+        <tr><th>Result Value</th><td>${this.cell(request.resultValue || '-')}</td></tr>
+        <tr><th>Reference Range</th><td>${this.cell(request.referenceRange || '-')}</td></tr>
+        <tr><th>Flag</th><td>${this.cell(request.resultFlag || '-')}</td></tr>
+        <tr><th>Summary</th><td>${this.cell(request.resultSummary || '-')}</td></tr>
+        <tr><th>Notes</th><td>${this.cell(request.resultNotes || '-')}</td></tr>
+        <tr><th>Collected At</th><td>${request.collectedAtUtc ? new Date(request.collectedAtUtc).toLocaleString() : '-'}</td></tr>
+        <tr><th>Resulted At</th><td>${request.resultedAtUtc ? new Date(request.resultedAtUtc).toLocaleString() : '-'}</td></tr>
+        <tr><th>Performed By</th><td>${this.cell(request.performedBy || '-')}</td></tr>
+        <tr><th>Verified By</th><td>${this.cell(request.verifiedBy || '-')}</td></tr>
+      </tbody></table>
+      <div class="signatures"><span>Lab Technician</span><span>Verifier / Pathologist</span></div>
+    `);
+  }
+
   printPrescription(prescription: Prescription) {
     const patient = this.patientById(prescription.patientId);
     const doctor = this.employeeById(prescription.doctorId);
@@ -1492,7 +1948,7 @@ export class AppComponent {
   filtered<T extends object>(items: T[]) {
     const term = this.search().trim().toLowerCase();
     if (!term) return items;
-    return items.filter((item) => JSON.stringify(item).toLowerCase().includes(term));
+    return items.filter((item) => this.rowSearchText(item).includes(term));
   }
 
   dismissToast(id: number) {
@@ -1530,6 +1986,53 @@ export class AppComponent {
     window.setTimeout(() => this.dismissToast(id), 4800);
   }
 
+  private rowSearchText(item: object) {
+    const record = item as Record<string, unknown>;
+    const extra: string[] = [];
+    const patientId = typeof record['patientId'] === 'string' ? record['patientId'] : '';
+    const doctorId = typeof record['doctorId'] === 'string' ? record['doctorId'] : '';
+    const invoiceId = typeof record['invoiceId'] === 'string' ? record['invoiceId'] : '';
+
+    if (patientId) extra.push(this.patientName(patientId), this.patientById(patientId)?.mrn ?? '', this.patientById(patientId)?.phone ?? '');
+    if (doctorId) extra.push(this.doctorName(doctorId));
+    if (invoiceId) extra.push(this.invoiceFor(invoiceId)?.invoiceNumber ?? '');
+
+    return `${JSON.stringify(item)} ${extra.join(' ')}`.toLowerCase();
+  }
+
+  private uniqueBy<T>(items: T[], keySelector: (item: T) => string) {
+    const seen = new Set<string>();
+    const result: T[] = [];
+    for (const item of items) {
+      const key = keySelector(item);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+
+    return result;
+  }
+
+  private uniqueTextValues(values: string[]) {
+    return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  }
+
+  private toggleStringSelection(values: string[], value: string, event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    const next = new Set(values);
+    if (checked) {
+      next.add(value);
+    } else {
+      next.delete(value);
+    }
+    values.splice(0, values.length, ...Array.from(next));
+  }
+
+  private doctorDisplayKey(doctor: Pick<Employee, 'firstName' | 'lastName' | 'emailAddress' | 'department' | 'specialization'>) {
+    const nameKey = `${doctor.firstName}|${doctor.lastName}|${doctor.department ?? ''}|${doctor.specialization ?? ''}`.toLowerCase();
+    return nameKey || doctor.emailAddress.toLowerCase();
+  }
+
   private syncDefaultSelections() {
     const firstPatientId = this.patients()[0]?.id ?? '';
     this.invoiceForm.patientId ||= firstPatientId;
@@ -1542,8 +2045,109 @@ export class AppComponent {
       return false;
     }
 
-    if (this.patientForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.patientForm.email)) {
+    if (this.patientForm.email && !this.isValidEmail(this.patientForm.email)) {
       this.toast('error', 'Enter a valid patient email address or leave it empty.');
+      return false;
+    }
+
+    return true;
+  }
+
+  private validateEmployeeForm() {
+    if (!this.employeeForm.firstName.trim() || !this.employeeForm.lastName.trim() || !this.employeeForm.emailAddress.trim() || !this.employeeForm.role.trim()) {
+      this.toast('error', 'First name, last name, email, and role are required.');
+      return false;
+    }
+
+    if (!this.isValidEmail(this.employeeForm.emailAddress)) {
+      this.toast('error', 'Enter a valid employee email address.');
+      return false;
+    }
+
+    if (!this.employeeForm.department.trim()) {
+      this.toast('error', 'Department is required for staff assignment.');
+      return false;
+    }
+
+    if (!this.employeeForm.specialization.trim()) {
+      this.toast('error', 'Select the employee specialization or work area.');
+      return false;
+    }
+
+    return true;
+  }
+
+  private isValidEmail(value: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+  }
+
+  private validatePatientIntakeForm() {
+    if (!this.patientIntakeForm.createAppointment) {
+      return true;
+    }
+
+    if (!this.patientIntakeForm.department.trim()) {
+      this.toast('error', 'Select the appointment department for patient intake.');
+      return false;
+    }
+
+    if (!this.patientIntakeForm.doctorId.trim()) {
+      this.toast('error', 'Select the assigned doctor for patient intake.');
+      return false;
+    }
+
+    if (!this.patientIntakeDoctors().some((doctor) => doctor.id === this.patientIntakeForm.doctorId)) {
+      this.toast('error', 'Selected doctor does not belong to the intake department.');
+      return false;
+    }
+
+    if (!this.patientIntakeForm.startsAtUtc || !Number.isFinite(new Date(this.patientIntakeForm.startsAtUtc).getTime())) {
+      this.toast('error', 'Select a valid appointment date and time.');
+      return false;
+    }
+
+    if (!this.patientIntakeForm.reason.trim()) {
+      this.toast('error', 'Appointment reason is required.');
+      return false;
+    }
+
+    return true;
+  }
+
+  private validateInvoiceForm() {
+    const quantity = Number(this.invoiceForm.quantity);
+    const unitPrice = Number(this.invoiceForm.unitPrice);
+    const lineDiscount = Number(this.invoiceForm.lineDiscount);
+    const discount = Number(this.invoiceForm.discount);
+    const tax = Number(this.invoiceForm.tax);
+
+    if (!this.invoiceForm.patientId.trim()) {
+      this.toast('error', 'Select the billing patient.');
+      return false;
+    }
+
+    if (!this.invoiceForm.description.trim() || !this.invoiceForm.serviceDescription.trim()) {
+      this.toast('error', 'Invoice and service descriptions are required.');
+      return false;
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      this.toast('error', 'Invoice quantity must be greater than zero.');
+      return false;
+    }
+
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      this.toast('error', 'Unit price must be greater than zero.');
+      return false;
+    }
+
+    if ([lineDiscount, discount, tax].some((value) => !Number.isFinite(value) || value < 0)) {
+      this.toast('error', 'Discount and tax values cannot be negative.');
+      return false;
+    }
+
+    if (lineDiscount >= quantity * unitPrice) {
+      this.toast('error', 'Line discount must be less than the line total.');
       return false;
     }
 
@@ -1579,6 +2183,18 @@ export class AppComponent {
     return true;
   }
 
+  private defaultEmployeeForm() {
+    return {
+      firstName: '',
+      lastName: '',
+      emailAddress: '',
+      phone: '',
+      role: 'DOCTOR',
+      department: 'Outpatient',
+      specialization: this.staffSpecializationsByRole['DOCTOR'][0],
+    };
+  }
+
   private emptyEncounterForm(): EncounterForm {
     return { patientId: '', doctorId: '', visitType: '', chiefComplaint: '', assessment: '', plan: '' };
   }
@@ -1592,11 +2208,49 @@ export class AppComponent {
   }
 
   private emptyPrescriptionForm(): PrescriptionForm {
-    return { patientId: '', doctorId: '', medication: '', instructions: '' };
+    return {
+      patientId: '',
+      doctorId: '',
+      selectedMedications: [],
+      customMedication: '',
+      medication: '',
+      dose: '',
+      route: 'Oral',
+      frequency: '',
+      duration: '',
+      quantity: '',
+      instructions: '',
+    };
   }
 
   private emptyLabForm(): LabForm {
-    return { patientId: '', doctorId: '', testName: '' };
+    return {
+      patientId: '',
+      doctorId: '',
+      selectedTests: [],
+      testName: '',
+      category: 'Laboratory',
+      priority: 'Routine',
+      specimenType: 'Whole blood',
+      clinicalNote: '',
+    };
+  }
+
+  private emptyLabResultForm(): LabResultForm {
+    return {
+      id: '',
+      status: 'Specimen Collected',
+      specimenType: 'Whole blood',
+      resultSummary: '',
+      resultValue: '',
+      referenceRange: '',
+      resultFlag: 'Normal',
+      resultNotes: '',
+      performedBy: '',
+      verifiedBy: '',
+      collectedAtUtc: this.localDateTimeValue(0),
+      resultedAtUtc: this.localDateTimeValue(0),
+    };
   }
 
   private patientToForm(patient: Patient): Omit<Patient, 'id' | 'mrn'> {
@@ -1620,6 +2274,19 @@ export class AppComponent {
       emergencyContactName: patient.emergencyContactName ?? '',
       emergencyContactPhone: patient.emergencyContactPhone ?? '',
       photoDataUrl: patient.photoDataUrl ?? '',
+    };
+  }
+
+  private emptyPatientIntakeForm(): PatientIntakeForm {
+    return {
+      createAppointment: true,
+      department: 'Outpatient',
+      doctorId: '',
+      startsAtUtc: this.localDateTimeValue(0),
+      reason: 'Initial consultation',
+      appointmentType: 'Consultation',
+      priority: 'Normal',
+      notes: 'Created during patient registration',
     };
   }
 
