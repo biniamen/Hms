@@ -1,541 +1,245 @@
-import { HttpClient } from '@angular/common/http';
-import { Injectable, signal } from '@angular/core';
+import { Injectable } from '@angular/core';
+import { AccessControlApiService, EmployeePayload } from './features/access-control/access-control-api.service';
+import { AuthApiService } from './features/auth/auth-api.service';
+import { BillingApiService } from './features/billing/billing-api.service';
+import { ClinicalApiService } from './features/clinical/clinical-api.service';
+import { EnterpriseRecord } from './features/clinical/clinical.models';
+import { AppointmentPayload, PatientManagementApiService } from './features/patients/patient-management-api.service';
+import { Patient } from './features/patients/patient-management.models';
+import { SystemHealthApiService } from './features/system-health/system-health-api.service';
 
-export interface ApiResponse<T> {
-  success: boolean;
-  message: string;
-  data: T;
-}
-
-export interface LoginResponse {
-  accessToken: string;
-  employeeId: string;
-  emailAddress: string;
-  role: string;
-  permission: string;
-}
-
-export interface Employee {
-  id: string;
-  employeeNo: string;
-  firstName: string;
-  lastName: string;
-  emailAddress: string;
-  phone?: string;
-  role: string;
-  permission: string;
-  department?: string;
-  specialization?: string;
-  isActive: boolean;
-  passwordSetupCompleted: boolean;
-  invitationSentAtUtc?: string;
-  passwordSetupExpiresAtUtc?: string;
-}
-
-export interface EmployeeInviteResponse {
-  employee: Employee;
-  setupUrl: string;
-}
-
-export interface PasswordResetResponse {
-  accepted: boolean;
-  setupUrl?: string;
-}
-
-export interface EmailOutboxMessage {
-  id: string;
-  recipient: string;
-  subject: string;
-  status: string;
-  createdAtUtc: string;
-  sentAtUtc?: string;
-  error?: string;
-  setupUrl?: string;
-}
-
-export interface RolePermission {
-  role: string;
-  description: string;
-  permissions: string[];
-  userCount: number;
-}
-
-export interface Permission {
-  key: string;
-  description: string;
-  module: string;
-}
-
-export interface Department {
-  id: string;
-  code: string;
-  name: string;
-  type: string;
-  location: string;
-}
-
-export interface DoctorProfile {
-  id: string;
-  firstName: string;
-  lastName: string;
-  emailAddress: string;
-  department?: string;
-  specialization?: string;
-  queueToday: number;
-  isActive: boolean;
-}
-
-export interface InsuranceCompany {
-  id: string;
-  name: string;
-  payerCode: string;
-  contactPerson: string;
-  phone: string;
-  email: string;
-  address: string;
-  coverageType: string;
-  coveragePercent: number;
-  isActive: boolean;
-}
-
-export interface Patient {
-  id: string;
-  mrn: string;
-  firstName: string;
-  lastName: string;
-  email?: string;
-  phone: string;
-  gender: string;
-  dateOfBirth: string;
-  nationalId?: string;
-  maritalStatus?: string;
-  occupation?: string;
-  address?: string;
-  bloodType?: string;
-  insuranceCompanyId?: string;
-  insuranceCompanyName?: string;
-  employerName?: string;
-  insurancePlan?: string;
-  insuranceProvider?: string;
-  insurancePolicyNumber?: string;
-  emergencyContactName?: string;
-  emergencyContactPhone?: string;
-  photoDataUrl?: string;
-}
-
-export interface Appointment {
-  id: string;
-  patientId: string;
-  doctorId: string;
-  startsAtUtc: string;
-  status: string;
-  reason: string;
-  department: string;
-  appointmentType: string;
-  priority: string;
-  notes?: string;
-  queueNumber: number;
-  waitingAhead: number;
-  queueStatus: string;
-}
-
-export interface QueueSummary {
-  doctorId: string;
-  doctorName: string;
-  department: string;
-  scheduled: number;
-  waiting: number;
-  inService: number;
-  completed: number;
-}
-
-export interface Bed {
-  id: string;
-  ward: string;
-  room: string;
-  bedNumber: string;
-  isAvailable: boolean;
-}
-
-export interface Prescription {
-  id: string;
-  patientId: string;
-  doctorId: string;
-  medication: string;
-  instructions: string;
-  orderedAtUtc: string;
-}
-
-export interface ClinicalEncounter {
-  id: string;
-  patientId: string;
-  doctorId: string;
-  visitType: string;
-  chiefComplaint: string;
-  assessment: string;
-  plan: string;
-  encounterAtUtc: string;
-}
-
-export interface VitalSign {
-  id: string;
-  patientId: string;
-  temperatureC: number;
-  pulse: number;
-  respiratoryRate: number;
-  bloodPressure: string;
-  weightKg: number;
-  heightCm: number;
-  recordedAtUtc: string;
-}
-
-export interface Diagnosis {
-  id: string;
-  patientId: string;
-  doctorId: string;
-  code: string;
-  description: string;
-  severity: string;
-  diagnosedAtUtc: string;
-}
-
-export interface LabRequest {
-  id: string;
-  patientId: string;
-  doctorId: string;
-  testName: string;
-  status: string;
-  orderedAtUtc: string;
-  category: string;
-  priority: string;
-  specimenType: string;
-  clinicalNote: string;
-  resultSummary: string;
-  resultValue: string;
-  referenceRange: string;
-  resultFlag: string;
-  resultNotes: string;
-  performedBy: string;
-  verifiedBy: string;
-  collectedAtUtc?: string | null;
-  resultedAtUtc?: string | null;
-  updatedAtUtc: string;
-}
-
-export interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  patientId: string;
-  description: string;
-  subtotal: number;
-  discount: number;
-  tax: number;
-  total: number;
-  paid: number;
-  balance: number;
-  status: string;
-  dueAtUtc: string;
-  createdAtUtc: string;
-  items: InvoiceItem[];
-}
-
-export interface InvoiceItem {
-  id: string;
-  serviceCode: string;
-  description: string;
-  quantity: number;
-  unitPrice: number;
-  discount: number;
-  lineTotal: number;
-}
-
-export interface Payment {
-  id: string;
-  invoiceId: string;
-  receiptNumber: string;
-  amount: number;
-  method: string;
-  reference?: string;
-  receivedBy: string;
-  paidAtUtc: string;
-}
-
-export interface Receipt {
-  id: string;
-  receiptNumber: string;
-  invoiceNumber: string;
-  invoiceId: string;
-  patientId: string;
-  amount: number;
-  method: string;
-  reference?: string;
-  receivedBy: string;
-  paidAtUtc: string;
-  balanceAfterPayment: number;
-}
-
-export interface EnterpriseRecord {
-  id: string;
-  area: string;
-  recordNumber: string;
-  patientId?: string;
-  title: string;
-  department: string;
-  owner: string;
-  priority: string;
-  status: string;
-  amount: number;
-  dueAtUtc: string;
-  details: string;
-  createdAtUtc: string;
-  updatedAtUtc: string;
-}
-
-export interface ServiceStatus {
-  id: string;
-  name: string;
-  url: string;
-  description: string;
-  projectPath: string;
-  status: string;
-  canStart: boolean;
-}
+export * from './core/api/api-response.model';
+export * from './features/access-control/access-control.models';
+export * from './features/auth/auth.models';
+export * from './features/billing/billing.models';
+export * from './features/clinical/clinical.models';
+export * from './features/patients/patient-management.models';
+export * from './features/system-health/system-health.models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  private readonly baseUrl = 'http://localhost:5200';
-  readonly session = signal<LoginResponse | null>(null);
+  constructor(
+    private auth: AuthApiService,
+    private accessControl: AccessControlApiService,
+    private patientManagement: PatientManagementApiService,
+    private clinical: ClinicalApiService,
+    private billing: BillingApiService,
+    private systemHealth: SystemHealthApiService,
+  ) {}
 
-  constructor(private http: HttpClient) {
-    const savedSession = localStorage.getItem('hms_session');
-    if (savedSession) {
-      try {
-        const session = JSON.parse(savedSession) as LoginResponse;
-        this.session.set(session);
-        localStorage.setItem('hms_access_token', session.accessToken);
-      } catch {
-        this.clearSession();
-      }
-    }
+  get session() {
+    return this.auth.session;
   }
 
-  storeSession(session: LoginResponse) {
-    this.session.set(session);
-    localStorage.setItem('hms_session', JSON.stringify(session));
-    localStorage.setItem('hms_access_token', session.accessToken);
+  storeSession(...args: Parameters<AuthApiService['storeSession']>) {
+    return this.auth.storeSession(...args);
   }
 
   clearSession() {
-    this.session.set(null);
-    localStorage.removeItem('hms_session');
-    localStorage.removeItem('hms_access_token');
+    return this.auth.clearSession();
   }
 
-  login(emailAddress: string, password: string) {
-    return this.http.post<ApiResponse<LoginResponse>>(`${this.baseUrl}/api/auth/login`, {
-      emailAddress,
-      password,
-    });
+  login(...args: Parameters<AuthApiService['login']>) {
+    return this.auth.login(...args);
+  }
+
+  setupPassword(...args: Parameters<AuthApiService['setupPassword']>) {
+    return this.auth.setupPassword(...args);
+  }
+
+  forgotPassword(...args: Parameters<AuthApiService['forgotPassword']>) {
+    return this.auth.forgotPassword(...args);
+  }
+
+  getEmailOutbox(...args: Parameters<AuthApiService['getEmailOutbox']>) {
+    return this.auth.getEmailOutbox(...args);
+  }
+
+  getLatestEmailLink(...args: Parameters<AuthApiService['getLatestEmailLink']>) {
+    return this.auth.getLatestEmailLink(...args);
   }
 
   getEmployees() {
-    return this.http.get<ApiResponse<Employee[]>>(`${this.baseUrl}/api/employees`);
+    return this.accessControl.getEmployees();
   }
 
-  createEmployee(payload: { firstName: string; lastName: string; emailAddress: string; phone?: string; role: string; department?: string; specialization?: string }) {
-    return this.http.post<ApiResponse<EmployeeInviteResponse>>(`${this.baseUrl}/api/employees`, payload);
+  createEmployee(payload: EmployeePayload) {
+    return this.accessControl.createEmployee(payload);
   }
 
-  updateEmployee(id: string, payload: { firstName: string; lastName: string; emailAddress: string; phone?: string; role: string; department?: string; specialization?: string }) {
-    return this.http.put<ApiResponse<Employee>>(`${this.baseUrl}/api/employees/${id}`, payload);
+  updateEmployee(id: string, payload: EmployeePayload) {
+    return this.accessControl.updateEmployee(id, payload);
   }
 
-  updateEmployeeStatus(id: string, isActive: boolean) {
-    return this.http.put<ApiResponse<Employee>>(`${this.baseUrl}/api/employees/${id}/status`, { isActive });
+  updateEmployeeStatus(...args: Parameters<AccessControlApiService['updateEmployeeStatus']>) {
+    return this.accessControl.updateEmployeeStatus(...args);
   }
 
-  resendEmployeeInvite(id: string) {
-    return this.http.post<ApiResponse<EmployeeInviteResponse>>(`${this.baseUrl}/api/employees/${id}/invite`, {});
-  }
-
-  setupPassword(payload: { token: string; password: string }) {
-    return this.http.post<ApiResponse<unknown>>(`${this.baseUrl}/api/auth/setup-password`, payload);
-  }
-
-  forgotPassword(emailAddress: string) {
-    return this.http.post<ApiResponse<PasswordResetResponse>>(`${this.baseUrl}/api/auth/forgot-password`, { emailAddress });
-  }
-
-  getEmailOutbox(recipient?: string) {
-    const query = recipient ? `?recipient=${encodeURIComponent(recipient)}` : '';
-    return this.http.get<ApiResponse<EmailOutboxMessage[]>>(`${this.baseUrl}/api/auth/email-outbox${query}`);
-  }
-
-  getLatestEmailLink(recipient: string) {
-    return this.http.get<ApiResponse<{ setupUrl: string }>>(`${this.baseUrl}/api/auth/email-outbox/latest-link?recipient=${encodeURIComponent(recipient)}`);
+  resendEmployeeInvite(...args: Parameters<AccessControlApiService['resendEmployeeInvite']>) {
+    return this.accessControl.resendEmployeeInvite(...args);
   }
 
   getRoles() {
-    return this.http.get<ApiResponse<RolePermission[]>>(`${this.baseUrl}/api/roles`);
+    return this.accessControl.getRoles();
   }
 
-  createRole(payload: { role: string; description: string; permissions: string[] }) {
-    return this.http.post<ApiResponse<RolePermission>>(`${this.baseUrl}/api/roles`, payload);
+  createRole(...args: Parameters<AccessControlApiService['createRole']>) {
+    return this.accessControl.createRole(...args);
   }
 
-  updateRole(role: string, payload: { description: string; permissions: string[] }) {
-    return this.http.put<ApiResponse<RolePermission>>(`${this.baseUrl}/api/roles/${role}`, payload);
+  updateRole(...args: Parameters<AccessControlApiService['updateRole']>) {
+    return this.accessControl.updateRole(...args);
   }
 
   getPermissions() {
-    return this.http.get<ApiResponse<Permission[]>>(`${this.baseUrl}/api/permissions`);
+    return this.accessControl.getPermissions();
   }
 
-  createPermission(payload: { key: string; description: string; module: string }) {
-    return this.http.post<ApiResponse<Permission>>(`${this.baseUrl}/api/permissions`, payload);
+  createPermission(...args: Parameters<AccessControlApiService['createPermission']>) {
+    return this.accessControl.createPermission(...args);
   }
 
   getDepartments() {
-    return this.http.get<ApiResponse<Department[]>>(`${this.baseUrl}/api/departments`);
+    return this.accessControl.getDepartments();
   }
 
-  createDepartment(payload: { code: string; name: string; type: string; location: string }) {
-    return this.http.post<ApiResponse<Department>>(`${this.baseUrl}/api/departments`, payload);
+  createDepartment(...args: Parameters<AccessControlApiService['createDepartment']>) {
+    return this.accessControl.createDepartment(...args);
   }
 
   getDoctors() {
-    return this.http.get<ApiResponse<DoctorProfile[]>>(`${this.baseUrl}/api/doctors`);
+    return this.accessControl.getDoctors();
   }
 
   getPatients() {
-    return this.http.get<ApiResponse<Patient[]>>(`${this.baseUrl}/api/patients`);
+    return this.patientManagement.getPatients();
   }
 
   createPatient(payload: Omit<Patient, 'id' | 'mrn'>) {
-    return this.http.post<ApiResponse<Patient>>(`${this.baseUrl}/api/patients`, payload);
+    return this.patientManagement.createPatient(payload);
   }
 
   updatePatient(id: string, payload: Omit<Patient, 'id' | 'mrn'>) {
-    return this.http.put<ApiResponse<Patient>>(`${this.baseUrl}/api/patients/${id}`, payload);
+    return this.patientManagement.updatePatient(id, payload);
   }
 
   getInsuranceCompanies() {
-    return this.http.get<ApiResponse<InsuranceCompany[]>>(`${this.baseUrl}/api/insurance-companies`);
+    return this.patientManagement.getInsuranceCompanies();
   }
 
-  createInsuranceCompany(payload: { name: string; payerCode: string; contactPerson: string; phone: string; email: string; address: string; coverageType: string; coveragePercent: number }) {
-    return this.http.post<ApiResponse<InsuranceCompany>>(`${this.baseUrl}/api/insurance-companies`, payload);
+  createInsuranceCompany(...args: Parameters<PatientManagementApiService['createInsuranceCompany']>) {
+    return this.patientManagement.createInsuranceCompany(...args);
   }
 
   getAppointments() {
-    return this.http.get<ApiResponse<Appointment[]>>(`${this.baseUrl}/api/appointments`);
+    return this.patientManagement.getAppointments();
   }
 
-  createAppointment(payload: { patientId: string; doctorId: string; startsAtUtc: string; reason: string; department: string; appointmentType: string; priority: string; notes?: string }) {
-    return this.http.post<ApiResponse<Appointment>>(`${this.baseUrl}/api/appointments`, payload);
+  createAppointment(payload: AppointmentPayload) {
+    return this.patientManagement.createAppointment(payload);
   }
 
   getQueueSummary() {
-    return this.http.get<ApiResponse<QueueSummary[]>>(`${this.baseUrl}/api/appointments/queue`);
+    return this.patientManagement.getQueueSummary();
   }
 
-  updateAppointmentStatus(id: string, status: string) {
-    return this.http.put<ApiResponse<Appointment>>(`${this.baseUrl}/api/appointments/${id}/status`, { status });
+  updateAppointmentStatus(...args: Parameters<PatientManagementApiService['updateAppointmentStatus']>) {
+    return this.patientManagement.updateAppointmentStatus(...args);
   }
 
   getBeds() {
-    return this.http.get<ApiResponse<Bed[]>>(`${this.baseUrl}/api/beds`);
+    return this.patientManagement.getBeds();
   }
 
   getPrescriptions() {
-    return this.http.get<ApiResponse<Prescription[]>>(`${this.baseUrl}/api/clinical/prescriptions`);
+    return this.clinical.getPrescriptions();
   }
 
   getEncounters() {
-    return this.http.get<ApiResponse<ClinicalEncounter[]>>(`${this.baseUrl}/api/clinical/encounters`);
+    return this.clinical.getEncounters();
   }
 
-  createEncounter(payload: { patientId: string; doctorId: string; visitType: string; chiefComplaint: string; assessment: string; plan: string }) {
-    return this.http.post<ApiResponse<ClinicalEncounter>>(`${this.baseUrl}/api/clinical/encounters`, payload);
+  createEncounter(...args: Parameters<ClinicalApiService['createEncounter']>) {
+    return this.clinical.createEncounter(...args);
   }
 
   getVitals() {
-    return this.http.get<ApiResponse<VitalSign[]>>(`${this.baseUrl}/api/clinical/vitals`);
+    return this.clinical.getVitals();
   }
 
-  createVitals(payload: { patientId: string; temperatureC: number; pulse: number; respiratoryRate: number; bloodPressure: string; weightKg: number; heightCm: number }) {
-    return this.http.post<ApiResponse<VitalSign>>(`${this.baseUrl}/api/clinical/vitals`, payload);
+  createVitals(...args: Parameters<ClinicalApiService['createVitals']>) {
+    return this.clinical.createVitals(...args);
   }
 
   getDiagnoses() {
-    return this.http.get<ApiResponse<Diagnosis[]>>(`${this.baseUrl}/api/clinical/diagnoses`);
+    return this.clinical.getDiagnoses();
   }
 
-  createDiagnosis(payload: { patientId: string; doctorId: string; code: string; description: string; severity: string }) {
-    return this.http.post<ApiResponse<Diagnosis>>(`${this.baseUrl}/api/clinical/diagnoses`, payload);
+  createDiagnosis(...args: Parameters<ClinicalApiService['createDiagnosis']>) {
+    return this.clinical.createDiagnosis(...args);
   }
 
-  createPrescription(payload: { patientId: string; doctorId: string; medication: string; instructions: string }) {
-    return this.http.post<ApiResponse<Prescription>>(`${this.baseUrl}/api/clinical/prescriptions`, payload);
+  createPrescription(...args: Parameters<ClinicalApiService['createPrescription']>) {
+    return this.clinical.createPrescription(...args);
   }
 
   getLabRequests() {
-    return this.http.get<ApiResponse<LabRequest[]>>(`${this.baseUrl}/api/clinical/lab-requests`);
+    return this.clinical.getLabRequests();
   }
 
-  createLabRequest(payload: { patientId: string; doctorId: string; testName: string; category?: string; priority?: string; specimenType?: string; clinicalNote?: string }) {
-    return this.http.post<ApiResponse<LabRequest>>(`${this.baseUrl}/api/clinical/lab-requests`, payload);
+  createLabRequest(...args: Parameters<ClinicalApiService['createLabRequest']>) {
+    return this.clinical.createLabRequest(...args);
   }
 
-  updateLabResult(id: string, payload: { status: string; specimenType?: string; resultSummary?: string; resultValue?: string; referenceRange?: string; resultFlag?: string; resultNotes?: string; performedBy?: string; verifiedBy?: string; collectedAtUtc?: string | null; resultedAtUtc?: string | null }) {
-    return this.http.put<ApiResponse<LabRequest>>(`${this.baseUrl}/api/clinical/lab-requests/${id}/result`, payload);
-  }
-
-  getInvoices() {
-    return this.http.get<ApiResponse<Invoice[]>>(`${this.baseUrl}/api/billing/invoices`);
-  }
-
-  createInvoice(payload: { patientId: string; description: string; amount: number; discount: number; tax: number; paymentType: string; insuranceProvider?: string; items?: Array<{ serviceCode: string; description: string; quantity: number; unitPrice: number; discount: number }> }) {
-    return this.http.post<ApiResponse<Invoice>>(`${this.baseUrl}/api/billing/invoices`, payload);
-  }
-
-  updateInvoiceStatus(id: string, status: string) {
-    return this.http.put<ApiResponse<Invoice>>(`${this.baseUrl}/api/billing/invoices/${id}/status`, { status });
-  }
-
-  getPayments() {
-    return this.http.get<ApiResponse<Payment[]>>(`${this.baseUrl}/api/billing/payments`);
-  }
-
-  getReceipts() {
-    return this.http.get<ApiResponse<Receipt[]>>(`${this.baseUrl}/api/billing/receipts`);
-  }
-
-  recordPayment(payload: { invoiceId: string; amount: number; method: string; reference?: string; receivedBy?: string }) {
-    return this.http.post<ApiResponse<Receipt>>(`${this.baseUrl}/api/billing/payments`, payload);
+  updateLabResult(...args: Parameters<ClinicalApiService['updateLabResult']>) {
+    return this.clinical.updateLabResult(...args);
   }
 
   getEnterpriseRecords() {
-    return this.http.get<ApiResponse<EnterpriseRecord[]>>(`${this.baseUrl}/api/clinical/enterprise-records`);
+    return this.clinical.getEnterpriseRecords();
   }
 
   createEnterpriseRecord(payload: Partial<EnterpriseRecord>) {
-    return this.http.post<ApiResponse<EnterpriseRecord>>(`${this.baseUrl}/api/clinical/enterprise-records`, payload);
+    return this.clinical.createEnterpriseRecord(payload);
   }
 
   updateEnterpriseRecord(id: string, payload: Partial<EnterpriseRecord>) {
-    return this.http.put<ApiResponse<EnterpriseRecord>>(`${this.baseUrl}/api/clinical/enterprise-records/${id}`, payload);
+    return this.clinical.updateEnterpriseRecord(id, payload);
   }
 
-  updateEnterpriseRecordStatus(id: string, status: string) {
-    return this.http.put<ApiResponse<EnterpriseRecord>>(`${this.baseUrl}/api/clinical/enterprise-records/${id}/status`, { status });
+  updateEnterpriseRecordStatus(...args: Parameters<ClinicalApiService['updateEnterpriseRecordStatus']>) {
+    return this.clinical.updateEnterpriseRecordStatus(...args);
+  }
+
+  getInvoices() {
+    return this.billing.getInvoices();
+  }
+
+  createInvoice(...args: Parameters<BillingApiService['createInvoice']>) {
+    return this.billing.createInvoice(...args);
+  }
+
+  updateInvoiceStatus(...args: Parameters<BillingApiService['updateInvoiceStatus']>) {
+    return this.billing.updateInvoiceStatus(...args);
+  }
+
+  getPayments() {
+    return this.billing.getPayments();
+  }
+
+  getReceipts() {
+    return this.billing.getReceipts();
+  }
+
+  recordPayment(...args: Parameters<BillingApiService['recordPayment']>) {
+    return this.billing.recordPayment(...args);
   }
 
   getServiceStatuses() {
-    return this.http.get<ServiceStatus[]>(`${this.baseUrl}/api/operations/services`);
+    return this.systemHealth.getServiceStatuses();
   }
 
-  startService(id: string) {
-    return this.http.post<{ message: string; url: string }>(`${this.baseUrl}/api/operations/services/${id}/start`, {});
+  startService(...args: Parameters<SystemHealthApiService['startService']>) {
+    return this.systemHealth.startService(...args);
   }
 }
