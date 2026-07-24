@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# HMS Platform Startup Script
+# Usage: ./start-hms.sh           (start)
+#        ./start-hms.sh stop      (stop)
+#        ./start-hms.sh restart   (restart)
+
+set +e  # Don't exit on error — we handle errors gracefully
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND="$ROOT/backend"
-FRONTEND="$ROOT/frontend/hms-web"
+FRONTEND="$ROOT/newfrontend"
 LOG_DIR="$ROOT/.runtime-logs"
 LOCAL_CONFIG="$ROOT/hms.local.sh"
 PID_FILE="$LOG_DIR/.pids"
+DOTNET_HOME="$BACKEND/.dotnet-home"
+DOTNET_APPDATA="$BACKEND/.appdata"
+
+# Set dotnet home to reduce memory issues with MSBuild nodes
+export DOTNET_CLI_HOME="$DOTNET_HOME"
+export APPDATA="$DOTNET_APPDATA"
+export MSBUILDDISABLENODEREUSE=1
+
+mkdir -p "$DOTNET_HOME" "$DOTNET_APPDATA"
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -21,7 +35,8 @@ cleanup() {
     if [ -f "$PID_FILE" ]; then
         while IFS= read -r pid; do
             if kill -0 "$pid" 2>/dev/null; then
-                kill "$pid" 2>/dev/null && info "Stopped PID $pid"
+                kill "$pid" 2>/dev/null || true
+                info "Stopped PID $pid"
             fi
         done < "$PID_FILE"
         rm -f "$PID_FILE"
@@ -51,7 +66,8 @@ start_service() {
     local err_log="$LOG_DIR/${name}.err.log"
 
     info "Starting $name on port $port ..."
-    nohup dotnet run --project "$project_dir" --no-build --urls "http://localhost:$port" > "$out_log" 2> "$err_log" &
+    # Use nohup and redirect to log files
+    (cd "$project_dir" && nohup dotnet run --no-build --urls "http://localhost:$port" > "$out_log" 2> "$err_log" &)
     local pid=$!
     echo "$pid" >> "$PID_FILE"
     ok "$name started (PID $pid) — logs: $LOG_DIR/$name.*.log"

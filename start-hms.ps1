@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backend = Join-Path $root "backend"
-$frontend = Join-Path $root "frontend\hms-web"
+$frontend = Join-Path $root "newfrontend"
 $logDir = Join-Path $root ".runtime-logs"
 $localConfig = Join-Path $root "hms.local.ps1"
 $smtpLocalConfig = Join-Path $root "smtp.local.ps1"

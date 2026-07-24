@@ -1,22 +1,13 @@
 import { bootstrapApplication } from '@angular/platform-browser';
-import { HttpInterceptorFn, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
 import { AppComponent } from './app/app.component';
-
-const authInterceptor: HttpInterceptorFn = (request, next) => {
-  const token = localStorage.getItem('hms_access_token');
-  const isApiRequest = request.url.startsWith('http://localhost:5200');
-  const isPublicAuthRequest =
-    request.url.includes('/api/auth/login') ||
-    request.url.includes('/api/auth/setup-password') ||
-    request.url.includes('/api/auth/forgot-password');
-
-  if (token && isApiRequest && !isPublicAuthRequest) {
-    return next(request.clone({ setHeaders: { Authorization: `Bearer ${token}` } }));
-  }
-
-  return next(request);
-};
+import { routes } from './app/app.routes';
+import { authInterceptor } from './app/core/interceptors/auth.interceptor';
 
 bootstrapApplication(AppComponent, {
-  providers: [provideHttpClient(withInterceptors([authInterceptor]))],
+  providers: [
+    provideRouter(routes),
+    provideHttpClient(withInterceptors([authInterceptor])),
+  ],
 }).catch((err) => console.error(err));
