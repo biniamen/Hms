@@ -1,5 +1,5 @@
-﻿<section *ngIf="vm.modal()" class="fixed inset-0 z-40 grid place-items-center bg-slate-950/50 p-4">
-  <div class="max-h-[92vh] w-[min(880px,100%)] overflow-auto rounded-lg bg-white shadow-float">
+﻿<section *ngIf="vm.modal()" class="fixed inset-0 z-40 grid place-items-center bg-slate-950/20 p-4 backdrop-blur-sm">
+  <div class="mx-auto max-h-[92vh] w-[min(880px,100%)] overflow-auto rounded-lg bg-white shadow-float">
     <div class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
       <h2 class="text-lg font-black text-slate-900">{{ vm.modal() | titlecase }}</h2>
       <button class="btn-secondary" type="button" (click)="vm.modal.set(null); stopCamera()">Close</button>

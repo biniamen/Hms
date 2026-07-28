@@ -130,8 +130,8 @@ import { Patient, PatientStatus } from '../../core/models';
 
       <!-- REGISTER PATIENT MODAL -->
       @if (isRegisterModalOpen()) {
-        <div class="fixed inset-0 bg-slate-900/30 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div class="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-scale-up space-y-6">
+        <div class="fixed inset-0 bg-slate-900/20 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+          <div class="mx-auto bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-scale-up space-y-6">
             
             <div class="flex items-center justify-between border-b border-slate-100 pb-4">
               <h3 class="text-base font-bold text-slate-900 font-display">New Patient Intake & Registration</h3>
