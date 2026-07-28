@@ -72,6 +72,7 @@ public sealed class PatientsDbContext(DbContextOptions<PatientsDbContext> option
             entity.Property(bed => bed.Room).HasColumnName("room").HasMaxLength(32);
             entity.Property(bed => bed.BedNumber).HasColumnName("bed_number").HasMaxLength(32);
             entity.Property(bed => bed.IsAvailable).HasColumnName("is_available");
+            entity.Property(bed => bed.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<Appointment>(entity =>
@@ -97,9 +98,8 @@ public sealed class PatientsDbContext(DbContextOptions<PatientsDbContext> option
     }
 }
 
-public sealed class Patient
+public sealed class Patient : Entity
 {
-    public Guid Id { get; set; }
     public string Mrn { get; set; } = "";
     public string FirstName { get; set; } = "";
     public string LastName { get; set; } = "";
@@ -121,14 +121,12 @@ public sealed class Patient
     public string? EmergencyContactPhone { get; set; }
     public string? PhotoContentType { get; set; }
     public byte[]? PhotoData { get; set; }
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public InsuranceCompany? InsuranceCompany { get; set; }
     public List<Appointment> Appointments { get; set; } = [];
 }
 
-public sealed class InsuranceCompany
+public sealed class InsuranceCompany : Entity
 {
-    public Guid Id { get; set; }
     public string Name { get; set; } = "";
     public string PayerCode { get; set; } = "";
     public string? ContactPerson { get; set; }
@@ -138,13 +136,11 @@ public sealed class InsuranceCompany
     public string CoverageType { get; set; } = "Corporate";
     public decimal CoveragePercent { get; set; } = 80;
     public bool IsActive { get; set; } = true;
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public List<Patient> Patients { get; set; } = [];
 }
 
-public sealed class Appointment
+public sealed class Appointment : Entity
 {
-    public Guid Id { get; set; }
     public Guid PatientId { get; set; }
     public Guid DoctorId { get; set; }
     public DateTime StartsAtUtc { get; set; }
@@ -154,13 +150,11 @@ public sealed class Appointment
     public string AppointmentType { get; set; } = "Consultation";
     public string Priority { get; set; } = "Normal";
     public string? Notes { get; set; }
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public Patient? Patient { get; set; }
 }
 
-public sealed class Bed
+public sealed class Bed : Entity
 {
-    public Guid Id { get; set; }
     public string Ward { get; set; } = "";
     public string Room { get; set; } = "";
     public string BedNumber { get; set; } = "";

@@ -26,6 +26,7 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(encounter => encounter.Assessment).HasColumnName("assessment");
             entity.Property(encounter => encounter.Plan).HasColumnName("plan");
             entity.Property(encounter => encounter.EncounterAtUtc).HasColumnName("encounter_at_utc").HasDefaultValueSql("now()");
+            entity.Property(encounter => encounter.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<VitalSign>(entity =>
@@ -40,6 +41,7 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(vital => vital.WeightKg).HasColumnName("weight_kg").HasPrecision(6, 2);
             entity.Property(vital => vital.HeightCm).HasColumnName("height_cm").HasPrecision(6, 2);
             entity.Property(vital => vital.RecordedAtUtc).HasColumnName("recorded_at_utc").HasDefaultValueSql("now()");
+            entity.Property(vital => vital.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<Diagnosis>(entity =>
@@ -52,6 +54,7 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(diagnosis => diagnosis.Description).HasColumnName("description");
             entity.Property(diagnosis => diagnosis.Severity).HasColumnName("severity").HasMaxLength(60);
             entity.Property(diagnosis => diagnosis.DiagnosedAtUtc).HasColumnName("diagnosed_at_utc").HasDefaultValueSql("now()");
+            entity.Property(diagnosis => diagnosis.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<Prescription>(entity =>
@@ -63,6 +66,7 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(prescription => prescription.Medication).HasColumnName("medication").HasMaxLength(240);
             entity.Property(prescription => prescription.Instructions).HasColumnName("instructions");
             entity.Property(prescription => prescription.OrderedAtUtc).HasColumnName("ordered_at_utc").HasDefaultValueSql("now()");
+            entity.Property(prescription => prescription.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<LabRequest>(entity =>
@@ -85,6 +89,7 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(request => request.ResultNotes).HasColumnName("result_notes");
             entity.Property(request => request.PerformedBy).HasColumnName("performed_by").HasMaxLength(120);
             entity.Property(request => request.VerifiedBy).HasColumnName("verified_by").HasMaxLength(120);
+            entity.Property(request => request.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
             entity.Property(request => request.CollectedAtUtc).HasColumnName("collected_at_utc");
             entity.Property(request => request.ResultedAtUtc).HasColumnName("resulted_at_utc");
             entity.Property(request => request.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
@@ -112,9 +117,8 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
     }
 }
 
-public sealed class ClinicalEncounter
+public sealed class ClinicalEncounter : Entity
 {
-    public Guid Id { get; set; }
     public Guid PatientId { get; set; }
     public Guid DoctorId { get; set; }
     public string VisitType { get; set; } = "";
@@ -124,9 +128,8 @@ public sealed class ClinicalEncounter
     public DateTime EncounterAtUtc { get; set; } = DateTime.UtcNow;
 }
 
-public sealed class VitalSign
+public sealed class VitalSign : Entity
 {
-    public Guid Id { get; set; }
     public Guid PatientId { get; set; }
     public decimal TemperatureC { get; set; }
     public int Pulse { get; set; }
@@ -137,9 +140,8 @@ public sealed class VitalSign
     public DateTime RecordedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
-public sealed class Diagnosis
+public sealed class Diagnosis : Entity
 {
-    public Guid Id { get; set; }
     public Guid PatientId { get; set; }
     public Guid DoctorId { get; set; }
     public string Code { get; set; } = "";
@@ -148,9 +150,8 @@ public sealed class Diagnosis
     public DateTime DiagnosedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
-public sealed class Prescription
+public sealed class Prescription : Entity
 {
-    public Guid Id { get; set; }
     public Guid PatientId { get; set; }
     public Guid DoctorId { get; set; }
     public string Medication { get; set; } = "";
@@ -158,9 +159,8 @@ public sealed class Prescription
     public DateTime OrderedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
-public sealed class LabRequest
+public sealed class LabRequest : Entity
 {
-    public Guid Id { get; set; }
     public Guid PatientId { get; set; }
     public Guid DoctorId { get; set; }
     public string TestName { get; set; } = "";
@@ -182,9 +182,8 @@ public sealed class LabRequest
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
-public sealed class EnterpriseRecord
+public sealed class EnterpriseRecord : Entity
 {
-    public Guid Id { get; set; }
     public string Area { get; set; } = "";
     public string RecordNumber { get; set; } = "";
     public Guid? PatientId { get; set; }
@@ -196,7 +195,6 @@ public sealed class EnterpriseRecord
     public decimal Amount { get; set; }
     public DateTime? DueAtUtc { get; set; }
     public string Details { get; set; } = "";
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 

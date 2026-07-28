@@ -43,6 +43,7 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
             entity.Property(item => item.UnitPrice).HasColumnName("unit_price").HasPrecision(12, 2);
             entity.Property(item => item.Discount).HasColumnName("discount").HasPrecision(12, 2);
             entity.Property(item => item.LineTotal).HasColumnName("line_total").HasPrecision(12, 2);
+            entity.Property(item => item.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
             entity.HasOne(item => item.Invoice)
                 .WithMany(invoice => invoice.Items)
                 .HasForeignKey(item => item.InvoiceId)
@@ -61,6 +62,7 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
             entity.Property(payment => payment.Reference).HasColumnName("reference").HasMaxLength(120);
             entity.Property(payment => payment.ReceivedBy).HasColumnName("received_by").HasMaxLength(120);
             entity.Property(payment => payment.PaidAtUtc).HasColumnName("paid_at_utc").HasDefaultValueSql("now()");
+            entity.Property(payment => payment.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
             entity.Property(payment => payment.BalanceAfterPayment).HasColumnName("balance_after_payment").HasPrecision(12, 2);
             entity.HasOne(payment => payment.Invoice)
                 .WithMany(invoice => invoice.Payments)
@@ -70,9 +72,8 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
     }
 }
 
-public sealed class Invoice
+public sealed class Invoice : Entity
 {
-    public Guid Id { get; set; }
     public string InvoiceNumber { get; set; } = "";
     public Guid PatientId { get; set; }
     public string Description { get; set; } = "";
@@ -83,16 +84,14 @@ public sealed class Invoice
     public decimal Paid { get; set; }
     public string Status { get; set; } = "Unpaid";
     public DateTime DueAtUtc { get; set; }
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string PaymentType { get; set; } = "Cash";
     public string? InsuranceProvider { get; set; }
     public List<InvoiceItem> Items { get; set; } = [];
     public List<Payment> Payments { get; set; } = [];
 }
 
-public sealed class InvoiceItem
+public sealed class InvoiceItem : Entity
 {
-    public Guid Id { get; set; }
     public Guid InvoiceId { get; set; }
     public string ServiceCode { get; set; } = "";
     public string Description { get; set; } = "";
@@ -103,9 +102,8 @@ public sealed class InvoiceItem
     public Invoice? Invoice { get; set; }
 }
 
-public sealed class Payment
+public sealed class Payment : Entity
 {
-    public Guid Id { get; set; }
     public Guid InvoiceId { get; set; }
     public string ReceiptNumber { get; set; } = "";
     public decimal Amount { get; set; }

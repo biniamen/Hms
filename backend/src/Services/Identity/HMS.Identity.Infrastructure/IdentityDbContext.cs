@@ -60,6 +60,7 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
             entity.Property(department => department.Name).HasColumnName("name").HasMaxLength(160);
             entity.Property(department => department.Type).HasColumnName("type").HasMaxLength(80);
             entity.Property(department => department.Location).HasColumnName("location").HasMaxLength(160);
+            entity.Property(department => department.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<Employee>(entity =>
@@ -142,18 +143,16 @@ public sealed class RolePermission
     public Permission? Permission { get; set; }
 }
 
-public sealed class Department
+public sealed class Department : Entity
 {
-    public Guid Id { get; set; }
     public string Code { get; set; } = "";
     public string Name { get; set; } = "";
     public string Type { get; set; } = "";
     public string Location { get; set; } = "";
 }
 
-public sealed class Employee
+public sealed class Employee : Entity
 {
-    public Guid Id { get; set; }
     public string EmployeeNo { get; set; } = "";
     public string FirstName { get; set; } = "";
     public string LastName { get; set; } = "";
@@ -165,31 +164,26 @@ public sealed class Employee
     public string PasswordHash { get; set; } = "";
     public bool IsActive { get; set; } = true;
     public bool PasswordSetupCompleted { get; set; }
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public Role? Role { get; set; }
     public List<PasswordSetupToken> PasswordSetupTokens { get; set; } = [];
 }
 
-public sealed class PasswordSetupToken
+public sealed class PasswordSetupToken : Entity
 {
-    public Guid Id { get; set; }
     public Guid EmployeeId { get; set; }
     public string TokenHash { get; set; } = "";
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime SentAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresAtUtc { get; set; }
     public DateTime? UsedAtUtc { get; set; }
     public Employee? Employee { get; set; }
 }
 
-public sealed class EmailOutboxMessage
+public sealed class EmailOutboxMessage : Entity
 {
-    public Guid Id { get; set; }
     public string Recipient { get; set; } = "";
     public string Subject { get; set; } = "";
     public string Body { get; set; } = "";
     public string Status { get; set; } = "";
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? SentAtUtc { get; set; }
     public string? Error { get; set; }
 }
