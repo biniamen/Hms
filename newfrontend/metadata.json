@@ -1,0 +1,6 @@
+{
+  "name": "Hospital Management System",
+  "description": "Enterprise-grade Hospital Management System dashboard and SaaS platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
