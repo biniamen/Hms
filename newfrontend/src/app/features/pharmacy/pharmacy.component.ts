@@ -9,147 +9,177 @@ import { StoreService } from '../../core/services/store.service';
   imports: [CommonModule, ReactiveFormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-6 animate-fade-in">
+    <div class="space-y-6 animate-fade-in pb-20">
       
       <!-- TOP BAR -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 class="text-xl sm:text-2xl font-bold text-slate-900 font-display">Inpatient & Outpatient Pharmacy</h1>
-          <p class="text-xs text-slate-500 mt-1">Prescription order fulfillment, dosage checking, and clinical medication dispensing</p>
+          <h1 class="text-xl sm:text-2xl font-bold text-slate-900 font-display">Pharmacy & Medication Management</h1>
+          <p class="text-xs text-slate-500 mt-1">Order fulfillment, dosage verification, and clinical dispensing</p>
         </div>
 
-        <button 
-          (click)="openPrescribeModal()" 
-          class="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-semibold rounded-xl text-xs shadow-md shadow-emerald-500/20 flex items-center gap-2 self-start sm:self-auto">
-          <span class="material-icons text-base">medication</span>
-          <span>New Prescription Order</span>
-        </button>
+        @if (!isFormVisible()) {
+          <button 
+            (click)="isFormVisible.set(true)" 
+            class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 self-start sm:self-auto hover:bg-slate-800 transition-all active:scale-95">
+            <span class="material-icons text-base">medication</span>
+            <span>New Prescription Order</span>
+          </button>
+        }
       </div>
 
-      <!-- PRESCRIPTIONS QUEUE LIST -->
-      <div class="space-y-4">
-        @for (rx of store.prescriptions(); track rx.id) {
-          <div class="bg-white rounded-2xl p-6 border border-slate-200/80 subtle-shadow space-y-4">
-            
-            <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 font-bold flex items-center justify-center">
-                  <span class="material-icons text-xl">medication_liquid</span>
-                </div>
-                <div>
-                  <h3 class="text-sm font-bold text-slate-900 font-display">{{ rx.patientName }}</h3>
-                  <p class="text-xs text-slate-400">MRN: {{ rx.patientMrn }} • Prescribed by {{ rx.doctorName }} on {{ rx.date }}</p>
+      <!-- INLINE PRESCRIPTION FORM -->
+      @if (isFormVisible()) {
+        <div class="bg-white rounded-3xl border-2 border-emerald-500/20 shadow-2xl shadow-emerald-500/5 overflow-hidden animate-slide-down">
+          <div class="bg-emerald-50/50 px-6 py-4 border-b border-emerald-100 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
+                <span class="material-icons text-base">medical_services</span>
+              </div>
+              <div>
+                <h3 class="text-sm font-bold text-slate-900">Issue New Prescription</h3>
+                <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Medication Order Entry</p>
+              </div>
+            </div>
+            <button (click)="isFormVisible.set(false)" class="p-2 hover:bg-white rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
+
+          <form [formGroup]="rxForm" (ngSubmit)="submitPrescription()" class="p-6 sm:p-8 space-y-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              
+              <!-- Column 1: Patient Selection -->
+              <div class="space-y-4">
+                <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <span class="w-1 h-3 bg-emerald-500 rounded-full"></span> Target Patient
+                </h4>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Select Patient *</label>
+                  <select formControlName="patientId" [class]="inputClasses">
+                    @for (p of store.patients(); track p.id) {
+                      <option [value]="p.id">{{ p.name }} ({{ p.mrn }})</option>
+                    }
+                  </select>
                 </div>
               </div>
 
-              <div class="flex items-center gap-2">
-                <span [class]="rx.status === 'PENDING' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'" class="px-3 py-1 rounded-full text-xs font-bold uppercase border">
+              <!-- Column 2: Medication Details -->
+              <div class="space-y-4 lg:col-span-2">
+                <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <span class="w-1 h-3 bg-teal-500 rounded-full"></span> Drug & Dosage Info
+                </h4>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Drug Name *</label>
+                    <input type="text" formControlName="medName" placeholder="e.g. Amoxicillin" [class]="inputClasses" />
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Dosage *</label>
+                      <input type="text" formControlName="dosage" placeholder="500mg" [class]="inputClasses" />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Duration *</label>
+                      <input type="text" formControlName="duration" placeholder="7 days" [class]="inputClasses" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Frequency *</label>
+                    <input type="text" formControlName="frequency" placeholder="3x Daily" [class]="inputClasses" />
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Special Instructions</label>
+                    <input type="text" formControlName="instructions" placeholder="Take after meals" [class]="inputClasses" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
+              <button type="button" (click)="isFormVisible.set(false)" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Discard</button>
+              <button type="submit" class="px-8 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition-all hover:-translate-y-0.5 active:scale-95">
+                Authorize Prescription
+              </button>
+            </div>
+          </form>
+        </div>
+      }
+
+      <!-- PRESCRIPTIONS QUEUE -->
+      <div class="space-y-4">
+        @for (rx of store.prescriptions(); track rx.id) {
+          <div class="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow space-y-5">
+            
+            <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 font-bold flex items-center justify-center shadow-inner">
+                  <span class="material-icons text-2xl">pill</span>
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-slate-900">{{ rx.patientName }}</h3>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-[10px] text-slate-400 font-mono uppercase tracking-widest">MRN: {{ rx.patientMrn }}</span>
+                    <span class="w-1 h-1 bg-slate-200 rounded-full"></span>
+                    <span class="text-[10px] text-slate-400 font-medium italic">Ordered by {{ rx.doctorName }} • {{ rx.date }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <span [class]="rx.status === 'PENDING' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'" 
+                  class="px-4 py-1 rounded-full text-[10px] font-black uppercase border tracking-widest">
                   {{ rx.status }}
                 </span>
 
                 @if (rx.status === 'PENDING') {
                   <button 
                     (click)="store.dispensePrescription(rx.id)" 
-                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5">
-                    <span class="material-icons text-base">check_circle</span>
-                    <span>Dispense Rx</span>
+                    class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-[11px] shadow-lg shadow-emerald-500/20 transition-all hover:-translate-y-0.5 flex items-center gap-2">
+                    <span class="material-icons text-sm">check_circle</span>
+                    Dispense
                   </button>
                 }
               </div>
             </div>
 
-            <!-- Itemized Medications List -->
-            <div class="space-y-2">
-              <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Prescribed Medications</h4>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                @for (med of rx.medications; track med.name) {
-                  <div class="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start justify-between text-xs">
-                    <div>
-                      <div class="font-bold text-slate-900 text-sm">{{ med.name }}</div>
-                      <div class="text-emerald-700 font-semibold mt-0.5">{{ med.dosage }} • {{ med.frequency }}</div>
-                      <div class="text-slate-500 text-[11px] mt-1">Duration: {{ med.duration }} • Instructions: {{ med.instructions }}</div>
+            <!-- Itemized Medications Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              @for (med of rx.medications; track med.name) {
+                <div class="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex items-start justify-between relative overflow-hidden group">
+                  <div class="absolute right-0 top-0 w-1 h-full bg-emerald-500/20"></div>
+                  <div>
+                    <div class="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Prescribed Med</div>
+                    <div class="font-bold text-slate-900 text-sm">{{ med.name }}</div>
+                    <div class="flex items-center gap-2 mt-1">
+                      <span class="text-xs font-bold text-slate-700">{{ med.dosage }}</span>
+                      <span class="text-[10px] text-slate-400 font-bold">• {{ med.frequency }}</span>
                     </div>
-                    <span class="px-2 py-0.5 rounded bg-white text-slate-600 border font-mono text-[10px] font-bold">Rx Approved</span>
+                    <div class="text-slate-500 text-[11px] mt-2 bg-white px-2 py-1 rounded-lg inline-block border border-slate-100 italic">
+                       {{ med.duration }} course — {{ med.instructions }}
+                    </div>
                   </div>
-                }
-              </div>
+                </div>
+              }
             </div>
 
             @if (rx.pharmacyNotes) {
-              <div class="text-xs text-slate-500 italic bg-emerald-50/50 p-2.5 rounded-lg border border-emerald-100 flex items-center gap-1.5">
-                <span class="material-icons text-sm text-emerald-600">verified</span>
-                {{ rx.pharmacyNotes }}
+              <div class="text-[11px] text-emerald-800 font-medium bg-emerald-50 p-3 rounded-xl border border-emerald-100/50 flex items-center gap-2">
+                <span class="material-icons text-sm text-emerald-500">verified_user</span>
+                Pharmacist Note: {{ rx.pharmacyNotes }}
               </div>
             }
-
+          </div>
+        } @empty {
+          <div class="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+             <span class="material-icons text-slate-200 text-6xl mb-4">medical_information</span>
+             <p class="text-slate-400 text-xs font-bold uppercase tracking-widest">The Prescription Queue is Empty</p>
           </div>
         }
       </div>
-
-      <!-- CREATE PRESCRIPTION MODAL -->
-      @if (isPrescribeModalOpen()) {
-        <div class="fixed inset-0 bg-slate-900/30 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div class="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-scale-up space-y-6">
-            
-            <div class="flex items-center justify-between border-b border-slate-100 pb-4">
-              <h3 class="text-base font-bold text-slate-900 font-display">New Medication Prescription Order</h3>
-              <button (click)="closePrescribeModal()" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
-                <span class="material-icons">close</span>
-              </button>
-            </div>
-
-            <form [formGroup]="rxForm" (ngSubmit)="submitPrescription()" class="space-y-4 text-xs">
-              
-              <div>
-                <label for="rx-patient-id" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Select Patient *</label>
-                <select id="rx-patient-id" formControlName="patientId" class="w-full px-3 py-2 border rounded-xl text-xs">
-                  @for (p of store.patients(); track p.id) {
-                    <option [value]="p.id">{{ p.name }} ({{ p.mrn }})</option>
-                  }
-                </select>
-              </div>
-
-              <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                <div class="font-bold text-slate-800 uppercase text-[10px]">Medication Entry</div>
-                
-                <div>
-                  <label for="rx-med-name" class="block text-[10px] font-semibold uppercase text-slate-500 mb-1">Drug Name *</label>
-                  <input id="rx-med-name" type="text" formControlName="medName" placeholder="e.g. Amoxicillin Trihydrate" class="w-full px-3 py-2 border rounded-xl bg-white" />
-                </div>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <div>
-                    <label for="rx-dosage" class="block text-[10px] font-semibold uppercase text-slate-500 mb-1">Dosage *</label>
-                    <input id="rx-dosage" type="text" formControlName="dosage" placeholder="500mg" class="w-full px-3 py-2 border rounded-xl bg-white" />
-                  </div>
-                  <div>
-                    <label for="rx-freq" class="block text-[10px] font-semibold uppercase text-slate-500 mb-1">Frequency *</label>
-                    <input id="rx-freq" type="text" formControlName="frequency" placeholder="3x daily with meals" class="w-full px-3 py-2 border rounded-xl bg-white" />
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <div>
-                    <label for="rx-duration" class="block text-[10px] font-semibold uppercase text-slate-500 mb-1">Duration *</label>
-                    <input id="rx-duration" type="text" formControlName="duration" placeholder="7 days" class="w-full px-3 py-2 border rounded-xl bg-white" />
-                  </div>
-                  <div>
-                    <label for="rx-instruct" class="block text-[10px] font-semibold uppercase text-slate-500 mb-1">Instructions</label>
-                    <input id="rx-instruct" type="text" formControlName="instructions" placeholder="Finish full course" class="w-full px-3 py-2 border rounded-xl bg-white" />
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" (click)="closePrescribeModal()" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl">Cancel</button>
-                <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-md shadow-emerald-500/20">Issue Prescription</button>
-              </div>
-
-            </form>
-
-          </div>
-        </div>
-      }
 
     </div>
   `
@@ -157,7 +187,9 @@ import { StoreService } from '../../core/services/store.service';
 export class PharmacyComponent {
   store = inject(StoreService);
 
-  isPrescribeModalOpen = signal(false);
+  isFormVisible = signal(false);
+
+  readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 transition-all';
 
   rxForm = new FormGroup({
     patientId: new FormControl('p-1', [Validators.required]),
@@ -167,14 +199,6 @@ export class PharmacyComponent {
     duration: new FormControl('14 days', [Validators.required]),
     instructions: new FormControl('Take after breakfast and dinner')
   });
-
-  openPrescribeModal() {
-    this.isPrescribeModalOpen.set(true);
-  }
-
-  closePrescribeModal() {
-    this.isPrescribeModalOpen.set(false);
-  }
 
   submitPrescription() {
     if (this.rxForm.invalid) {
@@ -202,7 +226,7 @@ export class PharmacyComponent {
       });
     }
 
-    this.closePrescribeModal();
-    this.rxForm.reset();
+    this.isFormVisible.set(false);
+    this.rxForm.reset({ patientId: 'p-1', dosage: '500mg', frequency: 'Twice daily', duration: '14 days' });
   }
 }

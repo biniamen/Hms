@@ -172,7 +172,7 @@ import { BillingInvoice } from '../../core/models';
 
       <!-- GENERATE INVOICE MODAL -->
       @if (isInvoiceModalOpen()) {
-        <div class="fixed inset-0 bg-slate-900/30 z-50 flex items-center justify-center p-4 animate-fade-in">
+        <div class="fixed inset-0  z-50 flex items-center justify-center p-4 animate-fade-in">
           <div class="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-scale-up space-y-6">
             
             <div class="flex items-center justify-between border-b border-slate-100 pb-4">
