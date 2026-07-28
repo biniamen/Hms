@@ -165,7 +165,7 @@ app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest requ
     return Results.Created($"/api/clinical/prescriptions/{prescription.Id}", ApiResponse<PrescriptionDto>.Ok(
         new PrescriptionDto(prescription.Id, prescription.PatientId, prescription.DoctorId, prescription.Medication, prescription.Instructions, prescription.OrderedAtUtc),
         "Prescription created."));
-});
+}).WithValidation<CreatePrescriptionRequest>();
 
 app.MapGet("/api/clinical/lab-requests", async (ClinicalDbContext db) =>
 {

@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '9.0'
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hms_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore HMS.sln
+
+      - name: Build
+        run: dotnet build HMS.sln --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test HMS.sln --no-build --configuration Release --verbosity normal
+
+  frontend:
+    name: Frontend Build & Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: newfrontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: newfrontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test -- --watch=false --browsers=ChromeHeadless
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend images
+        run: |
+          docker build -f backend/Dockerfile \
+            --build-arg SERVICE_PROJECT=src/Services/Identity/HMS.Identity.Api/HMS.Identity.Api.csproj \
+            --build-arg SERVICE_DLL=HMS.Identity.Api.dll \
+            -t hms-identity-api backend/
+
+          docker build -f backend/Dockerfile \
+            --build-arg SERVICE_PROJECT=src/Services/Patients/HMS.Patients.Api/HMS.Patients.Api.csproj \
+            --build-arg SERVICE_DLL=HMS.Patients.Api.dll \
+            -t hms-patients-api backend/
+
+          docker build -f backend/Dockerfile \
+            --build-arg SERVICE_PROJECT=src/Services/Clinical/HMS.Clinical.Api/HMS.Clinical.Api.csproj \
+            --build-arg SERVICE_DLL=HMS.Clinical.Api.dll \
+            -t hms-clinical-api backend/
+
+          docker build -f backend/Dockerfile \
+            --build-arg SERVICE_PROJECT=src/Services/Billing/HMS.Billing.Api/HMS.Billing.Api.csproj \
+            --build-arg SERVICE_DLL=HMS.Billing.Api.dll \
+            -t hms-billing-api backend/
+
+          docker build -f backend/Dockerfile \
+            --build-arg SERVICE_PROJECT=src/ApiGateway/HMS.ApiGateway/HMS.ApiGateway.csproj \
+            --build-arg SERVICE_DLL=HMS.ApiGateway.dll \
+            -t hms-api-gateway backend/
+
+      - name: Build frontend image
+        run: docker build -f newfrontend/Dockerfile -t hms-web newfrontend/

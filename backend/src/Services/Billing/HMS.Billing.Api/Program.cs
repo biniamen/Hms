@@ -110,7 +110,7 @@ app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, Billin
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/billing/invoices/{invoice.Id}", ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice), "Invoice created."));
-});
+}).WithValidation<CreateInvoiceRequest>();
 
 app.MapPut("/api/billing/invoices/{id:guid}/status", async (Guid id, UpdateInvoiceStatusRequest request, BillingDbContext db) =>
 {
@@ -211,7 +211,7 @@ app.MapPost("/api/billing/payments", async (PaymentRequest request, BillingDbCon
 
     payment.Invoice = invoice;
     return Results.Ok(ApiResponse<ReceiptDto>.Ok(ToReceiptDto(payment), "Payment recorded and receipt prepared."));
-});
+}).WithValidation<PaymentRequest>();
 
 app.MapGet("/api/billing/receipts", async (BillingDbContext db) =>
 {

@@ -1,6 +1,7 @@
 using HMS.Contracts;
 using HMS.Identity.Infrastructure;
 using HMS.SharedKernel;
+using HMS.SharedKernel.Constants;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Mail;
@@ -69,7 +70,7 @@ app.MapPost("/api/auth/login", async (LoginRequest request, IdentityDbContext db
     var token = HmsSecurity.CreateAccessToken(app.Configuration, employee.Id.ToString("D"), employee.EmailAddress, employee.RoleCode, permissions);
     var response = new LoginResponse(token, employee.Id, employee.EmailAddress, employee.RoleCode, permission);
     return Results.Ok(ApiResponse<LoginResponse>.Ok(response, "Login successful."));
-});
+}).WithValidation<LoginRequest>();
 
 app.MapGet("/api/employees", async (IdentityDbContext db) =>
 {
@@ -153,7 +154,7 @@ app.MapPost("/api/employees", async (CreateEmployeeRequest request, IdentityDbCo
     return Results.Created($"/api/employees/{employee.Id}", ApiResponse<EmployeeInviteResponse>.Ok(
         new EmployeeInviteResponse(ToEmployeeDto(employee, permission, latestToken), setupUrl),
         "Employee created. Password setup invitation prepared."));
-}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+}).WithValidation<CreateEmployeeRequest>().RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapPut("/api/employees/{id:guid}", async (Guid id, UpdateEmployeeRequest request, IdentityDbContext db) =>
 {
@@ -197,7 +198,7 @@ app.MapPut("/api/employees/{id:guid}", async (Guid id, UpdateEmployeeRequest req
     var permission = await PermissionTextAsync(db, employee.RoleCode);
     var latestToken = await LatestOpenTokenAsync(db, employee.Id);
     return Results.Ok(ApiResponse<EmployeeDto>.Ok(ToEmployeeDto(employee, permission, latestToken), "Employee updated."));
-}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+}).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapPut("/api/employees/{id:guid}/status", async (Guid id, UpdateEmployeeStatusRequest request, IdentityDbContext db) =>
 {
@@ -215,7 +216,7 @@ app.MapPut("/api/employees/{id:guid}/status", async (Guid id, UpdateEmployeeStat
     return Results.Ok(ApiResponse<EmployeeDto>.Ok(
         ToEmployeeDto(employee, permission, latestToken),
         request.IsActive ? "Employee enabled." : "Employee disabled."));
-}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+}).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapPost("/api/employees/{id:guid}/invite", async (Guid id, IdentityDbContext db) =>
 {
@@ -244,7 +245,7 @@ app.MapPost("/api/employees/{id:guid}/invite", async (Guid id, IdentityDbContext
     return Results.Ok(ApiResponse<EmployeeInviteResponse>.Ok(
         new EmployeeInviteResponse(ToEmployeeDto(employee, permission, latestToken), setupUrl),
         "Password setup invitation prepared."));
-}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+}).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapPost("/api/auth/forgot-password", async (ForgotPasswordRequest request, IdentityDbContext db) =>
 {
@@ -343,7 +344,7 @@ app.MapGet("/api/auth/email-outbox", async (string? recipient, IdentityDbContext
         message.SentAtUtc,
         message.Error,
         ExtractFirstUrl(message.Body)))));
-}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+}).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapGet("/api/auth/email-outbox/latest-link", async (string recipient, IdentityDbContext db) =>
 {
@@ -358,7 +359,7 @@ app.MapGet("/api/auth/email-outbox/latest-link", async (string recipient, Identi
     return string.IsNullOrWhiteSpace(setupUrl)
         ? Results.NotFound(ApiResponse<object>.Fail("No setup link found."))
         : Results.Ok(ApiResponse<object>.Ok(new { setupUrl }));
-}).RequireHmsRoles("ADMIN", "HR_MANAGER");
+}).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapGet("/api/roles", async (IdentityDbContext db) =>
 {
@@ -407,7 +408,7 @@ app.MapPost("/api/roles", async (CreateRoleRequest request, IdentityDbContext db
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/roles/{roleCode}", ApiResponse<object>.Ok(new { role = roleCode }, "Role saved."));
-}).RequireHmsRoles("ADMIN");
+}).RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPut("/api/roles/{roleCode}", async (string roleCode, UpdateRolePermissionRequest request, IdentityDbContext db) =>
 {
@@ -423,7 +424,7 @@ app.MapPut("/api/roles/{roleCode}", async (string roleCode, UpdateRolePermission
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<object>.Ok(new { role = normalizedRole }, "Role permissions updated."));
-}).RequireHmsRoles("ADMIN");
+}).RequireHmsRoles(HmsRoles.Admin);
 
 app.MapGet("/api/permissions", async (IdentityDbContext db) =>
 {
@@ -457,7 +458,7 @@ app.MapPost("/api/permissions", async (CreatePermissionRequest request, Identity
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/permissions/{key}", ApiResponse<PermissionDto>.Ok(new PermissionDto(permission.Key, permission.Description, permission.Module), "Permission saved."));
-}).RequireHmsRoles("ADMIN");
+}).RequireHmsRoles(HmsRoles.Admin);
 
 app.MapGet("/api/departments", async (IdentityDbContext db) =>
 {
@@ -493,13 +494,13 @@ app.MapPost("/api/departments", async (CreateDepartmentRequest request, Identity
     return Results.Created($"/api/departments/{department.Id}", ApiResponse<DepartmentDto>.Ok(
         new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location),
         "Department saved."));
-}).RequireHmsRoles("ADMIN");
+}).RequireHmsRoles(HmsRoles.Admin);
 
 app.MapGet("/api/doctors", async (IdentityDbContext db) =>
 {
     var doctors = await db.Employees
         .AsNoTracking()
-        .Where(employee => employee.RoleCode == "DOCTOR" && employee.IsActive)
+        .Where(employee => employee.RoleCode == HmsRoles.Doctor && employee.IsActive)
         .OrderBy(employee => employee.FirstName)
         .ThenBy(employee => employee.LastName)
         .Select(employee => new DoctorProfileDto(employee.Id, employee.FirstName, employee.LastName, employee.EmailAddress, employee.Department, employee.Specialization, 0, employee.IsActive))

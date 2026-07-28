@@ -258,6 +258,7 @@ echo "║  Logs:       $LOG_DIR                        ║"
 echo "║                                                              ║"
 echo "║  Wait 60-90 seconds for Angular to compile, then open        ║"
 echo "║  http://localhost:4200 in your browser.                      ║"
+echo "║  Opening browser automatically...                            ║"
 echo "║                                                              ║"
 echo "║  To stop:  ./start-hms.sh stop                               ║"
 echo "║                                                              ║"
@@ -278,6 +279,9 @@ if [ -f "$PID_FILE" ]; then
     done < "$PID_FILE"
     info "$alive process(es) running."
 fi
+
+# Auto-open browser after a delay
+(sleep 15 && (xdg-open http://localhost:4200 2>/dev/null || open http://localhost:4200 2>/dev/null || true)) &disown
 
 # Wait forever (or until Ctrl+C)
 wait

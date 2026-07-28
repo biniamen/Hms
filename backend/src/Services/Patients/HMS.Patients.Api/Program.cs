@@ -1,6 +1,7 @@
 using HMS.Contracts;
 using HMS.Patients.Infrastructure;
 using HMS.SharedKernel;
+using HMS.SharedKernel.Constants;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
 using System.Security.Claims;
@@ -184,7 +185,7 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, PatientsDbCont
     await PublishPatientRegisteredAsync(app.Configuration, dto);
 
     return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(dto, "Patient registered."));
-});
+}).WithValidation<CreatePatientRequest>();
 
 app.MapPut("/api/patients/{id:guid}", async (Guid id, UpdatePatientRequest request, PatientsDbContext db) =>
 {
@@ -368,7 +369,7 @@ static bool TryGetDoctorId(HttpContext httpContext, out Guid doctorId)
 {
     doctorId = Guid.Empty;
     var role = httpContext.User.FindFirstValue(ClaimTypes.Role) ?? "";
-    if (!role.Equals("DOCTOR", StringComparison.OrdinalIgnoreCase))
+    if (!role.Equals(HmsRoles.Doctor, StringComparison.OrdinalIgnoreCase))
     {
         return false;
     }

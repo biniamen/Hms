@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace HMS.Contracts;
 
 public sealed record PatientDto(
@@ -25,11 +27,14 @@ public sealed record PatientDto(
     string? PhotoDataUrl);
 
 public sealed record CreatePatientRequest(
-    string FirstName,
-    string LastName,
-    string? Email,
-    string Phone,
-    string Gender,
+    [Required(ErrorMessage = "First name is required")]
+    [StringLength(100, MinimumLength = 1)] string FirstName,
+    [Required(ErrorMessage = "Last name is required")]
+    [StringLength(100, MinimumLength = 1)] string LastName,
+    [EmailAddress(ErrorMessage = "Invalid email format")] string? Email,
+    [Required(ErrorMessage = "Phone is required")]
+    [Phone(ErrorMessage = "Invalid phone number")] string Phone,
+    [Required(ErrorMessage = "Gender is required")] string Gender,
     DateOnly DateOfBirth,
     string? NationalId,
     string? MaritalStatus,
@@ -46,11 +51,14 @@ public sealed record CreatePatientRequest(
     string? PhotoDataUrl);
 
 public sealed record UpdatePatientRequest(
-    string FirstName,
-    string LastName,
-    string? Email,
-    string Phone,
-    string Gender,
+    [Required(ErrorMessage = "First name is required")]
+    [StringLength(100, MinimumLength = 1)] string FirstName,
+    [Required(ErrorMessage = "Last name is required")]
+    [StringLength(100, MinimumLength = 1)] string LastName,
+    [EmailAddress(ErrorMessage = "Invalid email format")] string? Email,
+    [Required(ErrorMessage = "Phone is required")]
+    [Phone(ErrorMessage = "Invalid phone number")] string Phone,
+    [Required(ErrorMessage = "Gender is required")] string Gender,
     DateOnly DateOfBirth,
     string? NationalId,
     string? MaritalStatus,
@@ -79,11 +87,12 @@ public sealed record InsuranceCompanyDto(
     bool IsActive);
 
 public sealed record CreateInsuranceCompanyRequest(
-    string Name,
-    string PayerCode,
+    [Required(ErrorMessage = "Company name is required")] string Name,
+    [Required(ErrorMessage = "Payer code is required")] string PayerCode,
     string ContactPerson,
-    string Phone,
-    string Email,
+    [Required(ErrorMessage = "Phone is required")] string Phone,
+    [EmailAddress(ErrorMessage = "Invalid email format")] string Email,
     string Address,
     string CoverageType,
+    [Range(0, 100, ErrorMessage = "Coverage percent must be between 0 and 100")]
     decimal CoveragePercent);

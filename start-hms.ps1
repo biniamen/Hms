@@ -202,4 +202,11 @@ Write-Host "Frontend: http://localhost:4200"
 Write-Host "API Gateway: http://localhost:5200"
 Write-Host "Logs: $logDir"
 Write-Host ""
-Write-Host "Wait about 60-90 seconds for Angular to finish compiling, then open http://localhost:4200"
+Write-Host "Opening frontend in browser..."
+Start-Sleep -Seconds 15
+try {
+    Start-Process "http://localhost:4200"
+} catch {
+    Write-Host "Could not auto-open browser. Open http://localhost:4200 manually."
+}
+Write-Host "Wait about 60-90 seconds for Angular to finish compiling."
