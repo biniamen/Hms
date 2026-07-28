@@ -146,7 +146,7 @@ Pop-Location
 if (-not (Test-Path (Join-Path $frontend "node_modules"))) {
     Write-Host "Installing frontend packages..."
     Push-Location $frontend
-    npm.cmd install --cache .\.npm-cache
+    npm.cmd install --legacy-peer-deps --cache .\.npm-cache
     Pop-Location
 }
 

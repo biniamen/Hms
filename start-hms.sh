@@ -215,7 +215,7 @@ cd "$ROOT"
 if [ ! -d "$FRONTEND/node_modules" ]; then
     info "Installing frontend packages (npm install)..."
     cd "$FRONTEND"
-    npm install --cache .npm-cache
+    npm install --legacy-peer-deps --cache .npm-cache
     cd "$ROOT"
     ok "Frontend packages installed."
 else

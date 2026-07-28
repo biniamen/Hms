@@ -19,8 +19,9 @@ hms-platform/
       Services/Patients
       Services/Clinical
       Services/Billing
+  newfrontend/              # Active Angular UI
   frontend/
-    hms-web
+    hms-web                 # Legacy UI kept for reference only
   deploy/
     docker-compose.yml
     postgres/init/01-hms-seed.sql
@@ -45,6 +46,7 @@ hms-platform/
 | Redis | 6379 | Cache/session support |
 
 Appointments are handled inside the Patient Management service. The old standalone Appointments project is not part of the active solution.
+`newfrontend` is the active frontend used by local startup, Docker Compose, CI, and generated API clients. The older `frontend/hms-web` project is retained only as a reference and should not be used for new UI work.
 
 ## Prerequisites
 
@@ -224,8 +226,8 @@ dotnet build .\HMS.sln --no-restore
 Frontend:
 
 ```powershell
-cd "D:\Mine Only\Private\hms-platform\frontend\hms-web"
-npm.cmd install --cache .\.npm-cache
+cd "D:\Mine Only\Private\hms-platform\newfrontend"
+npm.cmd install --legacy-peer-deps --cache .\.npm-cache
 npm.cmd run build -- --no-progress
 ```
 
@@ -336,7 +338,7 @@ start-hms.ps1
 hms.local.example.ps1
 smtp.local.example.ps1
 backend/
-frontend/
+newfrontend/
 deploy/docker-compose.yml
 deploy/docker.env.example
 deploy/postgres/init/01-hms-seed.sql
