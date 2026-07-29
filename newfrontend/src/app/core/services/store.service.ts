@@ -1,5 +1,5 @@
 import { Injectable, computed, signal, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, tap } from 'rxjs';
 import { ApiService } from '../../api.service';
 import type {
   User, UserRole, Patient, Appointment, Prescription, LabOrder,
@@ -8,6 +8,7 @@ import type {
   BackendPatient, BackendAppointment, BackendLabRequest,
   BackendPrescription, BackendDepartment, BackendBed,
   BackendInvoice, BackendInvoiceItem, BackendEnterpriseRecord,
+  BackendClinicalEncounter,
 } from '../models';
 import { AVATARS } from '../models';
 
@@ -133,16 +134,14 @@ export class StoreService {
 
   // ── Login / Logout ──
   login(emailAddress: string, password: string): Observable<any> {
-    const obs = this.api.login(emailAddress, password);
-    obs.subscribe({
-      next: (res) => {
+    return this.api.login(emailAddress, password).pipe(
+      tap(res => {
         if (res.success) {
           this.api.storeSession(res.data);
           this.setCurrentUserFromSession();
         }
-      },
-    });
-    return obs;
+      })
+    );
   }
 
   logout() {
@@ -244,6 +243,9 @@ export class StoreService {
       case 'invoices':
         this.api.getInvoices().subscribe({ next: (r) => { if (r.data) this.billingInvoices.set(r.data.map(i => this.mapBackendInvoice(i))); dec(); }, error: dec });
         break;
+      case 'clinicalEncounters':
+        this.api.getEncounters().subscribe({ next: (r) => { if (r.data) this.medicalRecords.set(r.data.map(e => this.mapBackendEncounter(e))); dec(); }, error: dec });
+        break;
       case 'enterpriseRecords':
         this.api.getEnterpriseRecords().subscribe({ next: (r) => { if (r.data) this.enterpriseRecords.set(r.data); dec(); }, error: dec });
         break;
@@ -254,9 +256,9 @@ export class StoreService {
 
   private getEndpointsForRole(role: string): string[] {
     const roleEndpoints: Record<string, string[]> = {
-      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'beds', 'prescriptions', 'labRequests', 'invoices', 'enterpriseRecords'],
-      DOCTOR: ['patients', 'appointments', 'prescriptions', 'labRequests'],
-      NURSE: ['patients', 'appointments', 'beds', 'prescriptions', 'labRequests'],
+      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'beds', 'prescriptions', 'labRequests', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
+      DOCTOR: ['patients', 'appointments', 'prescriptions', 'labRequests', 'clinicalEncounters'],
+      NURSE: ['patients', 'appointments', 'beds', 'prescriptions', 'labRequests', 'clinicalEncounters'],
       RECEPTIONIST: ['patients', 'appointments', 'departments', 'beds'],
       PHARMACIST: ['patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
       LAB_TECHNICIAN: ['patients', 'appointments', 'labRequests', 'enterpriseRecords'],
@@ -391,6 +393,26 @@ export class StoreService {
       category: 'Biochemistry',
       status: l.status === 'Requested' ? 'ORDERED' : 'IN_ANALYSIS',
       orderedDate: l.orderedAtUtc ? new Date(l.orderedAtUtc).toLocaleString() : new Date().toLocaleString(),
+    };
+  }
+
+  private mapBackendEncounter(e: BackendClinicalEncounter): MedicalRecord {
+    const patient = this.patients().find(p => p.id === e.patientId);
+    const employee = this.employees().find(emp => emp.id === e.doctorId);
+    return {
+      id: e.id,
+      patientId: e.patientId,
+      patientName: patient?.name || e.patientId,
+      doctorId: e.doctorId,
+      doctorName: employee ? `${employee.firstName} ${employee.lastName}` : e.doctorId,
+      date: e.encounterAtUtc ? new Date(e.encounterAtUtc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      diagnosis: e.assessment || 'N/A',
+      icdCode: undefined,
+      symptoms: [e.chiefComplaint].filter(Boolean),
+      clinicalNotes: `${e.chiefComplaint}\n\nAssessment: ${e.assessment}\nPlan: ${e.plan}`,
+      vitalSigns: {
+        bp: 'N/A', hr: 0, temp: 0, spo2: 0, respiratoryRate: 0, updatedAt: 'N/A',
+      },
     };
   }
 

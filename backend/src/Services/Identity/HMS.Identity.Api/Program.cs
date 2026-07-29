@@ -156,6 +156,61 @@ app.MapPost("/api/employees", async (CreateEmployeeRequest request, IdentityDbCo
         "Employee created. Password setup invitation prepared."));
 }).WithValidation<CreateEmployeeRequest>().RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
+app.MapPost("/api/employees/with-password", async (CreateEmployeeWithPasswordRequest request, IdentityDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.FirstName) ||
+        string.IsNullOrWhiteSpace(request.LastName) ||
+        string.IsNullOrWhiteSpace(request.EmailAddress) ||
+        string.IsNullOrWhiteSpace(request.Role) ||
+        string.IsNullOrWhiteSpace(request.Password))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("First name, last name, email, role, and password are required."));
+    }
+
+    var role = NormalizeKey(request.Role);
+    if (!await db.Roles.AnyAsync(item => item.RoleCode == role))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Selected role does not exist."));
+    }
+
+    if (await db.Employees.AnyAsync(item => item.EmailAddress.ToLower() == request.EmailAddress.Trim().ToLower()))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("An employee with this email already exists."));
+    }
+
+    var passwordValidation = IdentitySecurity.ValidatePassword(request.Password);
+    if (passwordValidation is not null)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail(passwordValidation));
+    }
+
+    var employee = new Employee
+    {
+        Id = Guid.NewGuid(),
+        EmployeeNo = await NextEmployeeNoAsync(db),
+        FirstName = request.FirstName.Trim(),
+        LastName = request.LastName.Trim(),
+        EmailAddress = request.EmailAddress.Trim(),
+        Phone = CleanOrNull(request.Phone),
+        RoleCode = role,
+        Department = CleanOrNull(request.Department),
+        Specialization = CleanOrNull(request.Specialization),
+        PasswordHash = IdentitySecurity.HashPassword(request.Password),
+        IsActive = true,
+        PasswordSetupCompleted = true,
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    db.Employees.Add(employee);
+    await db.SaveChangesAsync();
+
+    var permission = await PermissionTextAsync(db, employee.RoleCode);
+    var latestToken = await LatestOpenTokenAsync(db, employee.Id);
+    return Results.Created($"/api/employees/{employee.Id}", ApiResponse<EmployeeDto>.Ok(
+        ToEmployeeDto(employee, permission, latestToken),
+        "Employee created with password."));
+}).WithValidation<CreateEmployeeWithPasswordRequest>().RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
+
 app.MapPut("/api/employees/{id:guid}", async (Guid id, UpdateEmployeeRequest request, IdentityDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(request.FirstName) ||

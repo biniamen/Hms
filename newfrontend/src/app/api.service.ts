@@ -83,6 +83,14 @@ export class ApiService {
     return this.http.put<ApiResponse<BackendEmployee>>(`${this.baseUrl}/api/employees/${id}/status`, { isActive });
   }
 
+  createEmployeeWithPassword(payload: {
+    firstName: string; lastName: string; emailAddress: string;
+    phone?: string; role: string; department?: string; specialization?: string;
+    password: string;
+  }): Observable<ApiResponse<BackendEmployee>> {
+    return this.http.post<ApiResponse<BackendEmployee>>(`${this.baseUrl}/api/employees/with-password`, payload);
+  }
+
   resendEmployeeInvite(id: string): Observable<ApiResponse<{ employee: BackendEmployee; setupUrl: string }>> {
     return this.http.post<ApiResponse<{ employee: BackendEmployee; setupUrl: string }>>(`${this.baseUrl}/api/employees/${id}/invite`, {});
   }

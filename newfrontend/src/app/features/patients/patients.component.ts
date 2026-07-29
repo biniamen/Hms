@@ -29,96 +29,98 @@ import { Patient, PatientStatus } from '../../core/models';
         }
       </div>
 
-      <!-- REGISTER PATIENT MODAL -->
+      <!-- INLINE PATIENT REGISTRATION FORM -->
       @if (isFormVisible()) {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20 backdrop-blur-sm p-4 animate-fade-in">
-          <div class="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 animate-scale-up">
-            <div class="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div class="bg-white rounded-3xl border-2 border-teal-500/20 shadow-2xl shadow-teal-500/5 overflow-hidden animate-slide-down">
+          <div class="bg-teal-50/50 px-6 py-4 border-b border-teal-100 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center">
+                <span class="material-icons text-base">person_add</span>
+              </div>
               <div>
-                <h3 class="text-base font-bold text-slate-900">New Patient Intake</h3>
+                <h3 class="text-sm font-bold text-slate-900">New Patient Intake</h3>
                 <p class="text-[10px] text-teal-600 font-bold uppercase tracking-widest">Complete all required fields</p>
               </div>
-              <button (click)="isFormVisible.set(false)" class="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
-                <span class="material-icons">close</span>
-              </button>
+            </div>
+            <button (click)="isFormVisible.set(false)" class="p-2 hover:bg-white rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
+
+          <form [formGroup]="patientForm" (ngSubmit)="submitRegistration()" class="p-6 sm:p-8 space-y-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              
+              <!-- Personal Info -->
+              <div class="space-y-4">
+                <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <span class="w-1 h-3 bg-teal-500 rounded-full"></span> Basic Information
+                </h4>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Full Name *</label>
+                  <input type="text" formControlName="name" placeholder="e.g. John Doe" [class]="inputClasses" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">DOB *</label>
+                    <input type="date" formControlName="dob" [class]="inputClasses" />
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Gender *</label>
+                    <select formControlName="gender" [class]="inputClasses">
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Contact -->
+              <div class="space-y-4">
+                <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <span class="w-1 h-3 bg-blue-500 rounded-full"></span> Contact Details
+                </h4>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Phone *</label>
+                  <input type="text" formControlName="phone" placeholder="+1..." [class]="inputClasses" />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Address</label>
+                  <input type="text" formControlName="address" placeholder="Street, City" [class]="inputClasses" />
+                </div>
+              </div>
+
+              <!-- Medical -->
+              <div class="space-y-4">
+                <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                  <span class="w-1 h-3 bg-rose-500 rounded-full"></span> Clinical Data
+                </h4>
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Blood Type</label>
+                    <select formControlName="bloodType" [class]="inputClasses + ' font-mono'">
+                      <option value="O+">O+</option><option value="A+">A+</option>
+                      <option value="B+">B+</option><option value="AB+">AB+</option>
+                    </select>
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Insurance</label>
+                    <input type="text" formControlName="insuranceProvider" placeholder="Provider" [class]="inputClasses" />
+                  </div>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-rose-600 ml-1 uppercase">Alerts / Allergies</label>
+                  <input type="text" formControlName="allergies" placeholder="e.g. Penicillin" [class]="inputClasses + ' border-rose-200 focus:border-rose-500 focus:ring-rose-500/5'" />
+                </div>
+              </div>
             </div>
 
-            <form [formGroup]="patientForm" (ngSubmit)="submitRegistration()" class="p-6 space-y-6">
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                
-                <!-- Personal Info -->
-                <div class="space-y-3">
-                  <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <span class="w-1 h-3 bg-teal-500 rounded-full"></span> Basic Information
-                  </h4>
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Full Name *</label>
-                    <input type="text" formControlName="name" placeholder="e.g. John Doe" [class]="inputClasses" />
-                  </div>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="space-y-1">
-                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">DOB *</label>
-                      <input type="date" formControlName="dob" [class]="inputClasses" />
-                    </div>
-                    <div class="space-y-1">
-                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Gender *</label>
-                      <select formControlName="gender" [class]="inputClasses">
-                        <option value="Female">Female</option>
-                        <option value="Male">Male</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Contact -->
-                <div class="space-y-3">
-                  <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <span class="w-1 h-3 bg-blue-500 rounded-full"></span> Contact Details
-                  </h4>
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Phone *</label>
-                    <input type="text" formControlName="phone" placeholder="+1..." [class]="inputClasses" />
-                  </div>
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Address</label>
-                    <input type="text" formControlName="address" placeholder="Street, City" [class]="inputClasses" />
-                  </div>
-                </div>
-
-                <!-- Medical -->
-                <div class="space-y-3">
-                  <h4 class="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <span class="w-1 h-3 bg-rose-500 rounded-full"></span> Clinical Data
-                  </h4>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="space-y-1">
-                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Blood Type</label>
-                      <select formControlName="bloodType" [class]="inputClasses + ' font-mono'">
-                        <option value="O+">O+</option><option value="A+">A+</option>
-                        <option value="B+">B+</option><option value="AB+">AB+</option>
-                      </select>
-                    </div>
-                    <div class="space-y-1">
-                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Insurance</label>
-                      <input type="text" formControlName="insuranceProvider" placeholder="Provider" [class]="inputClasses" />
-                    </div>
-                  </div>
-                  <div class="p-3 bg-rose-50 rounded-2xl border border-rose-100">
-                    <label class="text-[10px] font-bold text-rose-700 ml-1 uppercase">Alerts / Allergies</label>
-                    <input type="text" formControlName="allergies" placeholder="e.g. Penicillin" 
-                      class="w-full mt-1 bg-white border border-rose-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-rose-500/20 outline-none" />
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" (click)="isFormVisible.set(false)" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Cancel</button>
-                <button type="submit" class="px-8 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-teal-500/20 transition-all hover:-translate-y-0.5 active:scale-95">
-                  Save & Register
-                </button>
-              </div>
-            </form>
-          </div>
+            <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
+              <button type="button" (click)="isFormVisible.set(false)" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Discard</button>
+              <button type="submit" class="px-8 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-teal-500/20 transition-all hover:-translate-y-0.5 active:scale-95">
+                Save & Register
+              </button>
+            </div>
+          </form>
         </div>
       }
 

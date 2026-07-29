@@ -54,6 +54,21 @@ public sealed record UpdateEmployeeRequest(
 public sealed record UpdateEmployeeStatusRequest(
     [Required] bool IsActive);
 
+public sealed record CreateEmployeeWithPasswordRequest(
+    [Required(ErrorMessage = "First name is required")]
+    [StringLength(100, MinimumLength = 1)] string FirstName,
+    [Required(ErrorMessage = "Last name is required")]
+    [StringLength(100, MinimumLength = 1)] string LastName,
+    [Required(ErrorMessage = "Email is required")]
+    [EmailAddress(ErrorMessage = "Invalid email format")] string EmailAddress,
+    [Phone(ErrorMessage = "Invalid phone number")] string? Phone,
+    [Required(ErrorMessage = "Role is required")] string Role,
+    string? Department,
+    string? Specialization,
+    [Required(ErrorMessage = "Password is required")]
+    [StringLength(100, MinimumLength = 8, ErrorMessage = "Password must be at least 8 characters")]
+    string Password);
+
 public sealed record EmployeeInviteResponse(EmployeeDto Employee, string SetupUrl);
 
 public sealed record SetupPasswordRequest(

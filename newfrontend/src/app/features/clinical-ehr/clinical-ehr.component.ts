@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, signal, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
@@ -174,13 +174,13 @@ import { StoreService } from '../../core/services/store.service';
 export class ClinicalEhrComponent {
   store = inject(StoreService);
 
-  selectedPatientId = signal('p-1');
+  selectedPatientId = signal('');
   isFormVisible = signal(false);
 
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/5 transition-all';
 
   recordForm = new FormGroup({
-    patientId: new FormControl('p-1', [Validators.required]),
+    patientId: new FormControl('', [Validators.required]),
     diagnosis: new FormControl('', [Validators.required]),
     icdCode: new FormControl(''),
     clinicalNotes: new FormControl('', [Validators.required])
@@ -189,6 +189,15 @@ export class ClinicalEhrComponent {
   activePatientRecords = computed(() => {
     return this.store.medicalRecords().filter(r => r.patientId === this.selectedPatientId());
   });
+
+  constructor() {
+    effect(() => {
+      const patients = this.store.patients();
+      if (patients.length > 0 && !this.selectedPatientId()) {
+        this.selectedPatientId.set(patients[0].id);
+      }
+    });
+  }
 
   onPatientSelect(event: Event) {
     this.selectedPatientId.set((event.target as HTMLSelectElement).value);
@@ -222,6 +231,7 @@ export class ClinicalEhrComponent {
           updatedAt: 'Just now'
         }
       });
+      this.selectedPatientId.set(patient.id);
     }
 
     this.isFormVisible.set(false);
