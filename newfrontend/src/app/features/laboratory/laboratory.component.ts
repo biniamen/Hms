@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, signal, computed, inject } from '@a
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
-import { LabOrder } from '../../core/models';
+import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
 
 @Component({
   selector: 'app-laboratory',
@@ -21,7 +21,7 @@ import { LabOrder } from '../../core/models';
 
         @if (!isFormVisible() && !selectedLabForResult()) {
           <button 
-            (click)="isFormVisible.set(true)" 
+            (click)="openOrderForm()" 
             class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 self-start sm:self-auto hover:bg-slate-800 transition-all active:scale-95">
             <span class="material-icons text-base">biotech</span>
             <span>Order Lab Test</span>
@@ -31,7 +31,8 @@ import { LabOrder } from '../../core/models';
 
       <!-- INLINE FORM AREA (Order Entry or Result Entry) -->
       @if (isFormVisible() || selectedLabForResult()) {
-        <div class="bg-white rounded-3xl border-2 border-purple-500/20 shadow-2xl shadow-purple-500/5 overflow-hidden animate-slide-down">
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm animate-fade-in">
+        <div class="w-full max-w-5xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl shadow-slate-950/25 animate-scale-up">
           
           <!-- Shared Form Header -->
           <div class="bg-purple-50/50 px-6 py-4 border-b border-purple-100 flex items-center justify-between">
@@ -54,9 +55,10 @@ import { LabOrder } from '../../core/models';
           </div>
 
           <!-- SUB-FORM 1: New Lab Order -->
+          <div class="max-h-[calc(92vh-86px)] overflow-y-auto">
           @if (!selectedLabForResult()) {
             <form [formGroup]="orderForm" (ngSubmit)="submitOrder()" class="p-6 sm:p-8 space-y-6">
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Target Patient *</label>
                   <select formControlName="patientId" [class]="inputClasses">
@@ -66,19 +68,74 @@ import { LabOrder } from '../../core/models';
                   </select>
                 </div>
                 <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Diagnostic Test *</label>
-                  <input type="text" formControlName="testName" placeholder="e.g. Troponin, HbA1c" [class]="inputClasses" />
-                </div>
-                <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Category *</label>
-                  <select formControlName="category" [class]="inputClasses">
-                    <option value="Biochemistry">Biochemistry</option>
-                    <option value="Hematology">Hematology</option>
-                    <option value="Radiology">Radiology</option>
-                    <option value="Microbiology">Microbiology</option>
-                    <option value="Pathology">Pathology</option>
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Priority *</label>
+                  <select formControlName="priority" [class]="inputClasses">
+                    <option>Routine</option>
+                    <option>Urgent</option>
+                    <option>STAT</option>
                   </select>
                 </div>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Specimen *</label>
+                  <select formControlName="specimenType" [class]="inputClasses">
+                    <option>Whole blood</option>
+                    <option>Serum</option>
+                    <option>Plasma</option>
+                    <option>Urine</option>
+                    <option>Stool</option>
+                    <option>Sputum</option>
+                    <option>Imaging only</option>
+                  </select>
+                </div>
+                <div class="rounded-2xl border border-purple-100 bg-purple-50 p-4">
+                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-700">Selected Tests</div>
+                  <div class="mt-1 text-2xl font-black text-slate-900">{{ selectedOrderTests().length }}</div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_300px]">
+                <div class="space-y-4">
+                  @for (group of diagnosticOrderGroups(); track group.category) {
+                    <section class="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div class="mb-3 flex items-center justify-between">
+                        <h4 class="text-sm font-black text-slate-900">{{ group.category }}</h4>
+                        <span class="text-[10px] font-bold uppercase text-slate-400">{{ group.items.length }} catalog tests</span>
+                      </div>
+                      <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
+                        @for (test of group.items; track test.id) {
+                          <button
+                            type="button"
+                            (click)="toggleOrderTest(test)"
+                            [class]="isOrderTestSelected(test.id) ? 'border-purple-500 bg-purple-50 text-purple-800 ring-2 ring-purple-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-purple-200 hover:bg-purple-50/40'"
+                            class="flex min-h-16 items-start gap-3 rounded-xl border p-3 text-left transition-all">
+                            <span class="material-icons mt-0.5 text-base">{{ test.groupName === 'Radiology' ? 'radiology' : 'fact_check' }}</span>
+                            <span>
+                              <strong class="block text-xs">{{ test.testName }}</strong>
+                              <span class="text-[10px] font-semibold opacity-70">{{ test.subGroup }} - {{ test.specimenType || 'As applicable' }}</span>
+                              <span class="mt-1 block text-[10px] font-bold text-slate-400">Ref: {{ test.referenceRange || 'Report based' }} {{ test.unit }}</span>
+                            </span>
+                          </button>
+                        }
+                      </div>
+                    </section>
+                  }
+                </div>
+
+                <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <h4 class="text-sm font-black text-slate-900">Order basket</h4>
+                  <div class="mt-3 space-y-2">
+                    @for (test of selectedOrderTests(); track test.id) {
+                      <div class="rounded-xl border-l-4 border-purple-500 bg-white p-3 text-xs font-bold text-slate-700 shadow-sm">
+                        <div>{{ test.testName }}</div>
+                        <div class="mt-1 text-[10px] font-semibold text-slate-400">{{ test.groupName }} / {{ test.subGroup }}</div>
+                      </div>
+                    } @empty {
+                      <div class="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-[11px] font-bold text-slate-400">
+                        Select one or more tests from the catalog.
+                      </div>
+                    }
+                  </div>
+                </aside>
               </div>
               <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
                 <button type="button" (click)="closeForm()" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl">Discard</button>
@@ -92,27 +149,142 @@ import { LabOrder } from '../../core/models';
           <!-- SUB-FORM 2: Record Test Result -->
           @if (selectedLabForResult()) {
             <form [formGroup]="resultForm" (ngSubmit)="submitResult()" class="p-6 sm:p-8 space-y-6">
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Result Value *</label>
-                  <input type="text" formControlName="result" placeholder="e.g. 14.2" [class]="inputClasses + ' font-mono text-base font-bold'" />
+              <div class="grid grid-cols-1 gap-4 rounded-2xl border border-purple-100 bg-purple-50/50 p-4 md:grid-cols-4">
+                <div>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Patient</div>
+                  <div class="mt-1 text-sm font-black text-slate-900">{{ selectedLabForResult()?.patientName }}</div>
+                  <div class="text-[10px] font-mono text-slate-500">{{ selectedLabForResult()?.patientMrn }}</div>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Unit</label>
-                    <input type="text" formControlName="unit" placeholder="g/dL" [class]="inputClasses" />
+                <div>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Order</div>
+                  <div class="mt-1 text-sm font-bold text-slate-900">{{ selectedLabForResult()?.testName }}</div>
+                </div>
+                <div>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Category</div>
+                  <div class="mt-1 text-sm font-bold text-slate-900">{{ selectedLabForResult()?.category }}</div>
+                </div>
+                <div>
+                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Doctor</div>
+                  <div class="mt-1 text-sm font-bold text-slate-900">{{ selectedLabForResult()?.doctorName }}</div>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_320px]">
+                <div class="space-y-6">
+                  <section class="rounded-2xl border border-slate-200 bg-white p-5">
+                    <div class="mb-4 flex items-center justify-between">
+                      <h4 class="text-sm font-black text-slate-900">Result worksheet</h4>
+                      <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">{{ resultRows().length }} line items</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="w-full min-w-[760px] text-left text-xs">
+                        <thead class="border-b border-slate-200 bg-slate-50 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                          <tr>
+                            <th class="px-3 py-3">Test Name</th>
+                            <th class="px-3 py-3">Result *</th>
+                            <th class="px-3 py-3">Unit</th>
+                            <th class="px-3 py-3">Reference Range</th>
+                            <th class="px-3 py-3">Flag</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                          @for (row of resultRows(); track row.catalogId || row.testName; let i = $index) {
+                            <tr>
+                              <td class="px-3 py-3">
+                                <div class="font-black text-slate-900">{{ row.testName }}</div>
+                                <div class="mt-1 text-[10px] font-semibold text-slate-400">{{ row.groupName }} / {{ row.subGroup }}</div>
+                              </td>
+                              <td class="px-3 py-3">
+                                <input [value]="row.result" (input)="updateResultRow(i, 'result', $event)" placeholder="Enter value" [class]="inputClasses + ' font-mono font-bold'" />
+                              </td>
+                              <td class="px-3 py-3">
+                                <input [value]="row.unit" (input)="updateResultRow(i, 'unit', $event)" [class]="inputClasses" />
+                              </td>
+                              <td class="px-3 py-3">
+                                <input [value]="row.referenceRange" (input)="updateResultRow(i, 'referenceRange', $event)" [class]="inputClasses" />
+                              </td>
+                              <td class="px-3 py-3">
+                                <select [value]="row.flag" (change)="updateResultRow(i, 'flag', $event)" [class]="inputClasses">
+                                  <option>Normal</option>
+                                  <option>Low</option>
+                                  <option>High</option>
+                                  <option>Abnormal</option>
+                                  <option>Critical</option>
+                                </select>
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section class="rounded-2xl border border-slate-200 bg-white p-5">
+                    <div class="mb-4 flex items-center justify-between">
+                      <h4 class="text-sm font-black text-slate-900">Result summary</h4>
+                      <span class="rounded-full bg-purple-50 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-purple-700">Bench verification</span>
+                    </div>
+                    <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+                      <div class="space-y-1 md:col-span-2">
+                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Result Value / Summary *</label>
+                        <textarea rows="4" formControlName="result" placeholder="Enter numeric value, narrative result, or imaging impression" [class]="inputClasses + ' font-mono text-sm font-bold'"></textarea>
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Unit</label>
+                        <input type="text" formControlName="unit" placeholder="g/dL" [class]="inputClasses" />
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Reference Range</label>
+                        <input type="text" formControlName="normalRange" placeholder="13.5 - 17.5" [class]="inputClasses" />
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Result Flag *</label>
+                        <select formControlName="resultFlag" [class]="inputClasses">
+                          <option>Normal</option>
+                          <option>Abnormal</option>
+                          <option>Critical</option>
+                        </select>
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Performed By</label>
+                        <input type="text" formControlName="performedBy" placeholder="Lab technologist" [class]="inputClasses" />
+                      </div>
+                      <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Verified By</label>
+                        <input type="text" formControlName="verifiedBy" placeholder="Verifier" [class]="inputClasses" />
+                      </div>
+                      <div class="flex items-center gap-3 rounded-2xl border border-rose-100 bg-rose-50 p-4">
+                        <input type="checkbox" formControlName="isAbnormal" id="ab-check-inline" class="w-5 h-5 rounded border-rose-300 text-rose-600 focus:ring-rose-500" />
+                        <label for="ab-check-inline" class="cursor-pointer text-[11px] font-black uppercase tracking-wider text-rose-700">
+                          Clinically abnormal
+                        </label>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="rounded-2xl border border-slate-200 bg-white p-5">
+                    <h4 class="mb-3 text-sm font-black text-slate-900">2. Interpretation and release note</h4>
+                    <textarea formControlName="resultNotes" rows="4" [class]="inputClasses" placeholder="Interpretation, sample quality, critical call note, or radiology finding"></textarea>
+                  </section>
+                </div>
+
+                <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-sm font-black text-slate-900">Result preview</h4>
+                    <span [class]="resultForm.value.resultFlag === 'Critical' ? 'bg-rose-100 text-rose-700' : resultForm.value.resultFlag === 'Abnormal' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'" class="rounded-full px-2 py-1 text-[10px] font-black">
+                      {{ resultForm.value.resultFlag || 'Normal' }}
+                    </span>
                   </div>
-                  <div class="space-y-1">
-                    <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Normal Range</label>
-                    <input type="text" formControlName="normalRange" placeholder="13.5 - 17.5" [class]="inputClasses" />
+                  <div class="rounded-xl border-l-4 border-purple-500 bg-white p-4 shadow-sm">
+                    <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Released result</div>
+                    <div class="mt-2 whitespace-pre-line text-sm font-black text-slate-900">{{ resultForm.value.result || 'Result not entered yet' }}</div>
+                    <div class="mt-3 text-[11px] font-semibold text-slate-500">
+                      Ref: {{ resultForm.value.normalRange || 'N/A' }} {{ resultForm.value.unit || '' }}
+                    </div>
+                    <div class="mt-3 rounded-lg bg-purple-50 p-3 text-[11px] font-semibold text-purple-800">
+                      {{ resultForm.value.resultNotes || 'Interpretation will appear here.' }}
+                    </div>
                   </div>
-                </div>
-                <div class="flex items-center gap-3 bg-rose-50 p-4 rounded-2xl border border-rose-100">
-                  <input type="checkbox" formControlName="isAbnormal" id="ab-check-inline" class="w-5 h-5 rounded border-rose-300 text-rose-600 focus:ring-rose-500" />
-                  <label for="ab-check-inline" class="text-[11px] font-black text-rose-700 uppercase tracking-wider cursor-pointer">
-                    Flag as Clinically Abnormal
-                  </label>
-                </div>
+                </aside>
               </div>
               <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
                 <button type="button" (click)="closeForm()" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl">Cancel</button>
@@ -122,6 +294,8 @@ import { LabOrder } from '../../core/models';
               </div>
             </form>
           }
+          </div>
+        </div>
         </div>
       }
 
@@ -160,8 +334,8 @@ import { LabOrder } from '../../core/models';
                   <div class="flex items-center justify-between">
                     <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest">Laboratory Output</span>
                     @if (lab.isAbnormal) {
-                      <span class="text-rose-600 font-black text-[9px] flex items-center gap-1 uppercase">
-                        <span class="material-icons text-[12px]">warning</span> ABNORMAL
+                      <span [class]="lab.resultFlag === 'Critical' ? 'text-rose-700' : 'text-amber-700'" class="flex items-center gap-1 text-[9px] font-black uppercase">
+                        <span class="material-icons text-[12px]">warning</span> {{ lab.resultFlag || 'Abnormal' }}
                       </span>
                     } @else {
                       <span class="text-emerald-600 font-black text-[9px] uppercase tracking-widest">Normal</span>
@@ -184,9 +358,15 @@ import { LabOrder } from '../../core/models';
                     Record Result
                   </button>
                 } @else {
-                  <div class="pt-2 flex items-center justify-between border-t border-slate-50">
-                    <span class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Tech: {{ lab.labTechName }}</span>
-                    <span class="material-icons text-teal-500 text-sm">verified</span>
+                  <div class="flex items-center justify-between gap-3 border-t border-slate-50 pt-2">
+                    <span class="text-[9px] font-bold uppercase tracking-widest text-slate-400">Tech: {{ lab.labTechName || 'Lab' }}</span>
+                    <button
+                      type="button"
+                      (click)="printLabResult(lab)"
+                      class="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-black text-white shadow-sm transition-all hover:bg-purple-600">
+                      <span class="material-icons text-sm">print</span>
+                      Print
+                    </button>
                   </div>
                 }
               </div>
@@ -207,28 +387,84 @@ export class LaboratoryComponent {
 
   isFormVisible = signal(false);
   selectedLabForResult = signal<LabOrder | null>(null);
+  selectedOrderTestIds = signal<string[]>([]);
+  resultRows = signal<LabResultItem[]>([]);
+
+  diagnosticOrderGroups = computed(() => {
+    const groups = new Map<string, DiagnosticTest[]>();
+    for (const test of this.store.diagnosticTests().filter(item => item.isActive)) {
+      const key = test.groupName || 'Laboratory';
+      groups.set(key, [...(groups.get(key) || []), test]);
+    }
+
+    return Array.from(groups.entries()).map(([category, items]) => ({
+      category,
+      items: items.sort((a, b) =>
+        a.subGroup.localeCompare(b.subGroup) ||
+        a.sortOrder - b.sortOrder ||
+        a.testName.localeCompare(b.testName)),
+    }));
+  });
+
+  selectedOrderTests = computed(() =>
+    this.selectedOrderTestIds()
+      .map(id => this.store.diagnosticTests().find(test => test.id === id))
+      .filter((test): test is DiagnosticTest => !!test));
 
   // Standardized classes for input consistency across the dashboard
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-purple-500 focus:ring-4 focus:ring-purple-500/5 transition-all';
 
   orderForm = new FormGroup({
     patientId: new FormControl('p-1', [Validators.required]),
-    testName: new FormControl('', [Validators.required]),
-    category: new FormControl<'Biochemistry' | 'Hematology' | 'Radiology' | 'Microbiology' | 'Pathology'>('Biochemistry', [Validators.required])
+    category: new FormControl('Biochemistry', [Validators.required]),
+    priority: new FormControl('Routine', [Validators.required]),
+    specimenType: new FormControl('Whole blood', [Validators.required])
   });
 
   resultForm = new FormGroup({
-    result: new FormControl('', [Validators.required]),
+    result: new FormControl(''),
     unit: new FormControl('mg/dL'),
     normalRange: new FormControl('70 - 110'),
+    resultFlag: new FormControl<'Normal' | 'Abnormal' | 'Critical'>('Normal', [Validators.required]),
+    resultNotes: new FormControl(''),
+    performedBy: new FormControl(''),
+    verifiedBy: new FormControl(''),
     isAbnormal: new FormControl(false)
   });
 
   closeForm() {
     this.isFormVisible.set(false);
     this.selectedLabForResult.set(null);
-    this.orderForm.reset({ patientId: 'p-1', category: 'Biochemistry' });
+    this.selectedOrderTestIds.set([]);
+    this.resultRows.set([]);
+    this.orderForm.reset({ patientId: 'p-1', category: 'Biochemistry', priority: 'Routine', specimenType: 'Whole blood' });
     this.resultForm.reset();
+  }
+
+  openOrderForm() {
+    this.selectedLabForResult.set(null);
+    this.selectedOrderTestIds.set([]);
+    this.orderForm.reset({
+      patientId: this.store.patients()[0]?.id || '',
+      category: 'Biochemistry',
+      priority: 'Routine',
+      specimenType: 'Whole blood',
+    });
+    this.isFormVisible.set(true);
+  }
+
+  toggleOrderTest(test: DiagnosticTest) {
+    this.orderForm.patchValue({
+      category: test.groupName,
+      specimenType: test.specimenType || this.orderForm.value.specimenType || 'Whole blood',
+    });
+    this.selectedOrderTestIds.update(current =>
+      current.includes(test.id) ? current.filter(id => id !== test.id) : [...current, test.id]
+    );
+  }
+
+  isOrderTestSelected(id: string): boolean {
+    return this.selectedOrderTestIds().includes(id);
   }
 
   submitOrder() {
@@ -239,6 +475,12 @@ export class LaboratoryComponent {
     
     const val = this.orderForm.value;
     const patient = this.store.patients().find(p => p.id === val.patientId);
+    const selectedTests = this.selectedOrderTests();
+
+    if (selectedTests.length === 0) {
+      this.store.addToast('error', 'Diagnostic Test Required', 'Select at least one catalog test before submitting the order.');
+      return;
+    }
 
     if (patient) {
       this.store.addLabOrder({
@@ -247,8 +489,12 @@ export class LaboratoryComponent {
         patientMrn: patient.mrn,
         doctorId: this.store.currentUser()?.id || 'u-101',
         doctorName: this.store.currentUser()?.name || 'Dr. Sarah Jenkins',
-        testName: val.testName!,
-        category: val.category!
+        testName: selectedTests.map(test => test.testName).join(', '),
+        testCatalogIds: selectedTests.map(test => test.id),
+        category: selectedTests[0]?.groupName || val.category || 'Biochemistry',
+        priority: val.priority || 'Routine',
+        specimenType: val.specimenType || selectedTests[0]?.specimenType || 'Whole blood',
+        clinicalNote: `Requested panels: ${selectedTests.map(test => `${test.groupName}/${test.subGroup}/${test.testName}`).join('; ')}`
       });
     }
     this.closeForm();
@@ -257,14 +503,63 @@ export class LaboratoryComponent {
   openResultForm(lab: LabOrder) {
     this.selectedLabForResult.set(lab);
     this.isFormVisible.set(false); // Close order form if open
+    this.resultRows.set(this.buildResultRows(lab));
     this.resultForm.reset({
       result: '',
       unit: 'ng/mL',
       normalRange: '0.0 - 0.04',
+      resultFlag: 'Normal',
+      resultNotes: '',
+      performedBy: this.store.currentUser()?.name || '',
+      verifiedBy: this.store.currentUser()?.name || '',
       isAbnormal: false
     });
     // Scroll to top for focus
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  updateResultRow(index: number, field: keyof LabResultItem, event: Event) {
+    const value = (event.target as HTMLInputElement | HTMLSelectElement).value;
+    this.resultRows.update(rows => rows.map((row, rowIndex) =>
+      rowIndex === index ? { ...row, [field]: value } : row
+    ));
+  }
+
+  private buildResultRows(lab: LabOrder): LabResultItem[] {
+    if (lab.resultItems?.length) {
+      return lab.resultItems;
+    }
+
+    const catalogRows = (lab.testCatalogIds || [])
+      .map(id => this.store.diagnosticTests().find(test => test.id === id))
+      .filter((test): test is DiagnosticTest => !!test)
+      .map(test => ({
+        catalogId: test.id,
+        groupName: test.groupName,
+        subGroup: test.subGroup,
+        testName: test.testName,
+        result: '',
+        unit: test.unit,
+        referenceRange: test.referenceRange,
+        flag: 'Normal' as const,
+      }));
+
+    if (catalogRows.length) {
+      return catalogRows;
+    }
+
+    return lab.testName.split(',')
+      .map(name => name.trim())
+      .filter(Boolean)
+      .map(name => ({
+        groupName: lab.category || 'Laboratory',
+        subGroup: 'General',
+        testName: name,
+        result: '',
+        unit: lab.unit || '',
+        referenceRange: lab.normalRange || '',
+        flag: 'Normal' as const,
+      }));
   }
 
   submitResult() {
@@ -272,14 +567,135 @@ export class LaboratoryComponent {
     if (!lab || this.resultForm.invalid) return;
 
     const val = this.resultForm.value;
+    const rows = this.resultRows();
+    if (!rows.length || rows.some(row => !row.result?.trim())) {
+      this.store.addToast('error', 'Incomplete Results', 'Enter a result value for every requested test before posting.');
+      return;
+    }
+
+    const hasCritical = rows.some(row => row.flag === 'Critical');
+    const hasAbnormal = rows.some(row => row.flag !== 'Normal');
+    const flag = hasCritical ? 'Critical' : (val.isAbnormal || hasAbnormal ? 'Abnormal' : (val.resultFlag || 'Normal'));
+    const releaseText = [
+      val.result || rows.map(row => `${row.testName}: ${row.result} ${row.unit}`.trim()).join('\n'),
+      val.resultNotes ? `Interpretation: ${val.resultNotes}` : '',
+    ].filter(Boolean).join('\n');
+
     this.store.updateLabResult(
       lab.id,
-      val.result!,
-      val.normalRange || 'N/A',
-      val.unit || '',
-      !!val.isAbnormal
+      releaseText,
+      rows.length === 1 ? rows[0].referenceRange || 'N/A' : 'See result table',
+      rows.length === 1 ? rows[0].unit || '' : '',
+      flag !== 'Normal',
+      flag,
+      val.resultNotes || '',
+      val.performedBy || this.store.currentUser()?.name || '',
+      val.verifiedBy || this.store.currentUser()?.name || '',
+      rows
     );
     this.closeForm();
+  }
+
+  printLabResult(lab: LabOrder) {
+    const popup = window.open('', '_blank', 'width=980,height=760');
+    if (!popup) return;
+    const printedAt = new Date().toLocaleString();
+    const documentNo = `LAB-${Date.now().toString().slice(-8)}`;
+    const rows = lab.resultItems?.length
+      ? lab.resultItems
+      : this.buildResultRows({ ...lab, resultItems: undefined }).map(row => ({ ...row, result: lab.result || row.result }));
+    const groupedRows = rows.reduce<Record<string, LabResultItem[]>>((acc, row) => {
+      const key = row.groupName || lab.category || 'Laboratory';
+      acc[key] = [...(acc[key] || []), row];
+      return acc;
+    }, {});
+    const resultTableHtml = Object.entries(groupedRows).map(([group, groupRows]) => `
+      <h2>${this.escapeHtml(group)}</h2>
+      <table class="result-table">
+        <thead>
+          <tr><th>Test Name</th><th>Result</th><th>Unit</th><th>Reference Range</th><th>Flag</th></tr>
+        </thead>
+        <tbody>
+          ${groupRows.map(row => `<tr>
+            <td>${this.escapeHtml(row.testName)}</td>
+            <td>${this.escapeHtml(row.result || '')}</td>
+            <td>${this.escapeHtml(row.unit || '')}</td>
+            <td>${this.escapeHtml(row.referenceRange || '')}</td>
+            <td>${this.escapeHtml(row.flag || 'Normal')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `).join('');
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Laboratory Result - ${this.escapeHtml(lab.patientName)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; background: #e5e7eb; font-family: Arial, sans-serif; color: #111827; }
+            .page { position: relative; width: 210mm; min-height: 297mm; margin: 18px auto; background: white; padding: 18mm 16mm; box-shadow: 0 18px 50px rgba(15, 23, 42, .18); overflow: hidden; }
+            .watermark { position: absolute; inset: 38% auto auto 8%; transform: rotate(-34deg); font-size: 86px; font-weight: 900; color: rgba(124, 58, 237, .06); letter-spacing: .16em; }
+            .doc-header { position: relative; display: grid; grid-template-columns: 1fr 150px; border: 2px solid #111827; }
+            .hospital { padding: 12px 14px; text-align: center; border-right: 2px solid #111827; }
+            .hospital h2 { margin: 0; font-size: 17px; letter-spacing: .08em; }
+            .hospital p { margin: 4px 0 0; font-size: 10px; color: #475569; }
+            .doc-box { padding: 10px; text-align: center; font-size: 10px; }
+            .barcode { margin: 6px auto 2px; height: 28px; width: 96px; background: repeating-linear-gradient(90deg, #111827 0 2px, transparent 2px 5px, #111827 5px 6px, transparent 6px 9px); }
+            .title-row { display: grid; grid-template-columns: 1fr 160px; border: 2px solid #111827; border-top: 0; }
+            .title-row div { padding: 8px 12px; font-size: 12px; }
+            h1 { margin: 18px 0 14px; font-size: 20px; text-align: center; text-transform: uppercase; letter-spacing: .08em; }
+            h2 { margin: 18px 0 6px; border-bottom: 2px solid #111827; padding-bottom: 5px; font-size: 15px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; position: relative; z-index: 1; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+            th { width: 155px; background: #f1f5f9; text-transform: uppercase; font-size: 10px; letter-spacing: .06em; }
+            .result-table th { width: auto; border-left: 0; border-right: 0; background: white; }
+            .result-table td { border-left: 0; border-right: 0; }
+            .summary { margin-top: 16px; border-left: 5px solid #7c3aed; background: #faf5ff; padding: 14px; white-space: pre-line; font-size: 12px; line-height: 1.6; }
+            .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 72px; font-size: 12px; }
+            .sign-line { border-top: 1px solid #111827; padding-top: 8px; }
+            .footer { position: absolute; left: 16mm; right: 16mm; bottom: 10mm; border-top: 1px solid #cbd5e1; padding-top: 6px; text-align: center; font-size: 10px; color: #475569; }
+            @media print { body { background: white; } .page { margin: 0; box-shadow: none; width: auto; min-height: auto; } }
+          </style>
+        </head>
+        <body>
+          <section class="page">
+            <div class="watermark">LAB RESULT</div>
+            <div class="doc-header">
+              <div class="hospital">
+                <h2>BETHZATHA GENERAL HOSPITAL</h2>
+                <p>Addis Ababa, Ethiopia | Tel: +251-115-535980 | info@bethzatha.com</p>
+              </div>
+              <div class="doc-box">
+                Document No
+                <div class="barcode"></div>
+                <strong>${this.escapeHtml(documentNo)}</strong>
+              </div>
+            </div>
+            <div class="title-row">
+              <div><strong>Document Title:</strong> Laboratory Result Report</div>
+              <div><strong>Revision:</strong> 0<br><strong>Page:</strong> 1 of 1</div>
+            </div>
+            <h1>Laboratory Result Report</h1>
+            <table>
+              <tr><th>Patient Name</th><td>${this.escapeHtml(lab.patientName)}</td><th>MRN</th><td>${this.escapeHtml(lab.patientMrn)}</td></tr>
+              <tr><th>Sample Type</th><td>${this.escapeHtml(lab.specimenType || 'As applicable')}</td><th>Clinical Data</th><td>${this.escapeHtml(lab.clinicalNote || '')}</td></tr>
+              <tr><th>Requested By</th><td>${this.escapeHtml(lab.doctorName)}</td><th>Printed</th><td>${this.escapeHtml(printedAt)}</td></tr>
+              <tr><th>Order Date</th><td>${this.escapeHtml(lab.orderedDate)}</td><th>Report Date</th><td>${this.escapeHtml(lab.completedDate || printedAt)}</td></tr>
+            </table>
+            ${resultTableHtml}
+            <div class="summary">${this.escapeHtml(lab.resultNotes || lab.result || 'No interpretation note entered.')}</div>
+            <div class="signatures">
+              <div class="sign-line">Lab Technologist: ${this.escapeHtml(lab.labTechName || '')}</div>
+              <div class="sign-line">Authorized Clinician</div>
+            </div>
+            <div class="footer">Addis Ababa, Ethiopia | Core Lab Stadium Tel 011 554 15 15 | lab@bethzatha.com | www.bethzatha.com</div>
+          </section>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
   }
 
   getLabStatusClass(status: string): string {
@@ -290,5 +706,14 @@ export class LaboratoryComponent {
       case 'COMPLETED': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
+  }
+
+  private escapeHtml(value: string): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

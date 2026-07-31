@@ -363,6 +363,52 @@ app.MapGet("/api/beds", async (PatientsDbContext db) =>
     return Results.Ok(ApiResponse<IEnumerable<BedDto>>.Ok(beds));
 });
 
+app.MapPost("/api/beds", async (CreateBedRequest request, PatientsDbContext db) =>
+{
+    var ward = Clean(request.Ward, "");
+    var room = Clean(request.Room, "");
+    var bedNumber = Clean(request.BedNumber, "");
+
+    if (string.IsNullOrWhiteSpace(ward) || string.IsNullOrWhiteSpace(room) || string.IsNullOrWhiteSpace(bedNumber))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Ward, room, and bed number are required."));
+    }
+
+    if (await db.Beds.AnyAsync(item => item.BedNumber == bedNumber))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("A bed with this bed number already exists."));
+    }
+
+    var bed = new Bed
+    {
+        Id = Guid.NewGuid(),
+        Ward = ward,
+        Room = room,
+        BedNumber = bedNumber,
+        IsAvailable = request.IsAvailable,
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    db.Beds.Add(bed);
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/beds/{bed.Id}", ApiResponse<BedDto>.Ok(ToBedDto(bed), "Bed registered."));
+});
+
+app.MapPut("/api/beds/{id:guid}/status", async (Guid id, BedStatusUpdateRequest request, PatientsDbContext db) =>
+{
+    var bed = await db.Beds.FirstOrDefaultAsync(item => item.Id == id);
+    if (bed is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Bed not found."));
+    }
+
+    bed.IsAvailable = request.IsAvailable;
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<BedDto>.Ok(ToBedDto(bed), request.IsAvailable ? "Bed released." : "Bed assigned."));
+});
+
 app.Run();
 
 static bool TryGetDoctorId(HttpContext httpContext, out Guid doctorId)
@@ -408,6 +454,8 @@ static PatientDto ToPatientDto(Patient patient)
         patient.EmergencyContactPhone,
         photoDataUrl);
 }
+
+static BedDto ToBedDto(Bed bed) => new(bed.Id, bed.Ward, bed.Room, bed.BedNumber, bed.IsAvailable);
 
 static List<AppointmentDto> ToAppointmentDtos(IEnumerable<Appointment> appointments)
 {

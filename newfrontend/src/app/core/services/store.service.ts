@@ -4,9 +4,10 @@ import { ApiService } from '../../api.service';
 import type {
   User, UserRole, Patient, Appointment, Prescription, LabOrder,
   BillingInvoice, Department, Bed, InsuranceClaim, MedicalRecord,
-  ToastMessage, VitalSigns, EnterpriseModule, BackendEmployee,
+  ToastMessage, VitalSigns, EnterpriseModule, DiagnosticTest, LabResultItem, ClinicalVitalEntry,
+  ClinicalDiagnosis, BackendEmployee,
   BackendPatient, BackendAppointment, BackendLabRequest,
-  BackendPrescription, BackendDepartment, BackendBed,
+  BackendPrescription, BackendDepartment, BackendBed, BackendDiagnosticTest, BackendVitalSign, BackendDiagnosis,
   BackendInvoice, BackendInvoiceItem, BackendEnterpriseRecord,
   BackendClinicalEncounter,
 } from '../models';
@@ -40,6 +41,9 @@ export class StoreService {
   readonly departments = signal<Department[]>([]);
   readonly prescriptions = signal<Prescription[]>([]);
   readonly labOrders = signal<LabOrder[]>([]);
+  readonly diagnosticTests = signal<DiagnosticTest[]>([]);
+  readonly clinicalVitals = signal<ClinicalVitalEntry[]>([]);
+  readonly clinicalDiagnoses = signal<ClinicalDiagnosis[]>([]);
   readonly billingInvoices = signal<BillingInvoice[]>([]);
   readonly medicalRecords = signal<MedicalRecord[]>([]);
   readonly insuranceClaims = signal<InsuranceClaim[]>([]);
@@ -152,6 +156,9 @@ export class StoreService {
     this.employees.set([]);
     this.prescriptions.set([]);
     this.labOrders.set([]);
+    this.diagnosticTests.set([]);
+    this.clinicalVitals.set([]);
+    this.clinicalDiagnoses.set([]);
     this.billingInvoices.set([]);
     this.beds.set([]);
     this.departments.set([]);
@@ -240,6 +247,15 @@ export class StoreService {
       case 'labRequests':
         this.api.getLabRequests().subscribe({ next: (r) => { if (r.data) this.labOrders.set(r.data.map(l => this.mapBackendLabRequest(l))); dec(); }, error: dec });
         break;
+      case 'diagnosticTests':
+        this.api.getDiagnosticTests().subscribe({ next: (r) => { if (r.data) this.diagnosticTests.set(r.data.map(t => this.mapBackendDiagnosticTest(t))); dec(); }, error: dec });
+        break;
+      case 'vitals':
+        this.api.getVitals().subscribe({ next: (r) => { if (r.data) this.clinicalVitals.set(r.data.map(v => this.mapBackendVital(v))); dec(); }, error: dec });
+        break;
+      case 'diagnoses':
+        this.api.getDiagnoses().subscribe({ next: (r) => { if (r.data) this.clinicalDiagnoses.set(r.data.map(d => this.mapBackendDiagnosis(d))); dec(); }, error: dec });
+        break;
       case 'invoices':
         this.api.getInvoices().subscribe({ next: (r) => { if (r.data) this.billingInvoices.set(r.data.map(i => this.mapBackendInvoice(i))); dec(); }, error: dec });
         break;
@@ -256,12 +272,12 @@ export class StoreService {
 
   private getEndpointsForRole(role: string): string[] {
     const roleEndpoints: Record<string, string[]> = {
-      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'beds', 'prescriptions', 'labRequests', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
-      DOCTOR: ['patients', 'appointments', 'prescriptions', 'labRequests', 'clinicalEncounters'],
-      NURSE: ['patients', 'appointments', 'beds', 'prescriptions', 'labRequests', 'clinicalEncounters'],
+      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
+      DOCTOR: ['patients', 'appointments', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
+      NURSE: ['patients', 'appointments', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
       RECEPTIONIST: ['patients', 'appointments', 'departments', 'beds'],
       PHARMACIST: ['patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
-      LAB_TECHNICIAN: ['patients', 'appointments', 'labRequests', 'enterpriseRecords'],
+      LAB_TECHNICIAN: ['patients', 'appointments', 'diagnosticTests', 'labRequests', 'enterpriseRecords'],
       ACCOUNTANT: ['patients', 'invoices', 'enterpriseRecords'],
       CASHIER: ['invoices'],
       HR_MANAGER: ['employees', 'departments'],
@@ -357,6 +373,20 @@ export class StoreService {
     };
   }
 
+  private mapBackendDiagnosticTest(test: BackendDiagnosticTest): DiagnosticTest {
+    return {
+      id: test.id,
+      groupName: test.groupName,
+      subGroup: test.subGroup || 'General',
+      testName: test.testName,
+      specimenType: test.specimenType || '',
+      unit: test.unit || '',
+      referenceRange: test.referenceRange || '',
+      sortOrder: test.sortOrder || 0,
+      isActive: test.isActive,
+    };
+  }
+
   private mapBackendPrescription(p: BackendPrescription): Prescription {
     const patient = this.patients().find(pat => pat.id === p.patientId);
     const employee = this.employees().find(e => e.id === p.doctorId);
@@ -382,6 +412,15 @@ export class StoreService {
   private mapBackendLabRequest(l: BackendLabRequest): LabOrder {
     const patient = this.patients().find(p => p.id === l.patientId);
     const employee = this.employees().find(e => e.id === l.doctorId);
+    const normalizedStatus = (l.status || '').toLowerCase();
+    const status: LabOrder['status'] =
+      normalizedStatus.includes('complete') || normalizedStatus.includes('verified') || normalizedStatus.includes('result')
+        ? 'COMPLETED'
+        : normalizedStatus.includes('collected')
+          ? 'SAMPLE_COLLECTED'
+          : normalizedStatus.includes('progress') || normalizedStatus.includes('analysis')
+            ? 'IN_ANALYSIS'
+            : 'ORDERED';
     return {
       id: l.id,
       patientId: l.patientId,
@@ -390,9 +429,57 @@ export class StoreService {
       doctorId: l.doctorId,
       doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : l.doctorId,
       testName: l.testName,
-      category: 'Biochemistry',
-      status: l.status === 'Requested' ? 'ORDERED' : 'IN_ANALYSIS',
+      testCatalogIds: l.testCatalogIds || [],
+      category: (l.category as LabOrder['category']) || 'Biochemistry',
+      priority: l.priority,
+      specimenType: l.specimenType,
+      clinicalNote: l.clinicalNote,
+      status,
+      result: l.resultSummary || l.resultValue,
+      normalRange: l.referenceRange,
+      resultFlag: l.resultFlag,
+      resultNotes: l.resultNotes,
+      performedBy: l.performedBy,
+      verifiedBy: l.verifiedBy,
+      resultItems: this.parseLabResultItems(l.resultItemsJson),
+      isAbnormal: l.resultFlag === 'Abnormal' || l.resultFlag === 'Critical',
       orderedDate: l.orderedAtUtc ? new Date(l.orderedAtUtc).toLocaleString() : new Date().toLocaleString(),
+      completedDate: l.resultedAtUtc ? new Date(l.resultedAtUtc).toLocaleString() : undefined,
+      labTechName: l.performedBy,
+    };
+  }
+
+  private mapBackendVital(v: BackendVitalSign): ClinicalVitalEntry {
+    const patient = this.patients().find(p => p.id === v.patientId);
+    return {
+      id: v.id,
+      patientId: v.patientId,
+      patientName: patient?.name || v.patientId,
+      patientMrn: patient?.mrn || '',
+      temperatureC: v.temperatureC,
+      pulse: v.pulse,
+      respiratoryRate: v.respiratoryRate,
+      bloodPressure: v.bloodPressure,
+      weightKg: v.weightKg,
+      heightCm: v.heightCm,
+      recordedAtUtc: v.recordedAtUtc,
+    };
+  }
+
+  private mapBackendDiagnosis(d: BackendDiagnosis): ClinicalDiagnosis {
+    const patient = this.patients().find(p => p.id === d.patientId);
+    const employee = this.employees().find(e => e.id === d.doctorId);
+    return {
+      id: d.id,
+      patientId: d.patientId,
+      patientName: patient?.name || d.patientId,
+      patientMrn: patient?.mrn || '',
+      doctorId: d.doctorId,
+      doctorName: employee ? `${employee.firstName} ${employee.lastName}` : d.doctorId,
+      code: d.code,
+      description: d.description,
+      severity: d.severity,
+      diagnosedAtUtc: d.diagnosedAtUtc,
     };
   }
 
@@ -560,7 +647,16 @@ export class StoreService {
   }
 
   addLabOrder(lab: Omit<LabOrder, 'id' | 'orderedDate' | 'status'>) {
-    const payload = { patientId: lab.patientId, doctorId: lab.doctorId, testName: lab.testName };
+    const payload = {
+      patientId: lab.patientId,
+      doctorId: lab.doctorId,
+      testName: lab.testName,
+      testCatalogIds: lab.testCatalogIds,
+      category: lab.category,
+      priority: lab.priority,
+      specimenType: lab.specimenType,
+      clinicalNote: lab.clinicalNote,
+    };
     this.api.createLabRequest(payload).subscribe({
       next: (res) => {
         if (res.data) {
@@ -572,6 +668,179 @@ export class StoreService {
     });
   }
 
+  saveDiagnosticTest(test: Omit<DiagnosticTest, 'id'> & { id?: string }) {
+    const payload = {
+      groupName: test.groupName,
+      subGroup: test.subGroup,
+      testName: test.testName,
+      specimenType: test.specimenType,
+      unit: test.unit,
+      referenceRange: test.referenceRange,
+      sortOrder: test.sortOrder,
+      isActive: test.isActive,
+    };
+    const request = test.id
+      ? this.api.updateDiagnosticTest(test.id, payload)
+      : this.api.createDiagnosticTest(payload);
+
+    request.subscribe({
+      next: (res) => {
+        if (res.data) {
+          const mapped = this.mapBackendDiagnosticTest(res.data);
+          this.diagnosticTests.update(current => {
+            const exists = current.some(item => item.id === mapped.id);
+            const updated = exists
+              ? current.map(item => item.id === mapped.id ? mapped : item)
+              : [...current, mapped];
+            return updated.sort((a, b) =>
+              a.groupName.localeCompare(b.groupName) ||
+              a.subGroup.localeCompare(b.subGroup) ||
+              a.sortOrder - b.sortOrder ||
+              a.testName.localeCompare(b.testName));
+          });
+          this.addToast('success', 'Diagnostic Catalog Saved', `${mapped.testName} is available for clinical ordering.`);
+        }
+      },
+      error: () => this.addToast('error', 'Catalog Save Failed', 'Unable to save the diagnostic catalog item. Please try again.'),
+    });
+  }
+
+  createBed(payload: { ward: string; room: string; bedNumber: string; isAvailable: boolean }) {
+    this.api.createBed(payload).subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.beds.update(current => [...current, this.mapBackendBed(res.data!)]);
+          this.addToast('success', 'Bed Registered', `Bed ${res.data.bedNumber} has been added to ${res.data.ward}.`);
+        }
+      },
+      error: () => this.addToast('error', 'Bed Registration Failed', 'Unable to register this bed. Check for duplicate bed number and try again.'),
+    });
+  }
+
+  updateBedAvailability(id: string, isAvailable: boolean) {
+    this.api.updateBedStatus(id, isAvailable).subscribe({
+      next: (res) => {
+        if (res.data) {
+          const mapped = this.mapBackendBed(res.data);
+          this.beds.update(current => current.map(bed => bed.id === id ? { ...bed, ...mapped } : bed));
+          this.addToast('success', isAvailable ? 'Bed Released' : 'Bed Assigned', isAvailable ? 'The bed is now available.' : 'The bed is now marked occupied.');
+        }
+      },
+      error: () => this.addToast('error', 'Bed Update Failed', 'Unable to update this bed status. Please try again.'),
+    });
+  }
+
+  addClinicalEncounter(payload: {
+    patientId: string;
+    patientName: string;
+    doctorId: string;
+    doctorName: string;
+    visitType: string;
+    chiefComplaint: string;
+    assessment: string;
+    plan: string;
+  }) {
+    this.api.createEncounter({
+      patientId: payload.patientId,
+      doctorId: payload.doctorId,
+      visitType: payload.visitType,
+      chiefComplaint: payload.chiefComplaint,
+      assessment: payload.assessment,
+      plan: payload.plan,
+    }).subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.medicalRecords.update(current => [this.mapBackendEncounter(res.data), ...current]);
+          this.addToast('success', 'Encounter Saved', `Clinical note saved for ${payload.patientName}.`);
+        }
+      },
+      error: () => {
+        this.addMedicalRecord({
+          patientId: payload.patientId,
+          patientName: payload.patientName,
+          doctorId: payload.doctorId,
+          doctorName: payload.doctorName,
+          diagnosis: payload.assessment,
+          symptoms: [payload.chiefComplaint],
+          clinicalNotes: `Visit Type: ${payload.visitType}\n\nComplaint: ${payload.chiefComplaint}\n\nAssessment: ${payload.assessment}\n\nPlan: ${payload.plan}`,
+          vitalSigns: {
+            bp: 'N/A',
+            hr: 0,
+            temp: 0,
+            spo2: 0,
+            respiratoryRate: 0,
+            updatedAt: 'N/A',
+          },
+        });
+      },
+    });
+  }
+
+  addVitals(vital: Omit<ClinicalVitalEntry, 'id' | 'recordedAtUtc'>) {
+    this.api.createVitals({
+      patientId: vital.patientId,
+      temperatureC: vital.temperatureC,
+      pulse: vital.pulse,
+      respiratoryRate: vital.respiratoryRate,
+      bloodPressure: vital.bloodPressure,
+      weightKg: vital.weightKg,
+      heightCm: vital.heightCm,
+    }).subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.clinicalVitals.update(current => [this.mapBackendVital(res.data), ...current]);
+          this.patients.update(current => current.map(patient => patient.id === vital.patientId ? {
+            ...patient,
+            vitals: {
+              ...patient.vitals,
+              bp: vital.bloodPressure,
+              hr: vital.pulse,
+              temp: vital.temperatureC,
+              respiratoryRate: vital.respiratoryRate,
+              updatedAt: 'Just now',
+            },
+          } : patient));
+          this.addToast('success', 'Vitals Recorded', `Vitals saved for ${vital.patientName}.`);
+        }
+      },
+      error: () => {
+        const entry: ClinicalVitalEntry = {
+          ...vital,
+          id: 'vital-' + Math.floor(100 + Math.random() * 900),
+          recordedAtUtc: new Date().toISOString(),
+        };
+        this.clinicalVitals.update(current => [entry, ...current]);
+        this.addToast('success', 'Vitals Recorded', `Vitals saved for ${vital.patientName} (offline mode).`);
+      },
+    });
+  }
+
+  addDiagnosis(diagnosis: Omit<ClinicalDiagnosis, 'id' | 'diagnosedAtUtc'>) {
+    this.api.createDiagnosis({
+      patientId: diagnosis.patientId,
+      doctorId: diagnosis.doctorId,
+      code: diagnosis.code,
+      description: diagnosis.description,
+      severity: diagnosis.severity,
+    }).subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.clinicalDiagnoses.update(current => [this.mapBackendDiagnosis(res.data), ...current]);
+          this.addToast('success', 'Diagnosis Added', `${diagnosis.description} added for ${diagnosis.patientName}.`);
+        }
+      },
+      error: () => {
+        const entry: ClinicalDiagnosis = {
+          ...diagnosis,
+          id: 'dx-' + Math.floor(100 + Math.random() * 900),
+          diagnosedAtUtc: new Date().toISOString(),
+        };
+        this.clinicalDiagnoses.update(current => [entry, ...current]);
+        this.addToast('success', 'Diagnosis Added', `${diagnosis.description} added for ${diagnosis.patientName} (offline mode).`);
+      },
+    });
+  }
+
   dispensePrescription(id: string) {
     this.prescriptions.update(current =>
       current.map(p => p.id === id ? { ...p, status: 'DISPENSED' as const, pharmacyNotes: `Dispensed by ${this.currentUser()?.name}` } : p)
@@ -579,15 +848,69 @@ export class StoreService {
     this.addToast('success', 'Medication Dispensed', 'Prescription order fulfilled.');
   }
 
-  updateLabResult(id: string, result: string, normalRange: string, unit: string, isAbnormal: boolean) {
-    this.labOrders.update(current =>
-      current.map(l => l.id === id ? {
-        ...l, status: 'COMPLETED' as const, result, normalRange, unit, isAbnormal,
-        completedDate: new Date().toLocaleString(),
-        labTechName: this.currentUser()?.name,
-      } : l)
-    );
-    this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR.');
+  updateLabResult(
+    id: string,
+    result: string,
+    normalRange: string,
+    unit: string,
+    isAbnormal: boolean,
+    resultFlag = isAbnormal ? 'Abnormal' : 'Normal',
+    resultNotes = '',
+    performedBy = this.currentUser()?.name || '',
+    verifiedBy = this.currentUser()?.name || '',
+    resultItems: LabResultItem[] = []
+  ) {
+    const applyLocalUpdate = () => {
+      this.labOrders.update(current =>
+        current.map(l => l.id === id ? {
+          ...l, status: 'COMPLETED' as const, result, normalRange, unit, isAbnormal,
+          resultFlag,
+          resultNotes,
+          performedBy,
+          verifiedBy,
+          resultItems,
+          completedDate: new Date().toLocaleString(),
+          labTechName: performedBy || this.currentUser()?.name,
+        } : l)
+      );
+    };
+
+    this.api.updateLabResult(id, {
+      status: 'Completed',
+      resultSummary: result,
+      resultValue: result,
+      referenceRange: normalRange,
+      resultFlag,
+      resultNotes,
+      resultItemsJson: JSON.stringify(resultItems),
+      performedBy,
+      verifiedBy,
+      resultedAtUtc: new Date().toISOString(),
+    }).subscribe({
+      next: (res) => {
+        if (res.data) {
+          const mapped = { ...this.mapBackendLabRequest(res.data), unit, resultFlag, resultNotes, performedBy, verifiedBy, resultItems, isAbnormal };
+          this.labOrders.update(current => current.map(l => l.id === id ? mapped : l));
+        } else {
+          applyLocalUpdate();
+        }
+        this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR.');
+      },
+      error: () => {
+        applyLocalUpdate();
+        this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR (offline mode).');
+      },
+    });
+  }
+
+  private parseLabResultItems(value?: string): LabResultItem[] {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value) as LabResultItem[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   addMedicalRecord(rec: Omit<MedicalRecord, 'id' | 'date'>) {

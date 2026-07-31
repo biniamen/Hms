@@ -1,9 +1,9 @@
-import { Component, signal, inject } from '@angular/core';
+import { Component, computed, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
 import { ApiService } from '../../api.service';
-import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOutbox, BackendEmployee } from '../../core/models';
+import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOutbox, BackendEmployee, DiagnosticTest } from '../../core/models';
 
 @Component({
   selector: 'app-admin',
@@ -405,6 +405,101 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
           </div>
         }
 
+        <!-- Diagnostic Catalog Tab -->
+        @if (activeTab() === 'diagnostics') {
+          <div class="grid grid-cols-1 gap-6 xl:grid-cols-[360px_1fr]">
+            <form (ngSubmit)="saveDiagnosticCatalogItem()" class="rounded-[2rem] border border-purple-100 bg-white p-6 shadow-sm">
+              <div class="mb-5 flex items-center gap-3">
+                <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-purple-600 text-white">
+                  <span class="material-icons text-base">biotech</span>
+                </div>
+                <div>
+                  <h3 class="text-sm font-black text-slate-900">Diagnostic Catalog</h3>
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-purple-600">Lab and imaging master data</p>
+                </div>
+              </div>
+
+              <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Group *</span>
+                    <input [(ngModel)]="diagnosticForm.groupName" name="diagGroup" required placeholder="Radiology" [class]="inputClasses" />
+                  </label>
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Sub Group</span>
+                    <input [(ngModel)]="diagnosticForm.subGroup" name="diagSubGroup" placeholder="MRI" [class]="inputClasses" />
+                  </label>
+                </div>
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Test Name *</span>
+                  <input [(ngModel)]="diagnosticForm.testName" name="diagTestName" required placeholder="MRI Brain" [class]="inputClasses" />
+                </label>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Specimen</span>
+                    <input [(ngModel)]="diagnosticForm.specimenType" name="diagSpecimen" placeholder="Imaging only" [class]="inputClasses" />
+                  </label>
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Unit</span>
+                    <input [(ngModel)]="diagnosticForm.unit" name="diagUnit" placeholder="mg/dL" [class]="inputClasses" />
+                  </label>
+                </div>
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Reference Range</span>
+                  <input [(ngModel)]="diagnosticForm.referenceRange" name="diagRange" placeholder="30-100 or Radiologist report" [class]="inputClasses" />
+                </label>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Sort Order</span>
+                    <input [(ngModel)]="diagnosticForm.sortOrder" name="diagSort" type="number" [class]="inputClasses" />
+                  </label>
+                  <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-600">
+                    <input [(ngModel)]="diagnosticForm.isActive" name="diagActive" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500" />
+                    Active in order screens
+                  </label>
+                </div>
+              </div>
+
+              <div class="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-5">
+                <button type="button" (click)="resetDiagnosticForm()" class="rounded-xl px-4 py-2 text-xs font-black text-slate-500 hover:bg-slate-100">Clear</button>
+                <button type="submit" class="rounded-xl bg-purple-600 px-5 py-2 text-xs font-black text-white shadow-lg shadow-purple-500/20 hover:bg-purple-700">
+                  {{ diagnosticForm.id ? 'Update Test' : 'Add Test' }}
+                </button>
+              </div>
+            </form>
+
+            <div class="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div class="border-b border-slate-100 bg-slate-50/50 p-5">
+                <div class="text-[11px] font-black uppercase tracking-widest text-slate-900">Active Diagnostic Groups</div>
+                <p class="mt-1 text-xs text-slate-500">Doctors and lab technicians use this catalog for checkbox order entry and predefined result ranges.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead class="border-b border-slate-200 bg-slate-50 text-[9px] font-black uppercase tracking-widest text-slate-500">
+                    <tr><th class="px-5 py-4">Group</th><th class="px-5 py-4">Sub Group</th><th class="px-5 py-4">Test</th><th class="px-5 py-4">Specimen</th><th class="px-5 py-4">Range</th><th class="px-5 py-4 text-right">Action</th></tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100">
+                    @for (test of sortedDiagnosticTests(); track test.id) {
+                      <tr class="hover:bg-slate-50/60">
+                        <td class="px-5 py-4 font-black text-slate-900">{{ test.groupName }}</td>
+                        <td class="px-5 py-4 text-slate-600">{{ test.subGroup }}</td>
+                        <td class="px-5 py-4 font-bold text-slate-800">{{ test.testName }}</td>
+                        <td class="px-5 py-4 text-slate-500">{{ test.specimenType || 'As applicable' }}</td>
+                        <td class="px-5 py-4 font-mono text-[10px] text-slate-500">{{ test.referenceRange || 'Report based' }} {{ test.unit }}</td>
+                        <td class="px-5 py-4 text-right">
+                          <button type="button" (click)="editDiagnosticCatalogItem(test)" class="rounded-xl border border-purple-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-purple-700 hover:bg-purple-50">Edit</button>
+                        </td>
+                      </tr>
+                    } @empty {
+                      <tr><td colspan="6" class="py-16 text-center text-xs font-bold text-slate-400">No diagnostic catalog items loaded.</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        }
+
         <!-- Emails Tab -->
         @if (activeTab() === 'emails') {
           <div class="bg-white rounded-[2.5rem] border border-slate-200/80 shadow-sm overflow-hidden">
@@ -480,17 +575,71 @@ export class AdminComponent {
     department: '',
   };
 
+  diagnosticForm: Omit<DiagnosticTest, 'id'> & { id?: string } = {
+    groupName: 'Radiology',
+    subGroup: 'MRI',
+    testName: '',
+    specimenType: 'Imaging only',
+    unit: '',
+    referenceRange: 'Radiologist report',
+    sortOrder: 0,
+    isActive: true,
+  };
+
+  sortedDiagnosticTests = computed(() =>
+    [...this.store.diagnosticTests()].sort((a, b) =>
+      a.groupName.localeCompare(b.groupName) ||
+      a.subGroup.localeCompare(b.subGroup) ||
+      a.sortOrder - b.sortOrder ||
+      a.testName.localeCompare(b.testName)));
+
   tabs = [
     { id: 'users' as AdminTab, label: 'Identity Management' },
     { id: 'roles' as AdminTab, label: 'Role Dictionary' },
     { id: 'permissions' as AdminTab, label: 'System Access' },
     { id: 'departments' as AdminTab, label: 'Org Structure' },
+    { id: 'diagnostics' as AdminTab, label: 'Diagnostics Catalog' },
     { id: 'emails' as AdminTab, label: 'SMTP Logs' },
   ];
 
   constructor() {
     this.loadRoles();
     this.loadPermissions();
+  }
+
+  resetDiagnosticForm() {
+    this.diagnosticForm = {
+      groupName: 'Radiology',
+      subGroup: 'MRI',
+      testName: '',
+      specimenType: 'Imaging only',
+      unit: '',
+      referenceRange: 'Radiologist report',
+      sortOrder: 0,
+      isActive: true,
+    };
+  }
+
+  editDiagnosticCatalogItem(test: DiagnosticTest) {
+    this.diagnosticForm = { ...test };
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  saveDiagnosticCatalogItem() {
+    if (!this.diagnosticForm.groupName || !this.diagnosticForm.testName) {
+      this.store.addToast('error', 'Catalog Validation', 'Group and test name are required.');
+      return;
+    }
+    this.store.saveDiagnosticTest({
+      ...this.diagnosticForm,
+      subGroup: this.diagnosticForm.subGroup || 'General',
+      specimenType: this.diagnosticForm.specimenType || '',
+      unit: this.diagnosticForm.unit || '',
+      referenceRange: this.diagnosticForm.referenceRange || '',
+      sortOrder: Number(this.diagnosticForm.sortOrder || 0),
+      isActive: !!this.diagnosticForm.isActive,
+    });
+    this.resetDiagnosticForm();
   }
 
   loadRoles() {
@@ -703,7 +852,7 @@ export class AdminComponent {
     });
   }
 
-  private resetNewForm() {
+  resetNewForm() {
     this.isFormVisible.set(false);
     this.newEmployee = { firstName: '', lastName: '', emailAddress: '', phone: '', role: '', specialization: '', department: '' };
     this.newEmployeePassword = '';

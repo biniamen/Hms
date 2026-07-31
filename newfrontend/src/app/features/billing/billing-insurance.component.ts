@@ -126,6 +126,9 @@ import { BillingInvoice } from '../../core/models';
                           Submit Claim
                         </button>
                       }
+                      <button (click)="printInvoice(inv)" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-700 text-white font-bold rounded-lg text-[10px] shadow-xs">
+                        Print
+                      </button>
                     </div>
                   </td>
 
@@ -336,6 +339,107 @@ export class BillingInsuranceComponent {
     this.selectedInvForPayment.set(null);
   }
 
+  printInvoice(inv: BillingInvoice) {
+    const printedAt = new Date().toLocaleString();
+    const documentNo = `INV-${Date.now().toString().slice(-8)}`;
+    const rows = inv.items.map((item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${this.escapeHtml(item.id)}</td>
+        <td>${this.escapeHtml(item.description)}</td>
+        <td>${this.escapeHtml(item.category)}</td>
+        <td>${this.escapeHtml(inv.date)}</td>
+        <td class="num">${item.amount.toFixed(2)}</td>
+        <td class="num">1</td>
+        <td class="num">${item.amount.toFixed(2)}</td>
+      </tr>
+    `).join('');
+    const balance = inv.totalAmount - inv.insuranceCoveredAmount - inv.patientPaidAmount;
+    const popup = window.open('', '_blank', 'width=980,height=760');
+    if (!popup) return;
+    popup.document.write(`
+      <html>
+      <head>
+        <title>${this.escapeHtml(inv.invoiceNumber)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #e5e7eb; font-family: Arial, sans-serif; color: #111827; }
+          .page { position: relative; width: 210mm; min-height: 297mm; margin: 18px auto; background: white; padding: 16mm; box-shadow: 0 18px 50px rgba(15,23,42,.18); overflow: hidden; }
+          .watermark { position: absolute; top: 42%; left: 7%; transform: rotate(-35deg); font-size: 110px; font-weight: 900; color: rgba(15,118,110,.06); letter-spacing: .12em; }
+          .doc-header { position: relative; display: grid; grid-template-columns: 1fr 150px; border: 2px solid #111827; }
+          .hospital { padding: 12px; text-align: center; border-right: 2px solid #111827; }
+          .hospital h2 { margin: 0; font-size: 17px; letter-spacing: .08em; }
+          .hospital p { margin: 4px 0 0; font-size: 10px; color: #475569; }
+          .doc-box { padding: 10px; text-align: center; font-size: 10px; }
+          .barcode { margin: 6px auto 2px; height: 28px; width: 96px; background: repeating-linear-gradient(90deg, #111827 0 2px, transparent 2px 5px, #111827 5px 6px, transparent 6px 9px); }
+          .title-row { display: grid; grid-template-columns: 1fr 160px; border: 2px solid #111827; border-top: 0; }
+          .title-row div { padding: 8px 12px; font-size: 12px; }
+          h1 { text-align: center; font-size: 18px; margin: 18px 0 12px; text-transform: uppercase; }
+          .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 12px 0; font-size: 12px; }
+          .line { display: grid; grid-template-columns: 120px 1fr; border-bottom: 1px solid #94a3b8; padding: 4px 0; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 14px; position: relative; z-index: 1; }
+          th, td { border: 1px solid #cbd5e1; padding: 7px; text-align: left; }
+          th { background: #f1f5f9; font-size: 10px; text-transform: uppercase; }
+          .num { text-align: right; font-family: Consolas, monospace; }
+          .totals { margin-left: auto; margin-top: 14px; width: 330px; font-size: 12px; }
+          .totals div { display: grid; grid-template-columns: 1fr 120px; border-bottom: 1px solid #cbd5e1; padding: 5px 0; }
+          .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 72px; font-size: 12px; }
+          .sign-line { border-top: 1px solid #111827; padding-top: 8px; }
+          @media print { body { background: white; } .page { margin: 0; box-shadow: none; width: auto; min-height: auto; } }
+        </style>
+      </head>
+      <body>
+        <section class="page">
+          <div class="watermark">${inv.status === 'PAID' ? 'PAID' : 'INVOICE'}</div>
+          <div class="doc-header">
+            <div class="hospital">
+              <h2>BETHZATHA GENERAL HOSPITAL</h2>
+              <p>Addis Ababa, Ethiopia | Tel: +251-115-535980 | info@bethzatha.com</p>
+            </div>
+            <div class="doc-box">Document No<div class="barcode"></div><strong>${documentNo}</strong></div>
+          </div>
+          <div class="title-row">
+            <div><strong>Document Title:</strong> Cash Invoice Attachment</div>
+            <div><strong>Revision:</strong> 0<br><strong>Page:</strong> 1 of 1</div>
+          </div>
+          <h1>${inv.status === 'PAID' ? 'Cash Receipt Attachment' : 'Cash Invoice Attachment'}</h1>
+          <div class="meta">
+            <div>
+              <div class="line"><strong>Bill To</strong><span>${this.escapeHtml(inv.patientName)}</span></div>
+              <div class="line"><strong>Patient Name</strong><span>${this.escapeHtml(inv.patientName)}</span></div>
+              <div class="line"><strong>MRN</strong><span>${this.escapeHtml(inv.patientMrn)}</span></div>
+              <div class="line"><strong>Status</strong><span>${this.escapeHtml(inv.status)}</span></div>
+            </div>
+            <div>
+              <div class="line"><strong>Bill Date</strong><span>${this.escapeHtml(inv.date)}</span></div>
+              <div class="line"><strong>Printed</strong><span>${this.escapeHtml(printedAt)}</span></div>
+              <div class="line"><strong>Bill No</strong><span>${this.escapeHtml(documentNo)}</span></div>
+              <div class="line"><strong>Invoice No</strong><span>${this.escapeHtml(inv.invoiceNumber)}</span></div>
+            </div>
+          </div>
+          <table>
+            <thead><tr><th>No</th><th>Code</th><th>Description</th><th>Service Type</th><th>Date</th><th>Price</th><th>Unit</th><th>Total</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="totals">
+            <div><strong>Sub Total</strong><span class="num">${inv.totalAmount.toFixed(2)}</span></div>
+            <div><strong>Insurance Covered</strong><span class="num">${inv.insuranceCoveredAmount.toFixed(2)}</span></div>
+            <div><strong>Patient Paid</strong><span class="num">${inv.patientPaidAmount.toFixed(2)}</span></div>
+            <div><strong>Balance</strong><span class="num">${Math.max(balance, 0).toFixed(2)}</span></div>
+          </div>
+          <div class="signatures">
+            <div class="sign-line">Cashier / Billing Officer</div>
+            <div class="sign-line">${this.escapeHtml(inv.patientName)}</div>
+          </div>
+        </section>
+      </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  }
+
   getInvoiceStatusClass(status: string): string {
     switch (status) {
       case 'UNPAID': return 'bg-rose-50 text-rose-700 border-rose-200';
@@ -354,5 +458,14 @@ export class BillingInsuranceComponent {
       case 'REJECTED': return 'bg-rose-50 text-rose-700 border border-rose-200';
       default: return 'bg-slate-100 text-slate-700 border border-slate-200';
     }
+  }
+
+  private escapeHtml(value: string): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

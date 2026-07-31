@@ -29,6 +29,39 @@ function Stop-HmsProcess {
     }
 }
 
+function Get-HmsListeningProcessIds {
+    param([int[]]$TargetPorts)
+
+    $processIds = @()
+
+    try {
+        $processIds += Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object { $TargetPorts -contains $_.LocalPort } |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    } catch {
+        Write-Warning "Could not inspect listening ports with Get-NetTCPConnection: $($_.Exception.Message)"
+    }
+
+    if ($processIds.Count -eq 0) {
+        try {
+            $netstatLines = netstat -ano
+            foreach ($line in $netstatLines) {
+                if ($line -match '^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$') {
+                    $port = [int]$Matches[1]
+                    $processId = [int]$Matches[2]
+                    if ($TargetPorts -contains $port) {
+                        $processIds += $processId
+                    }
+                }
+            }
+        } catch {
+            Write-Warning "Could not inspect listening ports with netstat: $($_.Exception.Message)"
+        }
+    }
+
+    $processIds | Sort-Object -Unique
+}
+
 Write-Host "Stopping HMS services from: $root"
 
 try {
@@ -47,27 +80,20 @@ try {
 }
 
 if (-not $SkipPortStop) {
-    try {
-        Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-            Where-Object { $Ports -contains $_.LocalPort } |
-            Select-Object -ExpandProperty OwningProcess -Unique |
-            ForEach-Object {
-                Stop-HmsProcess -ProcessId $_ -Reason "listening on HMS port"
-            }
-    } catch {
-        Write-Warning "Could not inspect listening ports: $($_.Exception.Message)"
+    foreach ($processId in Get-HmsListeningProcessIds -TargetPorts $Ports) {
+        Stop-HmsProcess -ProcessId $processId -Reason "listening on HMS port"
     }
 }
 
 Start-Sleep -Seconds 1
 
-$remaining = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-    Where-Object { $Ports -contains $_.LocalPort } |
-    Select-Object LocalAddress, LocalPort, OwningProcess
+$remainingIds = Get-HmsListeningProcessIds -TargetPorts $Ports
 
-if ($remaining) {
+if ($remainingIds) {
     Write-Warning "Some HMS ports are still in use:"
-    $remaining | Format-Table -AutoSize
+    foreach ($processId in $remainingIds) {
+        netstat -ano | Select-String -Pattern $processId
+    }
     exit 1
 }
 

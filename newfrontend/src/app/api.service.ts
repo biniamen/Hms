@@ -7,7 +7,7 @@ import type {
   BackendEmployee, BackendDoctorProfile, BackendPatient,
   BackendAppointment, BackendBed, BackendPrescription,
   BackendClinicalEncounter, BackendVitalSign, BackendDiagnosis,
-  BackendLabRequest, BackendInvoice, BackendPayment,
+  BackendLabRequest, BackendDiagnosticTest, BackendInvoice, BackendPayment,
   BackendReceipt, BackendRolePermission, BackendPermission,
   BackendDepartment, BackendInsuranceCompany, BackendEmailOutbox,
   BackendEnterpriseRecord, BackendServiceStatus, BackendQueueSummary,
@@ -197,6 +197,14 @@ export class ApiService {
     return this.http.get<ApiResponse<BackendBed[]>>(`${this.baseUrl}/api/beds`);
   }
 
+  createBed(payload: { ward: string; room: string; bedNumber: string; isAvailable: boolean }): Observable<ApiResponse<BackendBed>> {
+    return this.http.post<ApiResponse<BackendBed>>(`${this.baseUrl}/api/beds`, payload);
+  }
+
+  updateBedStatus(id: string, isAvailable: boolean): Observable<ApiResponse<BackendBed>> {
+    return this.http.put<ApiResponse<BackendBed>>(`${this.baseUrl}/api/beds/${id}/status`, { isAvailable });
+  }
+
   // ── Clinical ──
   getEncounters(): Observable<ApiResponse<BackendClinicalEncounter[]>> {
     return this.http.get<ApiResponse<BackendClinicalEncounter[]>>(`${this.baseUrl}/api/clinical/encounters`);
@@ -230,6 +238,24 @@ export class ApiService {
     return this.http.post<ApiResponse<BackendDiagnosis>>(`${this.baseUrl}/api/clinical/diagnoses`, payload);
   }
 
+  getDiagnosticTests(): Observable<ApiResponse<BackendDiagnosticTest[]>> {
+    return this.http.get<ApiResponse<BackendDiagnosticTest[]>>(`${this.baseUrl}/api/clinical/diagnostic-tests`);
+  }
+
+  createDiagnosticTest(payload: {
+    groupName: string; subGroup?: string; testName: string; specimenType?: string;
+    unit?: string; referenceRange?: string; sortOrder?: number; isActive?: boolean;
+  }): Observable<ApiResponse<BackendDiagnosticTest>> {
+    return this.http.post<ApiResponse<BackendDiagnosticTest>>(`${this.baseUrl}/api/clinical/diagnostic-tests`, payload);
+  }
+
+  updateDiagnosticTest(id: string, payload: {
+    groupName: string; subGroup?: string; testName: string; specimenType?: string;
+    unit?: string; referenceRange?: string; sortOrder?: number; isActive?: boolean;
+  }): Observable<ApiResponse<BackendDiagnosticTest>> {
+    return this.http.put<ApiResponse<BackendDiagnosticTest>>(`${this.baseUrl}/api/clinical/diagnostic-tests/${id}`, payload);
+  }
+
   getPrescriptions(): Observable<ApiResponse<BackendPrescription[]>> {
     return this.http.get<ApiResponse<BackendPrescription[]>>(`${this.baseUrl}/api/clinical/prescriptions`);
   }
@@ -244,13 +270,14 @@ export class ApiService {
     return this.http.get<ApiResponse<BackendLabRequest[]>>(`${this.baseUrl}/api/clinical/lab-requests`);
   }
 
-  createLabRequest(payload: { patientId: string; doctorId: string; testName: string; category?: string; priority?: string; specimenType?: string; clinicalNote?: string }): Observable<ApiResponse<BackendLabRequest>> {
+  createLabRequest(payload: { patientId: string; doctorId: string; testName: string; testCatalogIds?: string[]; category?: string; priority?: string; specimenType?: string; clinicalNote?: string }): Observable<ApiResponse<BackendLabRequest>> {
     return this.http.post<ApiResponse<BackendLabRequest>>(`${this.baseUrl}/api/clinical/lab-requests`, payload);
   }
 
   updateLabResult(id: string, payload: {
     status: string; resultSummary?: string; resultValue?: string;
     referenceRange?: string; resultFlag?: string; resultNotes?: string;
+    resultItemsJson?: string;
     specimenType?: string; performedBy?: string; verifiedBy?: string;
     collectedAtUtc?: string; resultedAtUtc?: string;
   }): Observable<ApiResponse<BackendLabRequest>> {

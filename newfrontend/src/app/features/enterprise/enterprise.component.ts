@@ -22,7 +22,7 @@ import type { BackendEnterpriseRecord } from '../../core/models';
       <div class="bg-white rounded-2xl border border-slate-200/80 subtle-shadow p-4">
         <div class="flex flex-wrap gap-1.5">
           @for (mod of store.enterpriseModules; track mod.id) {
-            <button (click)="selectedModule.set(mod)" [class]="selectedModule()?.id === mod.id ? 'bg-teal-600 text-white font-bold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'" class="px-3 py-1.5 rounded-lg text-[10px] transition-all">
+            <button (click)="selectedModule.set(mod)" [class]="selectedModule().id === mod.id ? 'bg-teal-600 text-white font-bold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'" class="px-3 py-1.5 rounded-lg text-[10px] transition-all">
               {{ mod.label }}
             </button>
           }
@@ -105,7 +105,7 @@ export class EnterpriseComponent {
   showNewRecord = signal(false);
 
   filteredRecords = computed(() =>
-    this.store.enterpriseRecords().filter(r => r.area === this.selectedModule()?.area)
+    this.store.enterpriseRecords().filter(r => r.area === this.selectedModule().area)
   );
 
   getPatientName(patientId: string): string {
@@ -124,7 +124,7 @@ export class EnterpriseComponent {
   }
 
   private reloadRecords() {
-    this.api.getEnterpriseRecords(this.selectedModule()?.area).subscribe({
+    this.api.getEnterpriseRecords(this.selectedModule().area).subscribe({
       next: (r) => { if (r.data) this.store.enterpriseRecords.set(r.data); },
     });
   }

@@ -102,6 +102,18 @@ export interface BackendBed {
   isAvailable: boolean;
 }
 
+export interface BackendDiagnosticTest {
+  id: string;
+  groupName: string;
+  subGroup: string;
+  testName: string;
+  specimenType: string;
+  unit: string;
+  referenceRange: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
 export interface BackendPrescription {
   id: string;
   patientId: string;
@@ -149,8 +161,22 @@ export interface BackendLabRequest {
   patientId: string;
   doctorId: string;
   testName: string;
+  testCatalogIds?: string[];
   status: string;
   orderedAtUtc: string;
+  category?: string;
+  priority?: string;
+  specimenType?: string;
+  clinicalNote?: string;
+  resultSummary?: string;
+  resultValue?: string;
+  referenceRange?: string;
+  resultFlag?: string;
+  resultNotes?: string;
+  performedBy?: string;
+  verifiedBy?: string;
+  resultItemsJson?: string;
+  resultedAtUtc?: string;
 }
 
 export interface BackendInvoiceItem {
@@ -414,15 +440,74 @@ export interface LabOrder {
   doctorId: string;
   doctorName: string;
   testName: string;
-  category: 'Hematology' | 'Biochemistry' | 'Radiology' | 'Microbiology' | 'Pathology';
+  testCatalogIds?: string[];
+  category: string;
+  priority?: string;
+  specimenType?: string;
+  clinicalNote?: string;
   status: LabOrderStatus;
   result?: string;
   normalRange?: string;
   unit?: string;
+  resultFlag?: string;
+  resultNotes?: string;
+  performedBy?: string;
+  verifiedBy?: string;
+  resultItems?: LabResultItem[];
   isAbnormal?: boolean;
   orderedDate: string;
   completedDate?: string;
   labTechName?: string;
+}
+
+export interface DiagnosticTest {
+  id: string;
+  groupName: string;
+  subGroup: string;
+  testName: string;
+  specimenType: string;
+  unit: string;
+  referenceRange: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface LabResultItem {
+  catalogId?: string;
+  groupName: string;
+  subGroup: string;
+  testName: string;
+  result: string;
+  unit: string;
+  referenceRange: string;
+  flag: 'Normal' | 'Low' | 'High' | 'Abnormal' | 'Critical';
+}
+
+export interface ClinicalVitalEntry {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  temperatureC: number;
+  pulse: number;
+  respiratoryRate: number;
+  bloodPressure: string;
+  weightKg: number;
+  heightCm: number;
+  recordedAtUtc: string;
+}
+
+export interface ClinicalDiagnosis {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  doctorId: string;
+  doctorName: string;
+  code: string;
+  description: string;
+  severity: string;
+  diagnosedAtUtc: string;
 }
 
 export interface InvoiceItem {
@@ -530,7 +615,7 @@ export interface EnterpriseModule {
   workflow: string[];
 }
 
-export type AdminTab = 'users' | 'roles' | 'permissions' | 'departments' | 'emails';
+export type AdminTab = 'users' | 'roles' | 'permissions' | 'departments' | 'diagnostics' | 'emails';
 
 // ──────────────────────────────────────────────
 // Default avatar URLs for staff

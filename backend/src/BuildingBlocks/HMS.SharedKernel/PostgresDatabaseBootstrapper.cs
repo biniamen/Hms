@@ -88,7 +88,70 @@ public static class PostgresDatabaseBootstrapper
         await resetCommand.ExecuteNonQueryAsync();
     }
 
+    public static async Task ResetSchemaIfMigrationIsMissingAsync(
+        string connectionString,
+        bool resetLegacySchema,
+        string requiredMigrationId,
+        params string[] ownedTableNames)
+    {
+        if (!resetLegacySchema || string.IsNullOrWhiteSpace(requiredMigrationId) || ownedTableNames.Length == 0)
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        var ownedTables = string.Join(", ", ownedTableNames.Select(QuoteLiteral));
+        var ownedTableCount = await ScalarLongAsync(
+            connection,
+            $"""
+            select count(*)
+            from information_schema.tables
+            where table_schema = 'public'
+              and table_type = 'BASE TABLE'
+              and table_name in ({ownedTables})
+            """);
+
+        if (ownedTableCount == 0)
+        {
+            return;
+        }
+
+        var migrationHistoryTableCount = await ScalarLongAsync(
+            connection,
+            """
+            select count(*)
+            from information_schema.tables
+            where table_schema = 'public'
+              and table_name = '__EFMigrationsHistory'
+            """);
+
+        if (migrationHistoryTableCount > 0)
+        {
+            await using var migrationCommand = new NpgsqlCommand(
+                "select count(*) from \"__EFMigrationsHistory\" where \"MigrationId\" = @migration_id",
+                connection);
+            migrationCommand.Parameters.AddWithValue("migration_id", requiredMigrationId);
+            var migrationApplied = Convert.ToInt64(await migrationCommand.ExecuteScalarAsync() ?? 0) > 0;
+            if (migrationApplied)
+            {
+                return;
+            }
+        }
+
+        await using var resetCommand = new NpgsqlCommand(
+            """
+            drop schema public cascade;
+            create schema public;
+            """,
+            connection);
+        await resetCommand.ExecuteNonQueryAsync();
+    }
+
     private static string QuoteIdentifier(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+
+    private static string QuoteLiteral(string value) => "'" + value.Replace("'", "''") + "'";
 
     private static async Task<long> ScalarLongAsync(NpgsqlConnection connection, string sql)
     {

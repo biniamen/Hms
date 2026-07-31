@@ -1,20 +1,45 @@
+param(
+    [switch]$NoBrowser,
+    [switch]$WaitForFrontend,
+    [int]$FrontendWaitSeconds = 30,
+    [switch]$Build
+)
+
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backend = Join-Path $root "backend"
 $frontend = Join-Path $root "newfrontend"
 $logDir = Join-Path $root ".runtime-logs"
+$tempDir = Join-Path $root ".runtime-tmp"
 $localConfig = Join-Path $root "hms.local.ps1"
 $smtpLocalConfig = Join-Path $root "smtp.local.ps1"
 $dotnetHome = Join-Path $backend ".dotnet-home"
 $dotnetAppData = Join-Path $backend ".appdata"
+$npmCache = Join-Path $frontend ".npm-cache"
+$npmCmd = "C:\Program Files\nodejs\npm.cmd"
+$ngCmd = Join-Path $frontend "node_modules\.bin\ng.cmd"
 
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir | Out-Null
 }
+if (-not (Test-Path $tempDir)) {
+    New-Item -ItemType Directory -Path $tempDir | Out-Null
+}
+if (-not (Test-Path $npmCache)) {
+    New-Item -ItemType Directory -Path $npmCache | Out-Null
+}
 
 $env:DOTNET_CLI_HOME = $dotnetHome
 $env:APPDATA = $dotnetAppData
+$env:DOTNET_NOLOGO = "true"
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+$env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = "1"
+$env:TEMP = $tempDir
+$env:TMP = $tempDir
+$env:npm_config_cache = $npmCache
+$env:NPM_CONFIG_CACHE = $npmCache
 $nugetConfigDir = Join-Path $dotnetAppData "NuGet"
 if (-not (Test-Path $nugetConfigDir)) {
     New-Item -ItemType Directory -Path $nugetConfigDir -Force | Out-Null
@@ -109,10 +134,41 @@ if ([string]::IsNullOrWhiteSpace($env:Email__FromAddress) -or
 }
 
 $ports = @(5101, 5102, 5104, 5105, 5200, 4200)
-$connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort }
-foreach ($connection in $connections) {
+
+function Get-HmsListeningProcessIds {
+    param([int[]]$TargetPorts)
+
+    $processIds = @()
+
     try {
-        $process = Get-Process -Id $connection.OwningProcess -ErrorAction Stop
+        $processIds += Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object { $TargetPorts -contains $_.LocalPort } |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    } catch {
+    }
+
+    if ($processIds.Count -eq 0) {
+        try {
+            $netstatLines = netstat -ano
+            foreach ($line in $netstatLines) {
+                if ($line -match '^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$') {
+                    $port = [int]$Matches[1]
+                    $processId = [int]$Matches[2]
+                    if ($TargetPorts -contains $port) {
+                        $processIds += $processId
+                    }
+                }
+            }
+        } catch {
+        }
+    }
+
+    $processIds | Sort-Object -Unique
+}
+
+foreach ($processId in Get-HmsListeningProcessIds -TargetPorts $ports) {
+    try {
+        $process = Get-Process -Id $processId -ErrorAction Stop
         Stop-Process -Id $process.Id -Force
     } catch {
     }
@@ -138,15 +194,33 @@ try {
 
 Start-Sleep -Seconds 2
 
-Push-Location $backend
-dotnet restore .\HMS.sln --configfile .\NuGet.Config -p:NuGetAudit=false
-dotnet build .\HMS.sln --no-restore -p:NuGetAudit=false
-Pop-Location
+$requiredBackendArtifacts = @(
+    (Join-Path -Path $backend -ChildPath "src\Services\Identity\HMS.Identity.Api\bin\Debug\net9.0\HMS.Identity.Api.dll"),
+    (Join-Path -Path $backend -ChildPath "src\Services\Patients\HMS.Patients.Api\bin\Debug\net9.0\HMS.Patients.Api.dll"),
+    (Join-Path -Path $backend -ChildPath "src\Services\Clinical\HMS.Clinical.Api\bin\Debug\net9.0\HMS.Clinical.Api.dll"),
+    (Join-Path -Path $backend -ChildPath "src\Services\Billing\HMS.Billing.Api\bin\Debug\net9.0\HMS.Billing.Api.dll"),
+    (Join-Path -Path $backend -ChildPath "src\ApiGateway\HMS.ApiGateway\bin\Debug\net9.0\HMS.ApiGateway.dll")
+)
+
+$missingBackendArtifacts = @($requiredBackendArtifacts | Where-Object { -not (Test-Path $_) })
+if ($missingBackendArtifacts.Count -gt 0) {
+    $Build = $true
+    Write-Warning "Compiled backend files are missing. Running backend build once."
+}
+
+if ($Build) {
+    Push-Location $backend
+    dotnet restore .\HMS.sln --configfile .\NuGet.Config -p:NuGetAudit=false
+    dotnet build .\HMS.sln --no-restore -p:NuGetAudit=false
+    Pop-Location
+} else {
+    Write-Host "Skipping backend build. Use -Build after source code changes or after pulling updates."
+}
 
 if (-not (Test-Path (Join-Path $frontend "node_modules"))) {
     Write-Host "Installing frontend packages..."
     Push-Location $frontend
-    npm.cmd install --legacy-peer-deps --cache .\.npm-cache
+    & $npmCmd install --legacy-peer-deps --cache .\.npm-cache
     Pop-Location
 }
 
@@ -172,13 +246,24 @@ function Start-HmsApi {
         try { Remove-Item -LiteralPath $stderr -Force -ErrorAction Stop } catch { $stderr = Join-Path $logDir "$Name.$([DateTime]::Now.ToString('yyyyMMddHHmmss')).err.log" }
     }
 
-    Start-Process `
-        -FilePath "dotnet" `
-        -ArgumentList @("`"$dllPath`"", "--urls", "http://localhost:$Port", "--contentRoot", "`"$workDir`"") `
-        -WorkingDirectory $root `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $stdout `
-        -RedirectStandardError $stderr | Out-Null
+    $command = @(
+        '"dotnet"',
+        "`"$dllPath`"",
+        '"--urls"',
+        "`"http://localhost:$Port`"",
+        '"--contentRoot"',
+        "`"$workDir`""
+    ) -join " "
+    $command = "$command > `"$stdout`" 2> `"$stderr`""
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $env:ComSpec
+    $psi.WorkingDirectory = $root
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.Arguments = "/d /s /c `"$command`""
+
+    [System.Diagnostics.Process]::Start($psi) | Out-Null
 }
 
 Start-HmsApi "identity" "backend\src\Services\Identity\HMS.Identity.Api" "bin\Debug\net9.0\HMS.Identity.Api.dll" 5101
@@ -195,18 +280,53 @@ if (Test-Path $frontendOut) {
 if (Test-Path $frontendErr) {
     try { Remove-Item -LiteralPath $frontendErr -Force -ErrorAction Stop } catch { $frontendErr = Join-Path $logDir "frontend.$([DateTime]::Now.ToString('yyyyMMddHHmmss')).err.log" }
 }
-Start-Process -FilePath "npm.cmd" -ArgumentList @("start") -WorkingDirectory $frontend -WindowStyle Hidden -RedirectStandardOutput $frontendOut -RedirectStandardError $frontendErr | Out-Null
+if (-not (Test-Path $ngCmd)) {
+    Write-Host "Angular CLI was not found in node_modules. Installing frontend packages..."
+    Push-Location $frontend
+    & $npmCmd install --legacy-peer-deps --cache .\.npm-cache
+    Pop-Location
+}
+
+$frontendCommand = "`"$ngCmd`" serve --host 0.0.0.0 --port 4200 > `"$frontendOut`" 2> `"$frontendErr`""
+$frontendPsi = [System.Diagnostics.ProcessStartInfo]::new()
+$frontendPsi.FileName = $env:ComSpec
+$frontendPsi.WorkingDirectory = $frontend
+$frontendPsi.UseShellExecute = $false
+$frontendPsi.CreateNoWindow = $true
+$frontendPsi.Arguments = "/d /s /c `"$frontendCommand`""
+[System.Diagnostics.Process]::Start($frontendPsi) | Out-Null
 
 Write-Host "HMS services are starting..."
 Write-Host "Frontend: http://localhost:4200"
 Write-Host "API Gateway: http://localhost:5200"
 Write-Host "Logs: $logDir"
 Write-Host ""
-Write-Host "Opening frontend in browser..."
-Start-Sleep -Seconds 15
-try {
-    Start-Process "http://localhost:4200"
-} catch {
-    Write-Host "Could not auto-open browser. Open http://localhost:4200 manually."
+
+if ($NoBrowser -and -not $WaitForFrontend) {
+    Write-Host "Startup command finished. Angular may still compile for a few seconds."
+    Write-Host "Open http://localhost:4200 when ready, or check $frontendOut"
+} else {
+    Write-Host "Waiting for Angular frontend to finish compiling..."
+    $frontendReady = $false
+    $attemptCount = [Math]::Max(1, [Math]::Ceiling($FrontendWaitSeconds / 3))
+    for ($attempt = 1; $attempt -le $attemptCount; $attempt++) {
+        Start-Sleep -Seconds 3
+        $frontendReady = @((Get-HmsListeningProcessIds -TargetPorts @(4200))).Count -gt 0
+        if ($frontendReady) {
+            break
+        }
+    }
+
+    if ($frontendReady -and -not $NoBrowser) {
+        Write-Host "Opening frontend in browser..."
+        try {
+            Start-Process "http://localhost:4200"
+        } catch {
+            Write-Host "Could not auto-open browser. Open http://localhost:4200 manually."
+        }
+    } elseif ($frontendReady) {
+        Write-Host "Frontend is ready. Open http://localhost:4200"
+    } else {
+        Write-Warning "Angular is still compiling or failed to start. Check $frontendErr, then open http://localhost:4200 when it is ready."
+    }
 }
-Write-Host "Wait about 60-90 seconds for Angular to finish compiling."

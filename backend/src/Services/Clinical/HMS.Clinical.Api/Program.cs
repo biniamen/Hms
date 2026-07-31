@@ -11,11 +11,23 @@ builder.Services.AddOpenApi();
 builder.Services.AddHmsCors(builder.Configuration);
 
 var connectionString = builder.Configuration.RequireConnectionString("ClinicalDb");
+var resetLegacySchema = builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false);
 
 await ClinicalDatabaseBootstrapper.EnsureDatabaseExistsAsync(connectionString);
+await PostgresDatabaseBootstrapper.ResetSchemaIfMigrationIsMissingAsync(
+    connectionString,
+    resetLegacySchema,
+    "20260728083105_InitialCreate",
+    "clinical_encounters",
+    "vital_signs",
+    "diagnoses",
+    "prescriptions",
+    "lab_requests",
+    "diagnostic_tests",
+    "enterprise_records");
 await PostgresDatabaseBootstrapper.ResetLegacySchemaIfRequestedAsync(
     connectionString,
-    builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false));
+    resetLegacySchema);
 builder.Services.AddDbContext<ClinicalDbContext>(options => options.UseNpgsql(connectionString));
 
 var app = builder.Build();
@@ -167,6 +179,91 @@ app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest requ
         "Prescription created."));
 }).WithValidation<CreatePrescriptionRequest>();
 
+app.MapGet("/api/clinical/diagnostic-tests", async (ClinicalDbContext db) =>
+{
+    var tests = await db.DiagnosticTests
+        .AsNoTracking()
+        .OrderBy(test => test.GroupName)
+        .ThenBy(test => test.SubGroup)
+        .ThenBy(test => test.SortOrder)
+        .ThenBy(test => test.TestName)
+        .Select(test => new DiagnosticTestDto(test.Id, test.GroupName, test.SubGroup, test.TestName, test.SpecimenType, test.Unit, test.ReferenceRange, test.SortOrder, test.IsActive))
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<DiagnosticTestDto>>.Ok(tests));
+});
+
+app.MapPost("/api/clinical/diagnostic-tests", async (CreateDiagnosticTestRequest request, ClinicalDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.GroupName) || string.IsNullOrWhiteSpace(request.TestName))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Diagnostic group and test name are required."));
+    }
+
+    var groupName = Clean(request.GroupName, "");
+    var subGroup = Clean(request.SubGroup, "General");
+    var testName = Clean(request.TestName, "");
+
+    var test = await db.DiagnosticTests.FirstOrDefaultAsync(item =>
+        item.GroupName == groupName &&
+        item.SubGroup == subGroup &&
+        item.TestName == testName);
+
+    if (test is null)
+    {
+        test = new DiagnosticTest
+        {
+            Id = Guid.NewGuid(),
+            GroupName = groupName,
+            SubGroup = subGroup,
+            TestName = testName,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        db.DiagnosticTests.Add(test);
+    }
+
+    test.SpecimenType = Clean(request.SpecimenType, "");
+    test.Unit = Clean(request.Unit, "");
+    test.ReferenceRange = Clean(request.ReferenceRange, "");
+    test.SortOrder = request.SortOrder;
+    test.IsActive = request.IsActive;
+    test.UpdatedAtUtc = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+
+    return Results.Created($"/api/clinical/diagnostic-tests/{test.Id}", ApiResponse<DiagnosticTestDto>.Ok(
+        ToDiagnosticTestDto(test),
+        "Diagnostic catalog item saved."));
+}).WithValidation<CreateDiagnosticTestRequest>();
+
+app.MapPut("/api/clinical/diagnostic-tests/{id:guid}", async (Guid id, CreateDiagnosticTestRequest request, ClinicalDbContext db) =>
+{
+    var test = await db.DiagnosticTests.FirstOrDefaultAsync(item => item.Id == id);
+    if (test is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Diagnostic catalog item not found."));
+    }
+
+    if (string.IsNullOrWhiteSpace(request.GroupName) || string.IsNullOrWhiteSpace(request.TestName))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Diagnostic group and test name are required."));
+    }
+
+    test.GroupName = Clean(request.GroupName, "");
+    test.SubGroup = Clean(request.SubGroup, "General");
+    test.TestName = Clean(request.TestName, "");
+    test.SpecimenType = Clean(request.SpecimenType, "");
+    test.Unit = Clean(request.Unit, "");
+    test.ReferenceRange = Clean(request.ReferenceRange, "");
+    test.SortOrder = request.SortOrder;
+    test.IsActive = request.IsActive;
+    test.UpdatedAtUtc = DateTime.UtcNow;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<DiagnosticTestDto>.Ok(ToDiagnosticTestDto(test), "Diagnostic catalog item updated."));
+}).WithValidation<CreateDiagnosticTestRequest>();
+
 app.MapGet("/api/clinical/lab-requests", async (ClinicalDbContext db) =>
 {
     var records = await db.LabRequests
@@ -192,6 +289,7 @@ app.MapPost("/api/clinical/lab-requests", async (CreateLabRequestRequest request
         PatientId = request.PatientId,
         DoctorId = request.DoctorId,
         TestName = Clean(request.TestName, ""),
+        TestCatalogIds = string.Join(",", (request.TestCatalogIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty)),
         Category = Clean(request.Category, "Laboratory"),
         Priority = Clean(request.Priority, "Routine"),
         SpecimenType = Clean(request.SpecimenType, ""),
@@ -249,6 +347,7 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (Guid id, Update
     labRequest.ResultNotes = Clean(request.ResultNotes, labRequest.ResultNotes);
     labRequest.PerformedBy = Clean(request.PerformedBy, labRequest.PerformedBy);
     labRequest.VerifiedBy = Clean(request.VerifiedBy, labRequest.VerifiedBy);
+    labRequest.ResultItemsJson = Clean(request.ResultItemsJson, labRequest.ResultItemsJson);
     labRequest.CollectedAtUtc = request.CollectedAtUtc is null ? labRequest.CollectedAtUtc : ToUtc(request.CollectedAtUtc.Value);
     labRequest.ResultedAtUtc = request.ResultedAtUtc is null
         ? (resultRequired ? DateTime.UtcNow : labRequest.ResultedAtUtc)
@@ -383,6 +482,7 @@ static LabRequestDto ToLabRequestDto(LabRequest request) => new(
     request.PatientId,
     request.DoctorId,
     request.TestName,
+    ParseCatalogIds(request.TestCatalogIds),
     request.Status,
     request.OrderedAtUtc,
     request.Category,
@@ -396,9 +496,27 @@ static LabRequestDto ToLabRequestDto(LabRequest request) => new(
     request.ResultNotes,
     request.PerformedBy,
     request.VerifiedBy,
+    request.ResultItemsJson,
     request.CollectedAtUtc,
     request.ResultedAtUtc,
     request.UpdatedAtUtc);
+
+static DiagnosticTestDto ToDiagnosticTestDto(DiagnosticTest test) => new(
+    test.Id,
+    test.GroupName,
+    test.SubGroup,
+    test.TestName,
+    test.SpecimenType,
+    test.Unit,
+    test.ReferenceRange,
+    test.SortOrder,
+    test.IsActive);
+
+static IReadOnlyList<Guid> ParseCatalogIds(string value) =>
+    value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(item => Guid.TryParse(item, out var id) ? id : Guid.Empty)
+        .Where(id => id != Guid.Empty)
+        .ToArray();
 
 static async Task<string> NextRecordNumberAsync(ClinicalDbContext db, string area)
 {

@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, signal, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
 import { Bed } from '../../core/models';
 
 @Component({
   selector: 'app-wards-beds',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6 animate-fade-in">
@@ -22,8 +23,51 @@ import { Bed } from '../../core/models';
           <div class="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 subtle-shadow">
             Bed Occupancy: <span class="text-amber-600 font-mono">{{ store.bedOccupancyRate() }}%</span>
           </div>
+          <button
+            type="button"
+            (click)="isBedFormVisible.set(true)"
+            class="rounded-2xl bg-slate-900 px-5 py-2.5 text-xs font-black text-white shadow-xl shadow-slate-200 transition-all hover:bg-teal-600">
+            <span class="material-icons align-middle text-base">add_home_work</span>
+            Add Bed
+          </button>
         </div>
       </div>
+
+      @if (isBedFormVisible()) {
+        <form (ngSubmit)="saveBed()" class="rounded-[2rem] border border-teal-100 bg-white p-6 shadow-sm">
+          <div class="mb-5 flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-black text-slate-900">Register Ward Bed</h3>
+              <p class="text-xs text-slate-500">Beds are recorded against a ward, room, and unique bed number.</p>
+            </div>
+            <button type="button" (click)="resetBedForm()" class="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <label class="space-y-1">
+              <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Ward *</span>
+              <input [(ngModel)]="bedForm.ward" name="ward" required placeholder="Medical Ward" [class]="inputClasses" />
+            </label>
+            <label class="space-y-1">
+              <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Room *</span>
+              <input [(ngModel)]="bedForm.room" name="room" required placeholder="101" [class]="inputClasses" />
+            </label>
+            <label class="space-y-1">
+              <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Bed Number *</span>
+              <input [(ngModel)]="bedForm.bedNumber" name="bedNumber" required placeholder="MW-101-A" [class]="inputClasses" />
+            </label>
+            <label class="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-xs font-black text-emerald-700">
+              <input [(ngModel)]="bedForm.isAvailable" name="isAvailable" type="checkbox" class="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500" />
+              Available for admission
+            </label>
+          </div>
+          <div class="mt-5 flex justify-end gap-3 border-t border-slate-100 pt-5">
+            <button type="button" (click)="resetBedForm()" class="rounded-xl px-5 py-2 text-xs font-black text-slate-500 hover:bg-slate-100">Discard</button>
+            <button type="submit" class="rounded-xl bg-teal-600 px-6 py-2 text-xs font-black text-white shadow-lg shadow-teal-500/20 hover:bg-teal-700">Save Bed</button>
+          </div>
+        </form>
+      }
 
       <!-- WARD FILTER PILLS -->
       <div class="flex items-center gap-2 overflow-x-auto pb-1">
@@ -33,24 +77,14 @@ import { Bed } from '../../core/models';
           class="px-3.5 py-1.5 rounded-xl text-xs transition-all">
           All Wards
         </button>
-        <button 
-          (click)="selectedWard.set('ICU')" 
-          [class]="selectedWard() === 'ICU' ? 'bg-rose-600 text-white font-bold' : 'bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200'"
-          class="px-3.5 py-1.5 rounded-xl text-xs transition-all">
-          ICU Ward
-        </button>
-        <button 
-          (click)="selectedWard.set('General Ward')" 
-          [class]="selectedWard() === 'General Ward' ? 'bg-teal-600 text-white font-bold' : 'bg-teal-50 text-teal-800 hover:bg-teal-100 border border-teal-200'"
-          class="px-3.5 py-1.5 rounded-xl text-xs transition-all">
-          General Ward
-        </button>
-        <button 
-          (click)="selectedWard.set('Surgical Unit')" 
-          [class]="selectedWard() === 'Surgical Unit' ? 'bg-indigo-600 text-white font-bold' : 'bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200'"
-          class="px-3.5 py-1.5 rounded-xl text-xs transition-all">
-          Surgical Unit
-        </button>
+        @for (ward of wardNames(); track ward) {
+          <button
+            (click)="selectedWard.set(ward)"
+            [class]="selectedWard() === ward ? 'bg-teal-600 text-white font-bold' : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'"
+            class="px-3.5 py-1.5 rounded-xl text-xs transition-all">
+            {{ ward }}
+          </button>
+        }
       </div>
 
       <!-- BEDS GRID -->
@@ -112,6 +146,17 @@ export class WardsBedsComponent {
   store = inject(StoreService);
 
   selectedWard = signal<string>('ALL');
+  isBedFormVisible = signal(false);
+  readonly inputClasses = 'w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700 outline-none transition-all focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/5';
+
+  bedForm = {
+    ward: 'Medical Ward',
+    room: '',
+    bedNumber: '',
+    isAvailable: true,
+  };
+
+  wardNames = computed(() => Array.from(new Set(this.store.beds().map(bed => bed.wardName))).sort());
 
   filteredBeds = computed(() => {
     const ward = this.selectedWard();
@@ -119,7 +164,28 @@ export class WardsBedsComponent {
     return this.store.beds().filter(b => b.wardName === ward);
   });
 
+  saveBed() {
+    if (!this.bedForm.ward || !this.bedForm.room || !this.bedForm.bedNumber) {
+      this.store.addToast('error', 'Bed Validation', 'Ward, room, and bed number are required.');
+      return;
+    }
+
+    this.store.createBed({ ...this.bedForm });
+    this.resetBedForm();
+  }
+
+  resetBedForm() {
+    this.isBedFormVisible.set(false);
+    this.bedForm = {
+      ward: 'Medical Ward',
+      room: '',
+      bedNumber: '',
+      isAvailable: true,
+    };
+  }
+
   releaseBed(bed: Bed) {
+    this.store.updateBedAvailability(bed.id, true);
     this.store.beds.update(list => list.map(b => b.id === bed.id ? {
       ...b,
       isOccupied: false,
@@ -134,6 +200,7 @@ export class WardsBedsComponent {
   assignBed(bed: Bed) {
     const unassignedPatient = this.store.patients().find(p => p.status === 'IN_TRIAGE' || p.status === 'ADMITTED');
     if (unassignedPatient) {
+      this.store.updateBedAvailability(bed.id, false);
       this.store.beds.update(list => list.map(b => b.id === bed.id ? {
         ...b,
         isOccupied: true,

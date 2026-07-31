@@ -45,6 +45,7 @@ public sealed record LabRequestDto(
     Guid PatientId,
     Guid DoctorId,
     string TestName,
+    IReadOnlyList<Guid> TestCatalogIds,
     string Status,
     DateTime OrderedAtUtc,
     string Category,
@@ -58,6 +59,7 @@ public sealed record LabRequestDto(
     string ResultNotes,
     string PerformedBy,
     string VerifiedBy,
+    string ResultItemsJson,
     DateTime? CollectedAtUtc,
     DateTime? ResultedAtUtc,
     DateTime UpdatedAtUtc);
@@ -66,6 +68,7 @@ public sealed record CreateLabRequestRequest(
     [Required] Guid PatientId,
     [Required] Guid DoctorId,
     [Required(ErrorMessage = "Test name is required")] string TestName,
+    IReadOnlyList<Guid>? TestCatalogIds = null,
     string? Category = null,
     string? Priority = null,
     string? SpecimenType = null,
@@ -81,5 +84,27 @@ public sealed record UpdateLabResultRequest(
     string? ResultNotes,
     string? PerformedBy,
     string? VerifiedBy,
+    string? ResultItemsJson,
     DateTime? CollectedAtUtc,
     DateTime? ResultedAtUtc);
+
+public sealed record DiagnosticTestDto(
+    Guid Id,
+    string GroupName,
+    string SubGroup,
+    string TestName,
+    string SpecimenType,
+    string Unit,
+    string ReferenceRange,
+    int SortOrder,
+    bool IsActive);
+
+public sealed record CreateDiagnosticTestRequest(
+    [Required(ErrorMessage = "Group name is required")] string GroupName,
+    string? SubGroup,
+    [Required(ErrorMessage = "Test name is required")] string TestName,
+    string? SpecimenType,
+    string? Unit,
+    string? ReferenceRange,
+    int SortOrder = 0,
+    bool IsActive = true);

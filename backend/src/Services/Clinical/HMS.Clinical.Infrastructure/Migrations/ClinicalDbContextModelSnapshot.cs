@@ -152,6 +152,91 @@ namespace HMS.Clinical.Infrastructure.Migrations
                     b.ToTable("diagnoses", (string)null);
                 });
 
+            modelBuilder.Entity("HMS.Clinical.Infrastructure.DiagnosticTest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByIp")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GroupName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("group_name");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ReferenceRange")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("reference_range");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<string>("SpecimenType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("specimen_type");
+
+                    b.Property<string>("SubGroup")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("sub_group");
+
+                    b.Property<string>("TestName")
+                        .IsRequired()
+                        .HasMaxLength(180)
+                        .HasColumnType("character varying(180)")
+                        .HasColumnName("test_name");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("unit");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupName", "SubGroup", "TestName")
+                        .IsUnique();
+
+                    b.ToTable("diagnostic_tests", (string)null);
+                });
+
             modelBuilder.Entity("HMS.Clinical.Infrastructure.EnterpriseRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -329,6 +414,11 @@ namespace HMS.Clinical.Infrastructure.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("result_flag");
 
+                    b.Property<string>("ResultItemsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("result_items_json");
+
                     b.Property<string>("ResultNotes")
                         .IsRequired()
                         .HasColumnType("text")
@@ -359,6 +449,11 @@ namespace HMS.Clinical.Infrastructure.Migrations
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)")
                         .HasColumnName("status");
+
+                    b.Property<string>("TestCatalogIds")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("test_catalog_ids");
 
                     b.Property<string>("TestName")
                         .IsRequired()
