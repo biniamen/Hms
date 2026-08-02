@@ -110,6 +110,8 @@ public sealed class ClinicalDbContext(DbContextOptions<ClinicalDbContext> option
             entity.Property(test => test.Unit).HasColumnName("unit").HasMaxLength(40);
             entity.Property(test => test.ReferenceRange).HasColumnName("reference_range").HasMaxLength(120);
             entity.Property(test => test.SortOrder).HasColumnName("sort_order");
+            entity.Property(test => test.Price).HasColumnName("price").HasPrecision(12, 2).HasDefaultValue(0);
+            entity.Property(test => test.Currency).HasColumnName("currency").HasMaxLength(3).HasDefaultValue("ETB");
             entity.Property(test => test.IsActive).HasColumnName("is_active");
             entity.Property(test => test.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
             entity.Property(test => test.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
@@ -213,6 +215,8 @@ public sealed class DiagnosticTest : Entity
     public string Unit { get; set; } = "";
     public string ReferenceRange { get; set; } = "";
     public int SortOrder { get; set; }
+    public decimal Price { get; set; }
+    public string Currency { get; set; } = "ETB";
     public bool IsActive { get; set; } = true;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
@@ -288,22 +292,22 @@ public static class ClinicalSeedData
     {
         var tests = new[]
         {
-            new DiagnosticTest { Id = Guid.Parse("8d33f419-79f4-4a3e-a87e-9c0f3b662801"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "White Blood Cell Count", SpecimenType = "Whole blood", Unit = "cells/mm3", ReferenceRange = "4.0-10.8", SortOrder = 10 },
-            new DiagnosticTest { Id = Guid.Parse("b2a7b4c1-6e93-4fb7-8546-059d45d7c80b"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Neutrophil", SpecimenType = "Whole blood", Unit = "%", ReferenceRange = "40-72", SortOrder = 20 },
-            new DiagnosticTest { Id = Guid.Parse("4ddf0e77-3427-49ca-98b2-7a613e4169dd"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Lymphocyte", SpecimenType = "Whole blood", Unit = "%", ReferenceRange = "17-45", SortOrder = 30 },
-            new DiagnosticTest { Id = Guid.Parse("6e858c1c-ffea-4a49-af60-b108f29ee5c5"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Hemoglobin", SpecimenType = "Whole blood", Unit = "gm/dL", ReferenceRange = "12-16", SortOrder = 40 },
-            new DiagnosticTest { Id = Guid.Parse("f92dc89c-d240-41e4-b97a-e1848e92456e"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Platelet Count", SpecimenType = "Whole blood", Unit = "x 10^9/L", ReferenceRange = "150-450", SortOrder = 50 },
-            new DiagnosticTest { Id = Guid.Parse("d3916553-aa07-488f-a68b-f7c79af9482c"), GroupName = "Hematology", SubGroup = "Inflammation", TestName = "ESR", SpecimenType = "Whole blood", Unit = "mm/h", ReferenceRange = "0-20", SortOrder = 60 },
-            new DiagnosticTest { Id = Guid.Parse("92945363-d19b-49cb-bdc5-44cfc79a58d5"), GroupName = "Biochemistry", SubGroup = "Renal Function", TestName = "Creatinine", SpecimenType = "Serum", Unit = "mg/dL", ReferenceRange = "0.6-1.3", SortOrder = 10 },
-            new DiagnosticTest { Id = Guid.Parse("cd868d50-e36f-4d36-9697-12e1be7d851a"), GroupName = "Biochemistry", SubGroup = "Renal Function", TestName = "Urea", SpecimenType = "Serum", Unit = "mg/dL", ReferenceRange = "15-45", SortOrder = 20 },
-            new DiagnosticTest { Id = Guid.Parse("5bf19192-e366-4d74-9056-e82e3eb94531"), GroupName = "Biochemistry", SubGroup = "Glucose", TestName = "Random Blood Sugar", SpecimenType = "Plasma", Unit = "mg/dL", ReferenceRange = "70-140", SortOrder = 30 },
-            new DiagnosticTest { Id = Guid.Parse("dd589793-e283-4a18-9b2c-6af1f6e72814"), GroupName = "Biochemistry", SubGroup = "Vitamin", TestName = "Vitamin D", SpecimenType = "Serum", Unit = "ng/mL", ReferenceRange = "30-100", SortOrder = 40 },
-            new DiagnosticTest { Id = Guid.Parse("b7e30ea4-98af-4d59-b2b9-68bc1e06c4a0"), GroupName = "Biochemistry", SubGroup = "Vitamin", TestName = "Vitamin B12", SpecimenType = "Serum", Unit = "pg/mL", ReferenceRange = "200-900", SortOrder = 50 },
-            new DiagnosticTest { Id = Guid.Parse("4d34b33a-a342-4ba4-bfd5-0d8324358fdc"), GroupName = "Microbiology", SubGroup = "Culture", TestName = "Blood Culture", SpecimenType = "Blood", Unit = "", ReferenceRange = "No growth", SortOrder = 10 },
-            new DiagnosticTest { Id = Guid.Parse("f4cba693-d37f-4818-8b9e-68e8c9a0e927"), GroupName = "Microbiology", SubGroup = "Microscopy", TestName = "Urine Microscopy", SpecimenType = "Urine", Unit = "", ReferenceRange = "No significant cells", SortOrder = 20 },
-            new DiagnosticTest { Id = Guid.Parse("82094f96-0c8a-4b7b-a624-11d6d0ce1f83"), GroupName = "Radiology", SubGroup = "X-Ray", TestName = "Chest X-Ray", SpecimenType = "Imaging only", Unit = "", ReferenceRange = "Radiologist report", SortOrder = 10 },
-            new DiagnosticTest { Id = Guid.Parse("fb5b1ed5-e1cf-47a1-9632-ae57df2b0632"), GroupName = "Radiology", SubGroup = "MRI", TestName = "MRI Brain", SpecimenType = "Imaging only", Unit = "", ReferenceRange = "Radiologist report", SortOrder = 20 },
-            new DiagnosticTest { Id = Guid.Parse("b96e6277-8ee5-45a3-82b2-b281992743ef"), GroupName = "Radiology", SubGroup = "Ultrasound", TestName = "Abdominal Ultrasound", SpecimenType = "Imaging only", Unit = "", ReferenceRange = "Radiologist report", SortOrder = 30 }
+            new DiagnosticTest { Id = Guid.Parse("8d33f419-79f4-4a3e-a87e-9c0f3b662801"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "White Blood Cell Count", SpecimenType = "Whole blood", Unit = "cells/mm3", ReferenceRange = "4.0-10.8", SortOrder = 10, Price = 90, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("b2a7b4c1-6e93-4fb7-8546-059d45d7c80b"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Neutrophil", SpecimenType = "Whole blood", Unit = "%", ReferenceRange = "40-72", SortOrder = 20, Price = 75, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("4ddf0e77-3427-49ca-98b2-7a613e4169dd"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Lymphocyte", SpecimenType = "Whole blood", Unit = "%", ReferenceRange = "17-45", SortOrder = 30, Price = 75, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("6e858c1c-ffea-4a49-af60-b108f29ee5c5"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Hemoglobin", SpecimenType = "Whole blood", Unit = "gm/dL", ReferenceRange = "12-16", SortOrder = 40, Price = 90, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("f92dc89c-d240-41e4-b97a-e1848e92456e"), GroupName = "Hematology", SubGroup = "CBC With Differential", TestName = "Platelet Count", SpecimenType = "Whole blood", Unit = "x 10^9/L", ReferenceRange = "150-450", SortOrder = 50, Price = 100, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("d3916553-aa07-488f-a68b-f7c79af9482c"), GroupName = "Hematology", SubGroup = "Inflammation", TestName = "ESR", SpecimenType = "Whole blood", Unit = "mm/h", ReferenceRange = "0-20", SortOrder = 60, Price = 120, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("92945363-d19b-49cb-bdc5-44cfc79a58d5"), GroupName = "Biochemistry", SubGroup = "Renal Function", TestName = "Creatinine", SpecimenType = "Serum", Unit = "mg/dL", ReferenceRange = "0.6-1.3", SortOrder = 10, Price = 250, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("cd868d50-e36f-4d36-9697-12e1be7d851a"), GroupName = "Biochemistry", SubGroup = "Renal Function", TestName = "Urea", SpecimenType = "Serum", Unit = "mg/dL", ReferenceRange = "15-45", SortOrder = 20, Price = 220, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("5bf19192-e366-4d74-9056-e82e3eb94531"), GroupName = "Biochemistry", SubGroup = "Glucose", TestName = "Random Blood Sugar", SpecimenType = "Plasma", Unit = "mg/dL", ReferenceRange = "70-140", SortOrder = 30, Price = 180, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("dd589793-e283-4a18-9b2c-6af1f6e72814"), GroupName = "Biochemistry", SubGroup = "Vitamin", TestName = "Vitamin D", SpecimenType = "Serum", Unit = "ng/mL", ReferenceRange = "30-100", SortOrder = 40, Price = 900, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("b7e30ea4-98af-4d59-b2b9-68bc1e06c4a0"), GroupName = "Biochemistry", SubGroup = "Vitamin", TestName = "Vitamin B12", SpecimenType = "Serum", Unit = "pg/mL", ReferenceRange = "200-900", SortOrder = 50, Price = 850, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("4d34b33a-a342-4ba4-bfd5-0d8324358fdc"), GroupName = "Microbiology", SubGroup = "Culture", TestName = "Blood Culture", SpecimenType = "Blood", Unit = "", ReferenceRange = "No growth", SortOrder = 10, Price = 1200, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("f4cba693-d37f-4818-8b9e-68e8c9a0e927"), GroupName = "Microbiology", SubGroup = "Microscopy", TestName = "Urine Microscopy", SpecimenType = "Urine", Unit = "", ReferenceRange = "No significant cells", SortOrder = 20, Price = 300, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("82094f96-0c8a-4b7b-a624-11d6d0ce1f83"), GroupName = "Radiology", SubGroup = "X-Ray", TestName = "Chest X-Ray", SpecimenType = "Imaging only", Unit = "", ReferenceRange = "Radiologist report", SortOrder = 10, Price = 700, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("fb5b1ed5-e1cf-47a1-9632-ae57df2b0632"), GroupName = "Radiology", SubGroup = "MRI", TestName = "MRI Brain", SpecimenType = "Imaging only", Unit = "", ReferenceRange = "Radiologist report", SortOrder = 20, Price = 4500, Currency = "ETB" },
+            new DiagnosticTest { Id = Guid.Parse("b96e6277-8ee5-45a3-82b2-b281992743ef"), GroupName = "Radiology", SubGroup = "Ultrasound", TestName = "Abdominal Ultrasound", SpecimenType = "Imaging only", Unit = "", ReferenceRange = "Radiologist report", SortOrder = 30, Price = 900, Currency = "ETB" }
         };
 
         foreach (var test in tests)
@@ -323,6 +327,8 @@ public static class ClinicalSeedData
                 existing.Unit = test.Unit;
                 existing.ReferenceRange = test.ReferenceRange;
                 existing.SortOrder = test.SortOrder;
+                existing.Price = test.Price;
+                existing.Currency = test.Currency;
                 existing.IsActive = true;
                 existing.UpdatedAtUtc = DateTime.UtcNow;
             }

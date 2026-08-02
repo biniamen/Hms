@@ -97,6 +97,8 @@ public sealed record DiagnosticTestDto(
     string Unit,
     string ReferenceRange,
     int SortOrder,
+    decimal Price,
+    string Currency,
     bool IsActive);
 
 public sealed record CreateDiagnosticTestRequest(
@@ -107,4 +109,8 @@ public sealed record CreateDiagnosticTestRequest(
     string? Unit,
     string? ReferenceRange,
     int SortOrder = 0,
+    [Range(0, double.MaxValue, ErrorMessage = "Diagnostic price cannot be negative")]
+    decimal Price = 0,
+    [RegularExpression("^[A-Za-z]{3}$", ErrorMessage = "Currency must be a three-letter ISO code, for example ETB")]
+    string Currency = "ETB",
     bool IsActive = true);

@@ -100,6 +100,7 @@ app.MapGet("/api/insurance-companies", async (PatientsDbContext db) =>
             company.Address ?? "",
             company.CoverageType,
             company.CoveragePercent,
+            company.SpouseCoverageAllowed,
             company.IsActive))
         .ToListAsync();
 
@@ -130,12 +131,13 @@ app.MapPost("/api/insurance-companies", async (CreateInsuranceCompanyRequest req
     company.Address = CleanOrNull(request.Address);
     company.CoverageType = Clean(request.CoverageType, "Corporate");
     company.CoveragePercent = Math.Clamp(request.CoveragePercent, 0, 100);
+    company.SpouseCoverageAllowed = request.SpouseCoverageAllowed;
     company.IsActive = true;
 
     await db.SaveChangesAsync();
 
     return Results.Created("/api/insurance-companies", ApiResponse<InsuranceCompanyDto>.Ok(
-        new InsuranceCompanyDto(company.Id, company.Name, company.PayerCode, company.ContactPerson ?? "", company.Phone, company.Email ?? "", company.Address ?? "", company.CoverageType, company.CoveragePercent, company.IsActive),
+        new InsuranceCompanyDto(company.Id, company.Name, company.PayerCode, company.ContactPerson ?? "", company.Phone, company.Email ?? "", company.Address ?? "", company.CoverageType, company.CoveragePercent, company.SpouseCoverageAllowed, company.IsActive),
         "Insurance company registered."));
 });
 

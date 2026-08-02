@@ -517,11 +517,13 @@ app.MapPost("/api/permissions", async (CreatePermissionRequest request, Identity
 
 app.MapGet("/api/departments", async (IdentityDbContext db) =>
 {
-    var departments = await db.Departments
+    var departmentEntities = await db.Departments
         .AsNoTracking()
         .OrderBy(department => department.Name)
-        .Select(department => new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location))
         .ToListAsync();
+    var departments = departmentEntities
+        .Select(department => new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location, ParseSpecializations(department.Specializations)))
+        .ToList();
 
     return Results.Ok(ApiResponse<IEnumerable<DepartmentDto>>.Ok(departments));
 });
@@ -544,10 +546,11 @@ app.MapPost("/api/departments", async (CreateDepartmentRequest request, Identity
     department.Name = request.Name.Trim();
     department.Type = Clean(request.Type, "Clinical");
     department.Location = Clean(request.Location, "Main Campus");
+    department.Specializations = SerializeSpecializations(request.Specializations);
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/departments/{department.Id}", ApiResponse<DepartmentDto>.Ok(
-        new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location),
+        new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location, ParseSpecializations(department.Specializations)),
         "Department saved."));
 }).RequireHmsRoles(HmsRoles.Admin);
 
@@ -828,6 +831,18 @@ static string NormalizeKey(string value) => value.Trim().ToUpperInvariant().Repl
 
 static string Clean(string? value, string fallback) =>
     string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+static string[] ParseSpecializations(string? value) =>
+    (value ?? "")
+        .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+static string SerializeSpecializations(IEnumerable<string>? values) =>
+    string.Join('|', (values ?? [])
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Select(value => value.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase));
 
 static string? CleanOrNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? null : value.Trim();

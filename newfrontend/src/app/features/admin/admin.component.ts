@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
 import { ApiService } from '../../api.service';
-import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOutbox, BackendEmployee, DiagnosticTest } from '../../core/models';
+import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOutbox, BackendEmployee, DiagnosticTest, Department } from '../../core/models';
 
 @Component({
   selector: 'app-admin',
@@ -81,12 +81,22 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
                   <input [(ngModel)]="newEmployee.phone" name="phone" [class]="inputClasses" />
                 </div>
                 <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Specialization</label>
-                  <input [(ngModel)]="newEmployee.specialization" name="specialization" placeholder="e.g. Oncology" [class]="inputClasses" />
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Department *</label>
+                  <select [(ngModel)]="newEmployee.department" (ngModelChange)="onNewDepartmentChange($event)" name="department" required [class]="inputClasses">
+                    <option value="">Select department</option>
+                    @for (dept of store.departments(); track dept.id) {
+                      <option [value]="dept.name">{{ dept.name }}</option>
+                    }
+                  </select>
                 </div>
                 <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Department</label>
-                  <input [(ngModel)]="newEmployee.department" name="department" placeholder="e.g. Cardiology" [class]="inputClasses" />
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Specialization *</label>
+                  <select [(ngModel)]="newEmployee.specialization" name="specialization" required [class]="inputClasses">
+                    <option value="">Select specialization</option>
+                    @for (item of specializationOptions(newEmployee.department); track item) {
+                      <option [value]="item">{{ item }}</option>
+                    }
+                  </select>
                 </div>
               </div>
 
@@ -201,12 +211,22 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
                   <input [(ngModel)]="editEmployee.phone" name="editPhone" [class]="inputClasses" />
                 </div>
                 <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Specialization</label>
-                  <input [(ngModel)]="editEmployee.specialization" name="editSpecialization" placeholder="e.g. Oncology" [class]="inputClasses" />
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Department *</label>
+                  <select [(ngModel)]="editEmployee.department" (ngModelChange)="onEditDepartmentChange($event)" name="editDepartment" required [class]="inputClasses">
+                    <option value="">Select department</option>
+                    @for (dept of store.departments(); track dept.id) {
+                      <option [value]="dept.name">{{ dept.name }}</option>
+                    }
+                  </select>
                 </div>
                 <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Department</label>
-                  <input [(ngModel)]="editEmployee.department" name="editDepartment" placeholder="e.g. Cardiology" [class]="inputClasses" />
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Specialization *</label>
+                  <select [(ngModel)]="editEmployee.specialization" name="editSpecialization" required [class]="inputClasses">
+                    <option value="">Select specialization</option>
+                    @for (item of specializationOptions(editEmployee.department); track item) {
+                      <option [value]="item">{{ item }}</option>
+                    }
+                  </select>
                 </div>
               </div>
 
@@ -344,22 +364,73 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
 
         <!-- Roles Tab -->
         @if (activeTab() === 'roles') {
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            @for (role of roles(); track role.role) {
-              <div class="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden">
-                <div class="absolute top-0 left-0 right-0 h-1.5 bg-blue-50 group-hover:bg-blue-500 transition-colors"></div>
-                <div class="flex items-center justify-between mb-4">
-                  <span class="px-3 py-1 rounded-lg bg-blue-50 text-blue-700 font-black text-[10px] uppercase tracking-widest border border-blue-100">{{ role.role }}</span>
-                  <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{{ role.userCount }} Active Users</div>
+          <div class="grid grid-cols-1 gap-6 xl:grid-cols-[420px_1fr]">
+            <form (ngSubmit)="saveRoleDefinition()" class="rounded-[2rem] border border-blue-100 bg-white p-6 shadow-sm">
+              <div class="mb-5 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white">
+                    <span class="material-icons text-base">admin_panel_settings</span>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-black text-slate-900">Role Definition</h3>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-blue-600">Create role and assign permissions</p>
+                  </div>
                 </div>
-                <p class="text-xs text-slate-500 leading-relaxed font-medium">{{ role.description }}</p>
-                <div class="flex flex-wrap gap-1.5 pt-4">
-                  @for (p of role.permissions; track p) {
-                    <span class="px-2 py-0.5 bg-slate-100 rounded-md text-[9px] font-mono font-bold text-slate-500 uppercase">{{ p }}</span>
-                  }
+                <button type="button" (click)="resetRoleEditor()" class="rounded-xl border border-slate-200 px-3 py-1.5 text-[10px] font-black uppercase text-slate-500 hover:bg-slate-50">Clear</button>
+              </div>
+
+              <div class="space-y-4">
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Role Code *</span>
+                  <input [(ngModel)]="roleEditor.role" name="roleCode" required placeholder="e.g. RADIOLOGY_OFFICER" [class]="inputClasses" />
+                </label>
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Purpose *</span>
+                  <textarea [(ngModel)]="roleEditor.description" name="roleDescription" required rows="3" placeholder="What this role is allowed to do" [class]="inputClasses"></textarea>
+                </label>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Permission Assignment</div>
+                  <div class="space-y-4">
+                    @for (group of groupedPermissions(); track group.module) {
+                      <section class="rounded-xl bg-white p-3 ring-1 ring-slate-100">
+                        <h4 class="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-900">{{ group.module }}</h4>
+                        <div class="space-y-2">
+                          @for (permission of group.items; track permission.key) {
+                            <label class="flex cursor-pointer items-start gap-2 rounded-lg p-2 text-[11px] font-semibold text-slate-600 hover:bg-blue-50">
+                              <input type="checkbox" [checked]="rolePermissionSelected(permission.key)" (change)="toggleRolePermission(permission.key)" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                              <span><strong class="block font-mono text-slate-900">{{ permission.key }}</strong>{{ permission.description }}</span>
+                            </label>
+                          }
+                        </div>
+                      </section>
+                    }
+                  </div>
                 </div>
               </div>
-            }
+
+              <div class="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-5">
+                <button type="submit" class="rounded-xl bg-blue-600 px-5 py-2 text-xs font-black text-white shadow-lg shadow-blue-500/20 hover:bg-blue-700">Save Role</button>
+              </div>
+            </form>
+
+            <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+              @for (role of roles(); track role.role) {
+                <div class="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden">
+                  <div class="absolute top-0 left-0 right-0 h-1.5 bg-blue-50 group-hover:bg-blue-500 transition-colors"></div>
+                  <div class="flex items-center justify-between mb-4">
+                    <span class="px-3 py-1 rounded-lg bg-blue-50 text-blue-700 font-black text-[10px] uppercase tracking-widest border border-blue-100">{{ role.role }}</span>
+                    <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{{ role.userCount }} Active Users</div>
+                  </div>
+                  <p class="text-xs text-slate-500 leading-relaxed font-medium">{{ role.description }}</p>
+                  <div class="flex flex-wrap gap-1.5 pt-4">
+                    @for (p of role.permissions; track p) {
+                      <span class="px-2 py-0.5 bg-slate-100 rounded-md text-[9px] font-mono font-bold text-slate-500 uppercase">{{ p }}</span>
+                    }
+                  </div>
+                  <button type="button" (click)="openRoleEditor(role)" class="mt-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-[10px] font-black uppercase tracking-wider text-blue-700 hover:bg-blue-100">Configure</button>
+                </div>
+              }
+            </div>
           </div>
         }
 
@@ -387,21 +458,75 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
 
         <!-- Departments Tab -->
         @if (activeTab() === 'departments') {
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            @for (dept of store.departments(); track dept.id) {
-              <div class="bg-white p-6 rounded-[2.5rem] border border-slate-200/80 shadow-sm group">
-                <div class="flex items-center justify-between mb-4">
-                   <div class="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all">{{ dept.code }}</div>
-                   <span class="px-2 py-0.5 rounded-lg bg-slate-50 text-slate-400 font-black text-[9px] uppercase tracking-widest">{{ dept.type }}</span>
+          <div class="grid grid-cols-1 gap-6 xl:grid-cols-[360px_1fr]">
+            <form (ngSubmit)="saveDepartment()" class="rounded-[2rem] border border-amber-100 bg-white p-6 shadow-sm">
+              <div class="mb-5 flex items-center gap-3">
+                <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500 text-white">
+                  <span class="material-icons text-base">lan</span>
                 </div>
-                <h3 class="text-sm font-bold text-slate-900 mb-1">{{ dept.name }}</h3>
-                <p class="text-[10px] text-slate-400 font-medium italic mb-4">{{ dept.location }}</p>
-                <div class="pt-4 border-t border-slate-50 flex items-center justify-between">
-                   <div class="text-2xl font-black text-slate-900 leading-none">{{ dept.activeStaffCount }}</div>
-                   <div class="text-[9px] font-black text-slate-300 uppercase tracking-widest text-right">Registered Staff</div>
+                <div>
+                  <h3 class="text-sm font-black text-slate-900">Department Maintenance</h3>
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-amber-600">Specializations are selected during staff registration</p>
                 </div>
               </div>
-            }
+              <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Code *</span>
+                    <input [(ngModel)]="departmentForm.code" name="departmentCode" required placeholder="CARD" [class]="inputClasses" />
+                  </label>
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Type *</span>
+                    <select [(ngModel)]="departmentForm.type" name="departmentType" required [class]="inputClasses">
+                      <option>Clinical</option>
+                      <option>Diagnostic</option>
+                      <option>Administration</option>
+                      <option>Finance</option>
+                      <option>Support</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Department Name *</span>
+                  <input [(ngModel)]="departmentForm.name" name="departmentName" required placeholder="Cardiology" [class]="inputClasses" />
+                </label>
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Location *</span>
+                  <input [(ngModel)]="departmentForm.location" name="departmentLocation" required placeholder="Block A" [class]="inputClasses" />
+                </label>
+                <label class="block space-y-1">
+                  <span class="text-[10px] font-bold uppercase text-slate-500">Specializations *</span>
+                  <textarea [(ngModel)]="departmentForm.specializationsText" name="departmentSpecializations" required rows="4" placeholder="Internal Medicine, Cardiology, Echo Clinic" [class]="inputClasses"></textarea>
+                </label>
+              </div>
+              <div class="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-5">
+                <button type="button" (click)="resetDepartmentForm()" class="rounded-xl px-4 py-2 text-xs font-black text-slate-500 hover:bg-slate-100">Clear</button>
+                <button type="submit" class="rounded-xl bg-amber-500 px-5 py-2 text-xs font-black text-white shadow-lg shadow-amber-500/20 hover:bg-amber-600">Save Department</button>
+              </div>
+            </form>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              @for (dept of store.departments(); track dept.id) {
+                <div class="bg-white p-6 rounded-[2.5rem] border border-slate-200/80 shadow-sm group">
+                  <div class="flex items-center justify-between mb-4">
+                     <div class="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center font-black text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all">{{ dept.code }}</div>
+                     <span class="px-2 py-0.5 rounded-lg bg-slate-50 text-slate-400 font-black text-[9px] uppercase tracking-widest">{{ dept.type }}</span>
+                  </div>
+                  <h3 class="text-sm font-bold text-slate-900 mb-1">{{ dept.name }}</h3>
+                  <p class="text-[10px] text-slate-400 font-medium italic mb-4">{{ dept.location }}</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    @for (spec of dept.specializations; track spec) {
+                      <span class="rounded-lg bg-amber-50 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-amber-700">{{ spec }}</span>
+                    }
+                  </div>
+                  <div class="pt-4 mt-4 border-t border-slate-50 flex items-center justify-between">
+                     <div class="text-2xl font-black text-slate-900 leading-none">{{ dept.activeStaffCount }}</div>
+                     <div class="text-[9px] font-black text-slate-300 uppercase tracking-widest text-right">Registered Staff</div>
+                  </div>
+                  <button type="button" (click)="editDepartment(dept)" class="mt-4 rounded-xl border border-amber-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-amber-700 hover:bg-amber-50">Edit</button>
+                </div>
+              }
+            </div>
           </div>
         }
 
@@ -450,6 +575,19 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
                 </label>
                 <div class="grid grid-cols-2 gap-3">
                   <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Price *</span>
+                    <input [(ngModel)]="diagnosticForm.price" name="diagPrice" type="number" min="0" step="0.01" [class]="inputClasses" />
+                  </label>
+                  <label class="space-y-1">
+                    <span class="text-[10px] font-bold uppercase text-slate-500">Currency</span>
+                    <select [(ngModel)]="diagnosticForm.currency" name="diagCurrency" [class]="inputClasses">
+                      <option value="ETB">ETB</option>
+                      <option value="USD">USD</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <label class="space-y-1">
                     <span class="text-[10px] font-bold uppercase text-slate-500">Sort Order</span>
                     <input [(ngModel)]="diagnosticForm.sortOrder" name="diagSort" type="number" [class]="inputClasses" />
                   </label>
@@ -476,7 +614,7 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
               <div class="overflow-x-auto">
                 <table class="w-full text-left text-xs">
                   <thead class="border-b border-slate-200 bg-slate-50 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                    <tr><th class="px-5 py-4">Group</th><th class="px-5 py-4">Sub Group</th><th class="px-5 py-4">Test</th><th class="px-5 py-4">Specimen</th><th class="px-5 py-4">Range</th><th class="px-5 py-4 text-right">Action</th></tr>
+                    <tr><th class="px-5 py-4">Group</th><th class="px-5 py-4">Sub Group</th><th class="px-5 py-4">Test</th><th class="px-5 py-4">Specimen</th><th class="px-5 py-4">Range</th><th class="px-5 py-4">Price</th><th class="px-5 py-4 text-right">Action</th></tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100">
                     @for (test of sortedDiagnosticTests(); track test.id) {
@@ -486,12 +624,13 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
                         <td class="px-5 py-4 font-bold text-slate-800">{{ test.testName }}</td>
                         <td class="px-5 py-4 text-slate-500">{{ test.specimenType || 'As applicable' }}</td>
                         <td class="px-5 py-4 font-mono text-[10px] text-slate-500">{{ test.referenceRange || 'Report based' }} {{ test.unit }}</td>
+                        <td class="px-5 py-4 font-mono text-[10px] font-black text-purple-700">{{ test.price | number:'1.2-2' }} {{ test.currency }}</td>
                         <td class="px-5 py-4 text-right">
                           <button type="button" (click)="editDiagnosticCatalogItem(test)" class="rounded-xl border border-purple-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-purple-700 hover:bg-purple-50">Edit</button>
                         </td>
                       </tr>
                     } @empty {
-                      <tr><td colspan="6" class="py-16 text-center text-xs font-bold text-slate-400">No diagnostic catalog items loaded.</td></tr>
+                      <tr><td colspan="7" class="py-16 text-center text-xs font-bold text-slate-400">No diagnostic catalog items loaded.</td></tr>
                     }
                   </tbody>
                 </table>
@@ -551,6 +690,20 @@ export class AdminComponent {
   permissions = signal<BackendPermission[]>([]);
   emails = signal<BackendEmailOutbox[]>([]);
   creationMode = signal<'invite' | 'password'>('invite');
+  roleEditor = { role: '', description: '', permissions: [] as string[] };
+  departmentForm = { code: '', name: '', type: 'Clinical', location: 'Main Campus', specializationsText: '' };
+
+  groupedPermissions = computed(() => {
+    const groups = new Map<string, BackendPermission[]>();
+    for (const permission of this.permissions()) {
+      const module = permission.module || 'General';
+      groups.set(module, [...(groups.get(module) || []), permission]);
+    }
+    return Array.from(groups.entries()).map(([module, items]) => ({
+      module,
+      items: items.sort((a, b) => a.key.localeCompare(b.key)),
+    }));
+  });
 
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/5 transition-all font-medium';
 
@@ -583,6 +736,8 @@ export class AdminComponent {
     unit: '',
     referenceRange: 'Radiologist report',
     sortOrder: 0,
+    price: 0,
+    currency: 'ETB',
     isActive: true,
   };
 
@@ -605,6 +760,112 @@ export class AdminComponent {
   constructor() {
     this.loadRoles();
     this.loadPermissions();
+    this.store.loadDepartments();
+  }
+
+  openRoleEditor(role: BackendRolePermission) {
+    this.roleEditor = {
+      role: role.role,
+      description: role.description,
+      permissions: [...role.permissions],
+    };
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  resetRoleEditor() {
+    this.roleEditor = { role: '', description: '', permissions: [] };
+  }
+
+  rolePermissionSelected(key: string): boolean {
+    return this.roleEditor.permissions.includes(key);
+  }
+
+  toggleRolePermission(key: string) {
+    this.roleEditor.permissions = this.rolePermissionSelected(key)
+      ? this.roleEditor.permissions.filter(item => item !== key)
+      : [...this.roleEditor.permissions, key];
+  }
+
+  saveRoleDefinition() {
+    const role = this.roleEditor.role.trim().toUpperCase().replace(/\s+/g, '_');
+    const description = this.roleEditor.description.trim();
+    if (!role || !description || this.roleEditor.permissions.length === 0) {
+      this.store.addToast('error', 'Role Validation', 'Role code, purpose, and at least one permission are required.');
+      return;
+    }
+
+    const existing = this.roles().some(item => item.role === role);
+    const request = existing
+      ? this.api.updateRole(role, { description, permissions: this.roleEditor.permissions })
+      : this.api.createRole({ role, description, permissions: this.roleEditor.permissions });
+
+    request.subscribe({
+      next: (res) => {
+        if (res.data) {
+          this.loadRoles();
+          this.resetRoleEditor();
+          this.store.addToast('success', 'Role Saved', `${role} permissions have been updated.`);
+        }
+      },
+      error: () => this.store.addToast('error', 'Role Save Failed', 'Unable to save the role definition. Please review the role code and try again.'),
+    });
+  }
+
+  specializationOptions(departmentName: string): string[] {
+    const dept = this.store.departments().find(item => item.name === departmentName || item.code === departmentName);
+    return dept?.specializations?.length ? dept.specializations : [];
+  }
+
+  onNewDepartmentChange(departmentName: string) {
+    const specs = this.specializationOptions(departmentName);
+    this.newEmployee.specialization = specs[0] || '';
+  }
+
+  onEditDepartmentChange(departmentName: string) {
+    const specs = this.specializationOptions(departmentName);
+    this.editEmployee.specialization = specs[0] || '';
+  }
+
+  editDepartment(dept: Department) {
+    this.departmentForm = {
+      code: dept.code,
+      name: dept.name,
+      type: dept.type,
+      location: dept.location,
+      specializationsText: dept.specializations.join(', '),
+    };
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  resetDepartmentForm() {
+    this.departmentForm = { code: '', name: '', type: 'Clinical', location: 'Main Campus', specializationsText: '' };
+  }
+
+  saveDepartment() {
+    const specializations = this.departmentForm.specializationsText
+      .split(/[,\n]/)
+      .map(item => item.trim())
+      .filter(Boolean);
+
+    if (!this.departmentForm.code.trim() || !this.departmentForm.name.trim() || specializations.length === 0) {
+      this.store.addToast('error', 'Department Validation', 'Department code, name, and at least one specialization are required.');
+      return;
+    }
+
+    this.api.createDepartment({
+      code: this.departmentForm.code.trim(),
+      name: this.departmentForm.name.trim(),
+      type: this.departmentForm.type || 'Clinical',
+      location: this.departmentForm.location || 'Main Campus',
+      specializations,
+    }).subscribe({
+      next: () => {
+        this.store.loadDepartments();
+        this.resetDepartmentForm();
+        this.store.addToast('success', 'Department Saved', 'Department and specialization list have been updated.');
+      },
+      error: () => this.store.addToast('error', 'Department Save Failed', 'Unable to save the department. Please check duplicate code or required fields.'),
+    });
   }
 
   resetDiagnosticForm() {
@@ -616,6 +877,8 @@ export class AdminComponent {
       unit: '',
       referenceRange: 'Radiologist report',
       sortOrder: 0,
+      price: 0,
+      currency: 'ETB',
       isActive: true,
     };
   }
@@ -637,6 +900,8 @@ export class AdminComponent {
       unit: this.diagnosticForm.unit || '',
       referenceRange: this.diagnosticForm.referenceRange || '',
       sortOrder: Number(this.diagnosticForm.sortOrder || 0),
+      price: Math.max(0, Number(this.diagnosticForm.price || 0)),
+      currency: (this.diagnosticForm.currency || 'ETB').toUpperCase(),
       isActive: !!this.diagnosticForm.isActive,
     });
     this.resetDiagnosticForm();
@@ -714,7 +979,10 @@ export class AdminComponent {
 
   updateEmployee() {
     const id = this.editEmployeeId();
-    if (!id || !this.editEmployee.firstName || !this.editEmployee.lastName || !this.editEmployee.emailAddress || !this.editEmployee.role) return;
+    if (!id || !this.editEmployee.firstName || !this.editEmployee.lastName || !this.editEmployee.emailAddress || !this.editEmployee.role || !this.editEmployee.department || !this.editEmployee.specialization) {
+      this.store.addToast('error', 'User Validation', 'Name, email, role, department, and specialization are required.');
+      return;
+    }
 
     const name = `${this.editEmployee.firstName} ${this.editEmployee.lastName}`;
     this.store.isSaving.set(true);
@@ -766,7 +1034,10 @@ export class AdminComponent {
   }
 
   createEmployee() {
-    if (!this.newEmployee.firstName || !this.newEmployee.lastName || !this.newEmployee.emailAddress || !this.newEmployee.role) return;
+    if (!this.newEmployee.firstName || !this.newEmployee.lastName || !this.newEmployee.emailAddress || !this.newEmployee.role || !this.newEmployee.department || !this.newEmployee.specialization) {
+      this.store.addToast('error', 'User Validation', 'Name, email, role, department, and specialization are required.');
+      return;
+    }
 
     if (this.creationMode() === 'password') {
       if (!this.newEmployeePassword || this.newEmployeePassword.length < 8) {

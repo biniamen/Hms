@@ -53,6 +53,32 @@ export interface BackendDoctorProfile {
   isActive: boolean;
 }
 
+export interface BackendDoctorServicePrice {
+  id: string;
+  doctorId: string;
+  serviceCode: string;
+  serviceName: string;
+  amount: number;
+  currency: string;
+  validityDays: number;
+  isActive: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface BackendDoctorServiceQuote {
+  doctorId: string;
+  serviceCode: string;
+  serviceName: string;
+  amount: number;
+  currency: string;
+  validityDays: number;
+  isActive: boolean;
+  chargeRequired: boolean;
+  coveredUntilUtc?: string;
+  message: string;
+}
+
 export interface BackendPatient {
   id: string;
   mrn: string;
@@ -111,6 +137,8 @@ export interface BackendDiagnosticTest {
   unit: string;
   referenceRange: string;
   sortOrder: number;
+  price: number;
+  currency: string;
   isActive: boolean;
 }
 
@@ -187,6 +215,9 @@ export interface BackendInvoiceItem {
   unitPrice: number;
   discount: number;
   lineTotal: number;
+  referenceType?: string;
+  referenceId?: string;
+  serviceDateUtc?: string;
 }
 
 export interface BackendInvoice {
@@ -250,6 +281,7 @@ export interface BackendDepartment {
   name: string;
   type: string;
   location: string;
+  specializations?: string[];
 }
 
 export interface BackendInsuranceCompany {
@@ -262,6 +294,7 @@ export interface BackendInsuranceCompany {
   address: string;
   coverageType: string;
   coveragePercent: number;
+  spouseCoverageAllowed?: boolean;
   isActive: boolean;
 }
 
@@ -469,6 +502,8 @@ export interface DiagnosticTest {
   unit: string;
   referenceRange: string;
   sortOrder: number;
+  price: number;
+  currency: string;
   isActive: boolean;
 }
 
@@ -541,6 +576,7 @@ export interface Department {
   code: string;
   type: string;
   location: string;
+  specializations: string[];
   headDoctorName: string;
   totalBeds: number;
   occupiedBeds: number;

@@ -60,6 +60,7 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
             entity.Property(department => department.Name).HasColumnName("name").HasMaxLength(160);
             entity.Property(department => department.Type).HasColumnName("type").HasMaxLength(80);
             entity.Property(department => department.Location).HasColumnName("location").HasMaxLength(160);
+            entity.Property(department => department.Specializations).HasColumnName("specializations");
             entity.Property(department => department.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
         });
 
@@ -149,6 +150,7 @@ public sealed class Department : Entity
     public string Name { get; set; } = "";
     public string Type { get; set; } = "";
     public string Location { get; set; } = "";
+    public string Specializations { get; set; } = "";
 }
 
 public sealed class Employee : Entity
@@ -293,11 +295,11 @@ public static class IdentitySeedData
     {
         var departments = new[]
         {
-            new Department { Id = Guid.Parse("27b29b9e-70b5-45d0-8b48-b6d5323f4f54"), Code = "OPD", Name = "Outpatient", Type = "Clinical", Location = "Block A" },
-            new Department { Id = Guid.Parse("69915464-0999-4353-a3f5-91d3472ec98a"), Code = "ER", Name = "Emergency", Type = "Clinical", Location = "Ground Floor" },
-            new Department { Id = Guid.Parse("ea4b9765-f7d2-409d-a67f-a8f98695629a"), Code = "PED", Name = "Pediatrics", Type = "Clinical", Location = "Block B" },
-            new Department { Id = Guid.Parse("53b54a7a-c189-4fea-b3ba-f85dbe368601"), Code = "MAT", Name = "Maternity", Type = "Clinical", Location = "Block C" },
-            new Department { Id = Guid.Parse("0a48cb6a-c097-4f33-a6f2-baa1181e4d9a"), Code = "FIN", Name = "Finance", Type = "Administration", Location = "Admin Block" }
+            new Department { Id = Guid.Parse("27b29b9e-70b5-45d0-8b48-b6d5323f4f54"), Code = "OPD", Name = "Outpatient", Type = "Clinical", Location = "Block A", Specializations = "Internal Medicine|General Practice|Family Medicine|Cardiology" },
+            new Department { Id = Guid.Parse("69915464-0999-4353-a3f5-91d3472ec98a"), Code = "ER", Name = "Emergency", Type = "Clinical", Location = "Ground Floor", Specializations = "Emergency Medicine|Trauma Care|Critical Care|Triage Nursing" },
+            new Department { Id = Guid.Parse("ea4b9765-f7d2-409d-a67f-a8f98695629a"), Code = "PED", Name = "Pediatrics", Type = "Clinical", Location = "Block B", Specializations = "Pediatrics|Neonatology|Pediatric Nursing|Child Health" },
+            new Department { Id = Guid.Parse("53b54a7a-c189-4fea-b3ba-f85dbe368601"), Code = "MAT", Name = "Maternity", Type = "Clinical", Location = "Block C", Specializations = "Obstetrics|Gynecology|Midwifery|Maternal Health" },
+            new Department { Id = Guid.Parse("0a48cb6a-c097-4f33-a6f2-baa1181e4d9a"), Code = "FIN", Name = "Finance", Type = "Administration", Location = "Admin Block", Specializations = "Revenue Cycle|Cashier|Claims Management|Accounting" }
         };
 
         foreach (var department in departments)
@@ -312,6 +314,7 @@ public static class IdentitySeedData
                 existing.Name = department.Name;
                 existing.Type = department.Type;
                 existing.Location = department.Location;
+                existing.Specializations = department.Specializations;
             }
         }
     }

@@ -58,12 +58,20 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
           <div class="max-h-[calc(92vh-86px)] overflow-y-auto">
           @if (!selectedLabForResult()) {
             <form [formGroup]="orderForm" (ngSubmit)="submitOrder()" class="p-6 sm:p-8 space-y-6">
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Target Patient *</label>
                   <select formControlName="patientId" [class]="inputClasses">
                     @for (p of store.patients(); track p.id) {
                       <option [value]="p.id">{{ p.name }} (MRN: {{ p.mrn }})</option>
+                    }
+                  </select>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Requesting Doctor *</label>
+                  <select formControlName="doctorId" [class]="inputClasses">
+                    @for (doctor of orderDoctors(); track doctor.id) {
+                      <option [value]="doctor.id">{{ doctor.name }}</option>
                     }
                   </select>
                 </div>
@@ -152,8 +160,8 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
               <div class="grid grid-cols-1 gap-4 rounded-2xl border border-purple-100 bg-purple-50/50 p-4 md:grid-cols-4">
                 <div>
                   <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Patient</div>
-                  <div class="mt-1 text-sm font-black text-slate-900">{{ selectedLabForResult()?.patientName }}</div>
-                  <div class="text-[10px] font-mono text-slate-500">{{ selectedLabForResult()?.patientMrn }}</div>
+                  <div class="mt-1 text-sm font-black text-slate-900">{{ store.patientDisplayName(selectedLabForResult()?.patientId || '') }}</div>
+                  <div class="text-[10px] font-mono text-slate-500">{{ store.patientMrn(selectedLabForResult()?.patientId || '') }}</div>
                 </div>
                 <div>
                   <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Order</div>
@@ -165,7 +173,7 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                 </div>
                 <div>
                   <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Doctor</div>
-                  <div class="mt-1 text-sm font-bold text-slate-900">{{ selectedLabForResult()?.doctorName }}</div>
+                  <div class="mt-1 text-sm font-bold text-slate-900">{{ store.doctorDisplayName(selectedLabForResult()?.doctorId || '') }}</div>
                 </div>
               </div>
               <div class="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_320px]">
@@ -319,13 +327,13 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
               <div>
                 <h3 class="text-sm font-bold text-slate-900 font-display">{{ lab.testName }}</h3>
                 <div class="flex items-center gap-2 mt-2">
-                   <div class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 uppercase">{{ lab.patientName.charAt(0) }}</div>
+                   <div class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 uppercase">{{ store.patientDisplayName(lab.patientId).charAt(0) }}</div>
                    <div>
-                     <p class="text-xs text-slate-700 font-bold">{{ lab.patientName }}</p>
-                     <p class="text-[9px] text-slate-400 font-mono tracking-tighter">ID: {{ lab.patientMrn }}</p>
+                     <p class="text-xs text-slate-700 font-bold">{{ store.patientDisplayName(lab.patientId) }}</p>
+                     <p class="text-[9px] text-slate-400 font-mono tracking-tighter">MRN: {{ store.patientMrn(lab.patientId) }}</p>
                    </div>
                 </div>
-                <p class="text-[10px] text-slate-400 mt-3 font-medium italic">Ordered by {{ lab.doctorName }} • {{ lab.orderedDate }}</p>
+                <p class="text-[10px] text-slate-400 mt-3 font-medium italic">Ordered by {{ store.doctorDisplayName(lab.doctorId) }} • {{ lab.orderedDate }}</p>
               </div>
 
               <!-- Result Visualization -->
@@ -411,11 +419,23 @@ export class LaboratoryComponent {
       .map(id => this.store.diagnosticTests().find(test => test.id === id))
       .filter((test): test is DiagnosticTest => !!test));
 
+  orderDoctors = computed(() => {
+    const profiles = this.store.doctors().map(doctor => ({
+      id: doctor.id,
+      name: `Dr. ${doctor.firstName} ${doctor.lastName}`,
+    }));
+    if (profiles.length > 0) return profiles;
+    return this.store.employeesAsUsers()
+      .filter(employee => employee.role === 'DOCTOR')
+      .map(employee => ({ id: employee.id, name: employee.name }));
+  });
+
   // Standardized classes for input consistency across the dashboard
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-purple-500 focus:ring-4 focus:ring-purple-500/5 transition-all';
 
   orderForm = new FormGroup({
-    patientId: new FormControl('p-1', [Validators.required]),
+    patientId: new FormControl('', [Validators.required]),
+    doctorId: new FormControl('', [Validators.required]),
     category: new FormControl('Biochemistry', [Validators.required]),
     priority: new FormControl('Routine', [Validators.required]),
     specimenType: new FormControl('Whole blood', [Validators.required])
@@ -437,7 +457,13 @@ export class LaboratoryComponent {
     this.selectedLabForResult.set(null);
     this.selectedOrderTestIds.set([]);
     this.resultRows.set([]);
-    this.orderForm.reset({ patientId: 'p-1', category: 'Biochemistry', priority: 'Routine', specimenType: 'Whole blood' });
+    this.orderForm.reset({
+      patientId: this.store.patients()[0]?.id || '',
+      doctorId: this.orderDoctors()[0]?.id || '',
+      category: 'Biochemistry',
+      priority: 'Routine',
+      specimenType: 'Whole blood',
+    });
     this.resultForm.reset();
   }
 
@@ -446,6 +472,7 @@ export class LaboratoryComponent {
     this.selectedOrderTestIds.set([]);
     this.orderForm.reset({
       patientId: this.store.patients()[0]?.id || '',
+      doctorId: this.orderDoctors()[0]?.id || '',
       category: 'Biochemistry',
       priority: 'Routine',
       specimenType: 'Whole blood',
@@ -475,6 +502,7 @@ export class LaboratoryComponent {
     
     const val = this.orderForm.value;
     const patient = this.store.patients().find(p => p.id === val.patientId);
+    const doctor = this.orderDoctors().find(item => item.id === val.doctorId);
     const selectedTests = this.selectedOrderTests();
 
     if (selectedTests.length === 0) {
@@ -482,13 +510,18 @@ export class LaboratoryComponent {
       return;
     }
 
-    if (patient) {
+    if (!patient || !doctor) {
+      this.store.addToast('error', 'Patient and Doctor Required', 'Select a valid patient and requesting doctor before submitting.');
+      return;
+    }
+
+    if (patient && doctor) {
       this.store.addLabOrder({
         patientId: patient.id,
         patientName: patient.name,
         patientMrn: patient.mrn,
-        doctorId: this.store.currentUser()?.id || 'u-101',
-        doctorName: this.store.currentUser()?.name || 'Dr. Sarah Jenkins',
+        doctorId: doctor.id,
+        doctorName: doctor.name,
         testName: selectedTests.map(test => test.testName).join(', '),
         testCatalogIds: selectedTests.map(test => test.id),
         category: selectedTests[0]?.groupName || val.category || 'Biochemistry',
@@ -520,9 +553,71 @@ export class LaboratoryComponent {
 
   updateResultRow(index: number, field: keyof LabResultItem, event: Event) {
     const value = (event.target as HTMLInputElement | HTMLSelectElement).value;
-    this.resultRows.update(rows => rows.map((row, rowIndex) =>
-      rowIndex === index ? { ...row, [field]: value } : row
-    ));
+    this.resultRows.update(rows => {
+      const next = rows.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        const updated = { ...row, [field]: value } as LabResultItem;
+        if (field === 'result' || field === 'referenceRange') {
+          updated.flag = this.autoResultFlag(updated.result, updated.referenceRange);
+        }
+        return updated;
+      });
+      const overall = this.overallResultFlag(next);
+      this.resultForm.patchValue({
+        resultFlag: overall,
+        isAbnormal: overall !== 'Normal',
+      }, { emitEvent: false });
+      return next;
+    });
+  }
+
+  private autoResultFlag(result: string, referenceRange: string): LabResultItem['flag'] {
+    const value = this.firstNumber(result);
+    if (value === null) {
+      const text = (result || '').toLowerCase();
+      if (text.includes('critical')) return 'Critical';
+      if (text.includes('positive') || text.includes('detected') || text.includes('abnormal')) return 'Abnormal';
+      return 'Normal';
+    }
+
+    const range = (referenceRange || '').replace(/,/g, '').trim();
+    const between = range.match(/(-?\d+(?:\.\d+)?)\s*(?:-|to|–|—)\s*(-?\d+(?:\.\d+)?)/i);
+    if (between) {
+      const low = Number(between[1]);
+      const high = Number(between[2]);
+      if (Number.isFinite(low) && Number.isFinite(high)) {
+        if (value < low) return value < low * 0.5 ? 'Critical' : 'Low';
+        if (value > high) return value > high * 1.8 ? 'Critical' : 'High';
+        return 'Normal';
+      }
+    }
+
+    const lessThan = range.match(/<\s*(-?\d+(?:\.\d+)?)/);
+    if (lessThan) {
+      const upper = Number(lessThan[1]);
+      return value < upper ? 'Normal' : (value > upper * 1.8 ? 'Critical' : 'High');
+    }
+
+    const greaterThan = range.match(/>\s*(-?\d+(?:\.\d+)?)/);
+    if (greaterThan) {
+      const lower = Number(greaterThan[1]);
+      return value > lower ? 'Normal' : (value < lower * 0.5 ? 'Critical' : 'Low');
+    }
+
+    return 'Normal';
+  }
+
+  private firstNumber(value: string): number | null {
+    const match = String(value || '').replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+    if (!match) return null;
+    const parsed = Number(match[0]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private overallResultFlag(rows: LabResultItem[]): 'Normal' | 'Abnormal' | 'Critical' {
+    if (rows.some(row => row.flag === 'Critical')) return 'Critical';
+    if (rows.some(row => row.flag !== 'Normal')) return 'Abnormal';
+    return 'Normal';
   }
 
   private buildResultRows(lab: LabOrder): LabResultItem[] {
@@ -601,6 +696,9 @@ export class LaboratoryComponent {
     if (!popup) return;
     const printedAt = new Date().toLocaleString();
     const documentNo = `LAB-${Date.now().toString().slice(-8)}`;
+    const patientName = this.store.patientDisplayName(lab.patientId);
+    const patientMrn = this.store.patientMrn(lab.patientId);
+    const doctorName = this.store.doctorDisplayName(lab.doctorId);
     const rows = lab.resultItems?.length
       ? lab.resultItems
       : this.buildResultRows({ ...lab, resultItems: undefined }).map(row => ({ ...row, result: lab.result || row.result }));
@@ -621,7 +719,7 @@ export class LaboratoryComponent {
             <td>${this.escapeHtml(row.result || '')}</td>
             <td>${this.escapeHtml(row.unit || '')}</td>
             <td>${this.escapeHtml(row.referenceRange || '')}</td>
-            <td>${this.escapeHtml(row.flag || 'Normal')}</td>
+            <td class="flag-${this.escapeHtml(row.flag || 'Normal')}">${this.escapeHtml(row.flag || 'Normal')}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -629,20 +727,23 @@ export class LaboratoryComponent {
     popup.document.write(`
       <html>
         <head>
-          <title>Laboratory Result - ${this.escapeHtml(lab.patientName)}</title>
+          <title>Laboratory Result - ${this.escapeHtml(patientName)}</title>
           <style>
             * { box-sizing: border-box; }
             body { margin: 0; background: #e5e7eb; font-family: Arial, sans-serif; color: #111827; }
             .page { position: relative; width: 210mm; min-height: 297mm; margin: 18px auto; background: white; padding: 18mm 16mm; box-shadow: 0 18px 50px rgba(15, 23, 42, .18); overflow: hidden; }
-            .watermark { position: absolute; inset: 38% auto auto 8%; transform: rotate(-34deg); font-size: 86px; font-weight: 900; color: rgba(124, 58, 237, .06); letter-spacing: .16em; }
-            .doc-header { position: relative; display: grid; grid-template-columns: 1fr 150px; border: 2px solid #111827; }
-            .hospital { padding: 12px 14px; text-align: center; border-right: 2px solid #111827; }
-            .hospital h2 { margin: 0; font-size: 17px; letter-spacing: .08em; }
-            .hospital p { margin: 4px 0 0; font-size: 10px; color: #475569; }
-            .doc-box { padding: 10px; text-align: center; font-size: 10px; }
+            .watermark { position: absolute; inset: 38% auto auto 9%; transform: rotate(-18deg); font-size: 76px; font-weight: 900; color: rgba(220, 38, 38, .06); letter-spacing: .08em; }
+            .lab-top { position: relative; border-top: 10px solid #dc2626; border-bottom: 5px solid #0f3b67; padding: 10px 0 8px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 14px; align-items: center; }
+            .lab-brand { display: flex; align-items: center; gap: 10px; color: #dc2626; }
+            .drop { width: 26px; height: 38px; border: 4px solid #dc2626; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); }
+            .brand-name { font-size: 28px; font-weight: 900; letter-spacing: .02em; line-height: .9; }
+            .brand-sub { color: #0f3b67; font-size: 12px; font-weight: 800; margin-left: 39px; }
+            .lab-right { text-align: right; color: #0f3b67; font-weight: 900; font-size: 16px; letter-spacing: .04em; }
+            .lab-report-title { display: inline-block; margin-top: 12px; border-left: 5px solid #dc2626; color: #0f3b67; font-size: 20px; font-weight: 900; padding-left: 8px; }
+            .doc-box { position: absolute; right: 0; top: 54px; width: 130px; padding: 6px; text-align: center; font-size: 9px; border: 1px solid #cbd5e1; background: white; }
             .barcode { margin: 6px auto 2px; height: 28px; width: 96px; background: repeating-linear-gradient(90deg, #111827 0 2px, transparent 2px 5px, #111827 5px 6px, transparent 6px 9px); }
-            .title-row { display: grid; grid-template-columns: 1fr 160px; border: 2px solid #111827; border-top: 0; }
-            .title-row div { padding: 8px 12px; font-size: 12px; }
+            .report-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 14px; font-size: 11px; }
+            .line { display: grid; grid-template-columns: 118px 1fr; border-bottom: 1px solid #94a3b8; padding: 3px 0; }
             h1 { margin: 18px 0 14px; font-size: 20px; text-align: center; text-transform: uppercase; letter-spacing: .08em; }
             h2 { margin: 18px 0 6px; border-bottom: 2px solid #111827; padding-bottom: 5px; font-size: 15px; }
             table { width: 100%; border-collapse: collapse; font-size: 12px; position: relative; z-index: 1; }
@@ -650,38 +751,44 @@ export class LaboratoryComponent {
             th { width: 155px; background: #f1f5f9; text-transform: uppercase; font-size: 10px; letter-spacing: .06em; }
             .result-table th { width: auto; border-left: 0; border-right: 0; background: white; }
             .result-table td { border-left: 0; border-right: 0; }
+            .flag-Normal { color: #047857; font-weight: 900; }
+            .flag-Low, .flag-High, .flag-Abnormal { color: #b45309; font-weight: 900; }
+            .flag-Critical { color: #be123c; font-weight: 900; }
             .summary { margin-top: 16px; border-left: 5px solid #7c3aed; background: #faf5ff; padding: 14px; white-space: pre-line; font-size: 12px; line-height: 1.6; }
             .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 72px; font-size: 12px; }
             .sign-line { border-top: 1px solid #111827; padding-top: 8px; }
-            .footer { position: absolute; left: 16mm; right: 16mm; bottom: 10mm; border-top: 1px solid #cbd5e1; padding-top: 6px; text-align: center; font-size: 10px; color: #475569; }
+            .footer { position: absolute; left: 0; right: 0; bottom: 0; border-top: 4px solid #dc2626; background: #eff6ff; padding: 8px 16mm; text-align: center; font-size: 10px; color: #0f3b67; font-weight: 700; }
             @media print { body { background: white; } .page { margin: 0; box-shadow: none; width: auto; min-height: auto; } }
           </style>
         </head>
         <body>
           <section class="page">
-            <div class="watermark">LAB RESULT</div>
-            <div class="doc-header">
-              <div class="hospital">
-                <h2>BETHZATHA GENERAL HOSPITAL</h2>
-                <p>Addis Ababa, Ethiopia | Tel: +251-115-535980 | info@bethzatha.com</p>
+            <div class="watermark">bethzatha</div>
+            <div class="lab-top">
+              <div>
+                <div class="lab-brand"><span class="drop"></span><span class="brand-name">bethzatha</span></div>
+                <div class="brand-sub">Advanced Medical Laboratory</div>
+                <div class="lab-report-title">[ Laboratory Report ]</div>
               </div>
-              <div class="doc-box">
-                Document No
-                <div class="barcode"></div>
-                <strong>${this.escapeHtml(documentNo)}</strong>
+              <div class="lab-right">BETHZATHA ADVANCED MEDICAL LABORATORY</div>
+              <div class="doc-box">Document No<div class="barcode"></div><strong>${this.escapeHtml(documentNo)}</strong></div>
+            </div>
+            <div class="report-meta">
+              <div>
+                <div class="line"><strong>Patient Name</strong><span>${this.escapeHtml(patientName)}</span></div>
+                <div class="line"><strong>MRN</strong><span>${this.escapeHtml(patientMrn)}</span></div>
+                <div class="line"><strong>Sample Origin</strong><span>${this.escapeHtml(lab.specimenType || 'As applicable')}</span></div>
+                <div class="line"><strong>Clinical Data</strong><span>${this.escapeHtml(lab.clinicalNote || 'Not specified')}</span></div>
+                <div class="line"><strong>Fasting</strong><span>Yes [ ] &nbsp;&nbsp; No [ ]</span></div>
+              </div>
+              <div>
+                <div class="line"><strong>Requested By</strong><span>${this.escapeHtml(doctorName)}</span></div>
+                <div class="line"><strong>Order Date</strong><span>${this.escapeHtml(lab.orderedDate)}</span></div>
+                <div class="line"><strong>Report Date</strong><span>${this.escapeHtml(lab.completedDate || printedAt)}</span></div>
+                <div class="line"><strong>Sample ID</strong><span>${this.escapeHtml(lab.id.slice(0, 8).toUpperCase())}</span></div>
+                <div class="line"><strong>Document No</strong><span>${this.escapeHtml(documentNo)}</span></div>
               </div>
             </div>
-            <div class="title-row">
-              <div><strong>Document Title:</strong> Laboratory Result Report</div>
-              <div><strong>Revision:</strong> 0<br><strong>Page:</strong> 1 of 1</div>
-            </div>
-            <h1>Laboratory Result Report</h1>
-            <table>
-              <tr><th>Patient Name</th><td>${this.escapeHtml(lab.patientName)}</td><th>MRN</th><td>${this.escapeHtml(lab.patientMrn)}</td></tr>
-              <tr><th>Sample Type</th><td>${this.escapeHtml(lab.specimenType || 'As applicable')}</td><th>Clinical Data</th><td>${this.escapeHtml(lab.clinicalNote || '')}</td></tr>
-              <tr><th>Requested By</th><td>${this.escapeHtml(lab.doctorName)}</td><th>Printed</th><td>${this.escapeHtml(printedAt)}</td></tr>
-              <tr><th>Order Date</th><td>${this.escapeHtml(lab.orderedDate)}</td><th>Report Date</th><td>${this.escapeHtml(lab.completedDate || printedAt)}</td></tr>
-            </table>
             ${resultTableHtml}
             <div class="summary">${this.escapeHtml(lab.resultNotes || lab.result || 'No interpretation note entered.')}</div>
             <div class="signatures">

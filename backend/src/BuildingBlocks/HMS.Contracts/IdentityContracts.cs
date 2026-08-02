@@ -106,13 +106,14 @@ public sealed record CreatePermissionRequest(
     [Required(ErrorMessage = "Description is required")] string Description,
     string Module);
 
-public sealed record DepartmentDto(Guid Id, string Code, string Name, string Type, string Location);
+public sealed record DepartmentDto(Guid Id, string Code, string Name, string Type, string Location, string[] Specializations);
 
 public sealed record CreateDepartmentRequest(
     [Required(ErrorMessage = "Code is required")]
     [StringLength(20, MinimumLength = 1)] string Code,
     [Required(ErrorMessage = "Name is required")] string Name,
     string Type,
-    string Location);
+    string Location,
+    string[]? Specializations);
 
 public sealed record DoctorProfileDto(Guid Id, string FirstName, string LastName, string EmailAddress, string? Department, string? Specialization, int QueueToday, bool IsActive);

@@ -104,8 +104,19 @@ import { Patient, PatientStatus } from '../../core/models';
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Insurance</label>
-                    <input type="text" formControlName="insuranceProvider" placeholder="Provider" [class]="inputClasses" />
+                    <select formControlName="insuranceCompanyId" [class]="inputClasses">
+                      <option value="">Self Pay / Cash</option>
+                      @for (company of store.insuranceCompanies(); track company.id) {
+                        <option [value]="company.id">
+                          {{ company.name }} - {{ company.coveragePercent }}% {{ company.spouseCoverageAllowed ? '(spouse covered)' : '' }}
+                        </option>
+                      }
+                    </select>
                   </div>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Policy / Membership No.</label>
+                  <input type="text" formControlName="insurancePolicyNumber" placeholder="Policy number" [class]="inputClasses" />
                 </div>
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-rose-600 ml-1 uppercase">Alerts / Allergies</label>
@@ -277,19 +288,29 @@ export class PatientsComponent {
   });
 
   patientForm = new FormGroup({
-    name: new FormControl('', [Validators.required]),
+    name: new FormControl('', [Validators.required, Validators.minLength(3)]),
     dob: new FormControl('1990-01-01', [Validators.required]),
     gender: new FormControl<'Male' | 'Female'>('Female', [Validators.required]),
     bloodType: new FormControl('O+', [Validators.required]),
-    phone: new FormControl('', [Validators.required]),
+    phone: new FormControl('', [Validators.required, Validators.minLength(9)]),
     address: new FormControl(''),
     allergies: new FormControl('None'),
-    insuranceProvider: new FormControl('')
+    insuranceCompanyId: new FormControl(''),
+    insurancePolicyNumber: new FormControl('')
   });
 
+  constructor() {
+    this.store.loadInsuranceCompanies();
+  }
+
   submitRegistration() {
-    if (this.patientForm.invalid) return;
+    if (this.patientForm.invalid) {
+      this.patientForm.markAllAsTouched();
+      this.store.addToast('error', 'Registration Validation', 'Patient full name, date of birth, gender, and phone are required.');
+      return;
+    }
     const val = this.patientForm.value;
+    const company = this.store.insuranceCompanies().find(item => item.id === val.insuranceCompanyId);
     this.store.addPatient({
       name: val.name ?? '',
       firstName: (val.name ?? '').split(' ')[0],
@@ -300,8 +321,10 @@ export class PatientsComponent {
       phone: val.phone ?? '',
       address: val.address ?? '',
       email: '',
-      insuranceProvider: val.insuranceProvider ?? '',
-      insurancePolicyNumber: '',
+      insuranceProvider: company?.name || 'Self Pay',
+      insuranceCompanyId: company?.id,
+      insuranceCompanyName: company?.name,
+      insurancePolicyNumber: val.insurancePolicyNumber ?? '',
       allergyList: val.allergies ? [val.allergies] : [],
       status: 'IN_TRIAGE',
       emergencyContact: { name: '', relation: '', phone: val.phone ?? '' },
@@ -309,7 +332,17 @@ export class PatientsComponent {
       vitals: { bp: '120/80', hr: 72, temp: 37, spo2: 98, respiratoryRate: 16, updatedAt: 'Just now' },
     });
     this.isFormVisible.set(false);
-    this.patientForm.reset();
+    this.patientForm.reset({
+      name: '',
+      dob: '1990-01-01',
+      gender: 'Female',
+      bloodType: 'O+',
+      phone: '',
+      address: '',
+      allergies: 'None',
+      insuranceCompanyId: '',
+      insurancePolicyNumber: '',
+    });
   }
 
   onSearchInput(e: Event) { this.patientSearchQuery.set((e.target as HTMLInputElement).value); }

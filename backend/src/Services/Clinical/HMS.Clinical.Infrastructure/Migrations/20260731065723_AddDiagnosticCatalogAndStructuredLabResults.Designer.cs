@@ -3,6 +3,7 @@ using System;
 using HMS.Clinical.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HMS.Clinical.Infrastructure.Migrations
 {
     [DbContext(typeof(ClinicalDbContext))]
-    partial class ClinicalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731065723_AddDiagnosticCatalogAndStructuredLabResults")]
+    partial class AddDiagnosticCatalogAndStructuredLabResults
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -170,14 +173,6 @@ namespace HMS.Clinical.Infrastructure.Migrations
                     b.Property<string>("CreatedByIp")
                         .HasColumnType("text");
 
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)")
-                        .HasDefaultValue("ETB")
-                        .HasColumnName("currency");
-
                     b.Property<DateTime?>("DeletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -193,13 +188,6 @@ namespace HMS.Clinical.Infrastructure.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
-
-                    b.Property<decimal>("Price")
-                        .ValueGeneratedOnAdd()
-                        .HasPrecision(12, 2)
-                        .HasColumnType("numeric(12,2)")
-                        .HasDefaultValue(0m)
-                        .HasColumnName("price");
 
                     b.Property<string>("ReferenceRange")
                         .IsRequired()

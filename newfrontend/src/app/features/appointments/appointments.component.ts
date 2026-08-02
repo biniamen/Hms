@@ -21,7 +21,7 @@ import { AppointmentStatus, AppointmentType } from '../../core/models';
 
         @if (!isFormVisible()) {
           <button 
-            (click)="isFormVisible.set(true)" 
+            (click)="openBookingForm()"
             class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 self-start sm:self-auto hover:bg-slate-800 transition-all active:scale-95">
             <span class="material-icons text-base">add_alarm</span>
             <span>Book New Appointment</span>
@@ -66,8 +66,10 @@ import { AppointmentStatus, AppointmentType } from '../../core/models';
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Attending Physician *</label>
                   <select formControlName="doctorId" [class]="inputClasses">
-                    @for (doc of doctors(); track doc.id) {
+                    @for (doc of filteredDoctors(); track doc.id) {
                       <option [value]="doc.id">{{ doc.name }} ({{ doc.department }})</option>
+                    } @empty {
+                      <option value="">No doctor available in selected department</option>
                     }
                   </select>
                 </div>
@@ -80,11 +82,10 @@ import { AppointmentStatus, AppointmentType } from '../../core/models';
                 </h4>
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Department *</label>
-                  <select formControlName="department" [class]="inputClasses">
-                    <option value="Cardiology">Cardiology</option>
-                    <option value="Neurology">Neurology</option>
-                    <option value="Pediatrics">Pediatrics</option>
-                    <option value="General Medicine">General Medicine</option>
+                  <select formControlName="department" (change)="onDepartmentChange($event)" [class]="inputClasses">
+                    @for (dept of departmentOptions(); track dept.name) {
+                      <option [value]="dept.name">{{ dept.name }}</option>
+                    }
                   </select>
                 </div>
                 <div class="space-y-1">
@@ -182,10 +183,10 @@ import { AppointmentStatus, AppointmentType } from '../../core/models';
                     <div class="text-[10px] text-slate-400">Today</div>
                   </td>
                   <td class="py-4 px-4">
-                    <div class="font-bold text-slate-900">{{ apt.patientName }}</div>
-                    <div class="text-[10px] text-slate-400 font-mono">{{ apt.patientMrn }}</div>
+                    <div class="font-bold text-slate-900">{{ store.patientDisplayName(apt.patientId) }}</div>
+                    <div class="text-[10px] text-slate-400 font-mono">{{ store.patientMrn(apt.patientId) }}</div>
                   </td>
-                  <td class="py-4 px-4 font-medium text-slate-700">{{ apt.doctorName }}</td>
+                  <td class="py-4 px-4 font-medium text-slate-700">{{ store.doctorDisplayName(apt.doctorId) }}</td>
                   <td class="py-4 px-4">
                     <span class="px-2 py-1 rounded bg-teal-50 text-teal-700 font-bold text-[10px] border border-teal-100">
                       {{ apt.department }}
@@ -233,13 +234,35 @@ export class AppointmentsComponent {
   });
 
   doctors = computed(() => {
-    return this.store.employeesAsUsers().filter(e => e.role === 'DOCTOR');
+    const profiles = this.store.doctors().map(doctor => ({
+      id: doctor.id,
+      name: `Dr. ${doctor.firstName} ${doctor.lastName}`,
+      department: doctor.department || doctor.specialization || 'General',
+    }));
+    if (profiles.length > 0) return profiles;
+    return this.store.employeesAsUsers()
+      .filter(employee => employee.role === 'DOCTOR')
+      .map(employee => ({ id: employee.id, name: employee.name, department: employee.department }));
+  });
+
+  departmentOptions = computed(() => {
+    const departments = this.store.departments().filter(dept => dept.type !== 'Finance');
+    if (departments.length > 0) return departments;
+    return [
+      { id: 'opd', name: 'Outpatient', code: 'OPD', type: 'Clinical', location: 'Block A', specializations: ['Internal Medicine'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'local_hospital' },
+      { id: 'er', name: 'Emergency', code: 'ER', type: 'Clinical', location: 'Ground Floor', specializations: ['Emergency Medicine'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'emergency' },
+    ];
+  });
+
+  filteredDoctors = computed(() => {
+    const department = this.aptForm.controls.department.value || '';
+    return this.doctors().filter(doc => !department || doc.department === department);
   });
 
   aptForm = new FormGroup({
-    patientId: new FormControl('p-1', [Validators.required]),
-    doctorId: new FormControl('u-101', [Validators.required]),
-    department: new FormControl('Cardiology', [Validators.required]),
+    patientId: new FormControl('', [Validators.required]),
+    doctorId: new FormControl('', [Validators.required]),
+    department: new FormControl('Outpatient', [Validators.required]),
     timeSlot: new FormControl('09:00 AM', [Validators.required]),
     type: new FormControl<AppointmentType>('CONSULTATION', [Validators.required]),
     reason: new FormControl('', [Validators.required])
@@ -247,6 +270,24 @@ export class AppointmentsComponent {
 
   updateStatus(id: string, status: AppointmentStatus) {
     this.store.updateAppointmentStatus(id, status);
+  }
+
+  openBookingForm() {
+    const department = this.departmentOptions()[0]?.name || 'Outpatient';
+    this.aptForm.patchValue({ department });
+    const doctor = this.filteredDoctors()[0] || this.doctors()[0];
+    this.aptForm.patchValue({
+      patientId: this.store.patients()[0]?.id || '',
+      doctorId: doctor?.id || '',
+    });
+    this.isFormVisible.set(true);
+  }
+
+  onDepartmentChange(event: Event) {
+    const department = (event.target as HTMLSelectElement).value;
+    this.aptForm.patchValue({ department });
+    const doctor = this.filteredDoctors()[0];
+    this.aptForm.patchValue({ doctorId: doctor?.id || '' });
   }
 
   submitAppointment() {
@@ -257,7 +298,7 @@ export class AppointmentsComponent {
 
     const val = this.aptForm.value;
     const patient = this.store.patients().find(p => p.id === val.patientId);
-    const doctor = this.store.employeesAsUsers().find(e => e.id === val.doctorId);
+    const doctor = this.filteredDoctors().find(item => item.id === val.doctorId);
 
     if (patient && doctor) {
       this.store.addAppointment({
@@ -275,7 +316,14 @@ export class AppointmentsComponent {
     }
 
     this.isFormVisible.set(false);
-    this.aptForm.reset();
+    this.aptForm.reset({
+      patientId: this.store.patients()[0]?.id || '',
+      doctorId: this.doctors()[0]?.id || '',
+      department: this.departmentOptions()[0]?.name || 'Outpatient',
+      timeSlot: '09:00 AM',
+      type: 'CONSULTATION',
+      reason: '',
+    });
   }
 
   getStatusClass(status: AppointmentStatus): string {

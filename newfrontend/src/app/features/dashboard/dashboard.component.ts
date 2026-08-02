@@ -198,6 +198,45 @@ import { StoreService } from '../../core/services/store.service';
 
       </div>
 
+      <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 class="font-display text-lg font-black text-slate-900">Patient Workflow by Role</h2>
+            <p class="text-xs font-medium text-slate-500">Registration, pricing, payment, clinical care, diagnostics, and pharmacy handoff.</p>
+          </div>
+          <span class="rounded-full bg-teal-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-teal-700">Current role: {{ store.currentUser()?.role || 'User' }}</span>
+        </div>
+
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          @for (stage of workflowStages; track stage.index) {
+            <article
+              class="rounded-2xl border p-4 transition-all"
+              [class]="isCurrentRoleStage(stage.roles) ? 'border-teal-300 bg-teal-50 shadow-md shadow-teal-100' : 'border-slate-200 bg-slate-50/60'">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black text-white" [class]="stage.color">
+                    {{ stage.index }}
+                  </div>
+                  <div>
+                    <h3 class="text-xs font-black uppercase tracking-wider text-slate-900">{{ stage.title }}</h3>
+                    <p class="mt-0.5 text-[10px] font-bold text-slate-500">{{ stage.owner }}</p>
+                  </div>
+                </div>
+                <span class="material-icons text-base" [class]="isCurrentRoleStage(stage.roles) ? 'text-teal-700' : 'text-slate-300'">{{ stage.icon }}</span>
+              </div>
+              <ul class="mt-4 space-y-2">
+                @for (item of stage.actions; track item) {
+                  <li class="flex gap-2 text-[11px] font-semibold leading-relaxed text-slate-600">
+                    <span class="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" [class]="isCurrentRoleStage(stage.roles) ? 'bg-teal-600' : 'bg-slate-300'"></span>
+                    <span>{{ item }}</span>
+                  </li>
+                }
+              </ul>
+            </article>
+          }
+        </div>
+      </section>
+
     </div>
   `
 })
@@ -206,6 +245,21 @@ export class DashboardComponent {
 
   currentUser = computed(() => this.store.currentUser());
   todayDate = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+  workflowStages = [
+    { index: 1, title: 'Reception', owner: 'Receptionist', roles: ['RECEPTIONIST'], icon: 'assignment_ind', color: 'bg-blue-600', actions: ['Search or register patient', 'Create visit and assign doctor', 'Send consultation invoice to cashier'] },
+    { index: 2, title: 'Consultation Payment', owner: 'Cashier', roles: ['CASHIER', 'ACCOUNTANT'], icon: 'payments', color: 'bg-amber-500', actions: ['Confirm doctor price', 'Collect consultation payment', 'Print receipt and release to nurse'] },
+    { index: 3, title: 'Nursing', owner: 'Nurse', roles: ['NURSE'], icon: 'monitor_heart', color: 'bg-cyan-600', actions: ['View paid queue', 'Record vitals and allergies', 'Send prepared patient to doctor'] },
+    { index: 4, title: 'Consultation', owner: 'Doctor', roles: ['DOCTOR'], icon: 'stethoscope', color: 'bg-teal-700', actions: ['Review history and vitals', 'Record diagnosis and plan', 'Request labs when required'] },
+    { index: 5, title: 'Diagnostic Payment', owner: 'Cashier', roles: ['CASHIER', 'ACCOUNTANT'], icon: 'receipt_long', color: 'bg-orange-500', actions: ['Review requested tests', 'Collect catalog-based lab payment', 'Release order to laboratory'] },
+    { index: 6, title: 'Laboratory', owner: 'Lab Technician', roles: ['LAB_TECHNICIAN'], icon: 'biotech', color: 'bg-purple-600', actions: ['Collect and label sample', 'Enter structured result values', 'Verify and release report'] },
+    { index: 7, title: 'Final Review', owner: 'Doctor', roles: ['DOCTOR'], icon: 'fact_check', color: 'bg-teal-700', actions: ['Review lab results', 'Confirm final diagnosis', 'Create prescription'] },
+    { index: 8, title: 'Pharmacy', owner: 'Pharmacist', roles: ['PHARMACIST'], icon: 'local_pharmacy', color: 'bg-rose-500', actions: ['Verify prescription', 'Dispense available medicine', 'Print external prescription if needed'] },
+  ];
+
+  isCurrentRoleStage(roles: string[]): boolean {
+    const role = this.store.currentUser()?.role;
+    return !!role && roles.includes(role);
+  }
 
   getAge(dobStr: string): number {
     const dob = new Date(dobStr);

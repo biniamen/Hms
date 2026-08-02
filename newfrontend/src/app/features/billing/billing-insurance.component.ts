@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, signal, inject } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
+import { ApiService } from '../../api.service';
 import { BillingInvoice } from '../../core/models';
 
 @Component({
@@ -19,12 +20,20 @@ import { BillingInvoice } from '../../core/models';
           <p class="text-xs text-slate-500 mt-1">Itemized clinical charges, copay collection, and third-party insurance claims</p>
         </div>
 
-        <button 
-          (click)="openInvoiceModal()" 
-          class="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl text-xs shadow-md shadow-blue-500/20 flex items-center gap-2 self-start sm:self-auto">
-          <span class="material-icons text-base">post_add</span>
-          <span>Generate New Invoice</span>
-        </button>
+        <div class="flex flex-wrap gap-2 self-start sm:self-auto">
+          <button 
+            (click)="openInsuranceModal()" 
+            class="px-4 py-2.5 bg-white text-blue-700 font-semibold rounded-xl text-xs shadow-sm border border-blue-100 flex items-center gap-2 hover:bg-blue-50">
+            <span class="material-icons text-base">verified_user</span>
+            <span>Register Insurance</span>
+          </button>
+          <button 
+            (click)="openInvoiceModal()" 
+            class="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl text-xs shadow-md shadow-blue-500/20 flex items-center gap-2">
+            <span class="material-icons text-base">post_add</span>
+            <span>Generate New Invoice</span>
+          </button>
+        </div>
       </div>
 
       <!-- SUMMARY TILES STRIP -->
@@ -51,6 +60,54 @@ import { BillingInvoice } from '../../core/models';
             &#36;3,650.00
           </div>
           <div class="text-[10px] text-emerald-600 font-semibold mt-1">Cleared transactions</div>
+        </div>
+      </div>
+
+      <!-- INSURANCE COMPANY MAINTENANCE -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 subtle-shadow overflow-hidden">
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-blue-50/40">
+          <div>
+            <h3 class="text-xs font-bold text-slate-800 uppercase tracking-wider font-display">Insurance Company Maintenance</h3>
+            <p class="text-[11px] text-slate-500 mt-1">Registered payers used during patient intake, claims, and invoice settlement.</p>
+          </div>
+          <span class="rounded-full bg-white px-3 py-1 text-[10px] font-black uppercase tracking-widest text-blue-700 ring-1 ring-blue-100">{{ store.insuranceCompanies().length }} Payers</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+              <tr><th class="py-3.5 px-4">Company</th><th class="py-3.5 px-4">Payer Code</th><th class="py-3.5 px-4">Contact</th><th class="py-3.5 px-4">Coverage</th><th class="py-3.5 px-4">Spouse Service</th><th class="py-3.5 px-4">Status</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              @for (company of store.insuranceCompanies(); track company.id) {
+                <tr class="hover:bg-slate-50/80">
+                  <td class="py-3.5 px-4">
+                    <div class="font-black text-slate-900">{{ company.name }}</div>
+                    <div class="text-[10px] text-slate-400">{{ company.address || 'Address not recorded' }}</div>
+                  </td>
+                  <td class="py-3.5 px-4 font-mono font-black text-blue-700">{{ company.payerCode }}</td>
+                  <td class="py-3.5 px-4">
+                    <div class="font-bold text-slate-700">{{ company.contactPerson || 'Claims desk' }}</div>
+                    <div class="text-[10px] text-slate-400">{{ company.phone }} • {{ company.email }}</div>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span class="rounded-lg bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700">{{ company.coverageType }} / {{ company.coveragePercent }}%</span>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span [class]="company.spouseCoverageAllowed ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-200'" class="rounded-full border px-2.5 py-1 text-[9px] font-black uppercase">
+                      {{ company.spouseCoverageAllowed ? 'Allowed' : 'Not Covered' }}
+                    </span>
+                  </td>
+                  <td class="py-3.5 px-4">
+                    <span [class]="company.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'" class="rounded-full border px-2.5 py-1 text-[9px] font-black uppercase">
+                      {{ company.isActive ? 'Active' : 'Inactive' }}
+                    </span>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="6" class="py-14 text-center text-xs font-bold text-slate-400">No insurance companies registered yet.</td></tr>
+              }
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -84,8 +141,8 @@ import { BillingInvoice } from '../../core/models';
                   </td>
 
                   <td class="py-3.5 px-4">
-                    <div class="font-bold text-slate-900">{{ inv.patientName }}</div>
-                    <div class="text-[10px] text-slate-400 font-mono">{{ inv.patientMrn }}</div>
+                    <div class="font-bold text-slate-900">{{ store.patientDisplayName(inv.patientId) }}</div>
+                    <div class="text-[10px] text-slate-400 font-mono">{{ store.patientMrn(inv.patientId) }}</div>
                   </td>
 
                   <td class="py-3.5 px-4">
@@ -229,7 +286,7 @@ import { BillingInvoice } from '../../core/models';
             <div class="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <h3 class="text-base font-bold text-slate-900 font-display">Record Patient Payment</h3>
-                <p class="text-xs text-slate-400">{{ selectedInvForPayment()?.invoiceNumber }} for {{ selectedInvForPayment()?.patientName }}</p>
+                <p class="text-xs text-slate-400">{{ selectedInvForPayment()?.invoiceNumber }} for {{ store.patientDisplayName(selectedInvForPayment()?.patientId || '') }}</p>
               </div>
               <button (click)="selectedInvForPayment.set(null)" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
                 <span class="material-icons">close</span>
@@ -264,17 +321,88 @@ import { BillingInvoice } from '../../core/models';
         </div>
       }
 
+      <!-- INSURANCE COMPANY MODAL -->
+      @if (isInsuranceModalOpen()) {
+        <div class="fixed inset-0 bg-slate-900/30 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div class="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-scale-up space-y-6">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h3 class="text-base font-bold text-slate-900 font-display">Register Insurance Company</h3>
+                <p class="text-xs text-slate-400">Create payer profile, coverage rule, and spouse eligibility.</p>
+              </div>
+              <button (click)="closeInsuranceModal()" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
+                <span class="material-icons">close</span>
+              </button>
+            </div>
+
+            <form [formGroup]="insuranceForm" (ngSubmit)="submitInsuranceCompany()" class="space-y-4 text-xs">
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Company Name *</span>
+                  <input formControlName="name" class="w-full px-3 py-2 border rounded-xl text-xs" placeholder="EthioLife Corporate Insurance" />
+                </label>
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Payer Code *</span>
+                  <input formControlName="payerCode" class="w-full px-3 py-2 border rounded-xl text-xs font-mono uppercase" placeholder="ELIFE" />
+                </label>
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Contact Person</span>
+                  <input formControlName="contactPerson" class="w-full px-3 py-2 border rounded-xl text-xs" placeholder="Claims desk" />
+                </label>
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Phone *</span>
+                  <input formControlName="phone" class="w-full px-3 py-2 border rounded-xl text-xs" placeholder="0911000000" />
+                </label>
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Email</span>
+                  <input formControlName="email" type="email" class="w-full px-3 py-2 border rounded-xl text-xs" placeholder="claims@payer.com" />
+                </label>
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Coverage Type *</span>
+                  <select formControlName="coverageType" class="w-full px-3 py-2 border rounded-xl text-xs">
+                    <option>Corporate</option>
+                    <option>Employer Fund</option>
+                    <option>Community</option>
+                    <option>Private</option>
+                    <option>Government</option>
+                  </select>
+                </label>
+                <label class="space-y-1">
+                  <span class="block text-xs font-semibold uppercase text-slate-600">Coverage Percent *</span>
+                  <input formControlName="coveragePercent" type="number" min="0" max="100" class="w-full px-3 py-2 border rounded-xl text-xs font-mono" />
+                </label>
+                <label class="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3 font-bold text-blue-800">
+                  <input formControlName="spouseCoverageAllowed" type="checkbox" class="h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500" />
+                  Spouse can receive covered service
+                </label>
+              </div>
+              <label class="block space-y-1">
+                <span class="block text-xs font-semibold uppercase text-slate-600">Address</span>
+                <textarea formControlName="address" rows="3" class="w-full px-3 py-2 border rounded-xl text-xs" placeholder="Office address"></textarea>
+              </label>
+
+              <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                <button type="button" (click)="closeInsuranceModal()" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl">Cancel</button>
+                <button type="submit" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-md shadow-blue-500/20">Save Insurance Company</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      }
+
     </div>
   `
 })
 export class BillingInsuranceComponent {
   store = inject(StoreService);
+  private api = inject(ApiService);
 
   isInvoiceModalOpen = signal(false);
+  isInsuranceModalOpen = signal(false);
   selectedInvForPayment = signal<BillingInvoice | null>(null);
 
   invForm = new FormGroup({
-    patientId: new FormControl('p-1', [Validators.required]),
+    patientId: new FormControl('', [Validators.required]),
     description: new FormControl('', [Validators.required]),
     totalAmount: new FormControl(500, [Validators.required]),
     insuranceCovered: new FormControl(400)
@@ -285,7 +413,71 @@ export class BillingInsuranceComponent {
     method: new FormControl<'Credit Card' | 'Cash' | 'Insurance Direct' | 'Wire Transfer'>('Credit Card', [Validators.required])
   });
 
+  insuranceForm = new FormGroup({
+    name: new FormControl('', [Validators.required, Validators.minLength(2)]),
+    payerCode: new FormControl('', [Validators.required, Validators.minLength(2)]),
+    contactPerson: new FormControl(''),
+    phone: new FormControl('', [Validators.required, Validators.minLength(9)]),
+    email: new FormControl('', [Validators.email]),
+    address: new FormControl(''),
+    coverageType: new FormControl('Corporate', [Validators.required]),
+    coveragePercent: new FormControl(80, [Validators.required, Validators.min(0), Validators.max(100)]),
+    spouseCoverageAllowed: new FormControl(false),
+  });
+
+  constructor() {
+    this.store.loadInsuranceCompanies();
+  }
+
+  openInsuranceModal() {
+    this.isInsuranceModalOpen.set(true);
+  }
+
+  closeInsuranceModal() {
+    this.isInsuranceModalOpen.set(false);
+    this.insuranceForm.reset({
+      name: '',
+      payerCode: '',
+      contactPerson: '',
+      phone: '',
+      email: '',
+      address: '',
+      coverageType: 'Corporate',
+      coveragePercent: 80,
+      spouseCoverageAllowed: false,
+    });
+  }
+
+  submitInsuranceCompany() {
+    if (this.insuranceForm.invalid) {
+      this.insuranceForm.markAllAsTouched();
+      this.store.addToast('error', 'Insurance Validation', 'Company name, payer code, phone, coverage type, and coverage percent are required.');
+      return;
+    }
+
+    const val = this.insuranceForm.getRawValue();
+    this.api.createInsuranceCompany({
+      name: val.name || '',
+      payerCode: (val.payerCode || '').toUpperCase(),
+      contactPerson: val.contactPerson || '',
+      phone: val.phone || '',
+      email: val.email || '',
+      address: val.address || '',
+      coverageType: val.coverageType || 'Corporate',
+      coveragePercent: Number(val.coveragePercent || 0),
+      spouseCoverageAllowed: !!val.spouseCoverageAllowed,
+    }).subscribe({
+      next: () => {
+        this.store.loadInsuranceCompanies();
+        this.closeInsuranceModal();
+        this.store.addToast('success', 'Insurance Company Saved', 'The payer profile is now available during patient registration.');
+      },
+      error: () => this.store.addToast('error', 'Insurance Save Failed', 'Unable to save this insurance company. Check duplicate payer code and try again.'),
+    });
+  }
+
   openInvoiceModal() {
+    this.invForm.patchValue({ patientId: this.store.patients()[0]?.id || '' });
     this.isInvoiceModalOpen.set(true);
   }
 
@@ -320,7 +512,12 @@ export class BillingInsuranceComponent {
     }
 
     this.closeInvoiceModal();
-    this.invForm.reset();
+    this.invForm.reset({
+      patientId: this.store.patients()[0]?.id || '',
+      description: '',
+      totalAmount: 500,
+      insuranceCovered: 400,
+    });
   }
 
   openPayModal(inv: BillingInvoice) {
@@ -342,6 +539,8 @@ export class BillingInsuranceComponent {
   printInvoice(inv: BillingInvoice) {
     const printedAt = new Date().toLocaleString();
     const documentNo = `INV-${Date.now().toString().slice(-8)}`;
+    const patientName = this.store.patientDisplayName(inv.patientId);
+    const patientMrn = this.store.patientMrn(inv.patientId);
     const rows = inv.items.map((item, index) => `
       <tr>
         <td>${index + 1}</td>
@@ -405,9 +604,9 @@ export class BillingInsuranceComponent {
           <h1>${inv.status === 'PAID' ? 'Cash Receipt Attachment' : 'Cash Invoice Attachment'}</h1>
           <div class="meta">
             <div>
-              <div class="line"><strong>Bill To</strong><span>${this.escapeHtml(inv.patientName)}</span></div>
-              <div class="line"><strong>Patient Name</strong><span>${this.escapeHtml(inv.patientName)}</span></div>
-              <div class="line"><strong>MRN</strong><span>${this.escapeHtml(inv.patientMrn)}</span></div>
+              <div class="line"><strong>Bill To</strong><span>${this.escapeHtml(patientName)}</span></div>
+              <div class="line"><strong>Patient Name</strong><span>${this.escapeHtml(patientName)}</span></div>
+              <div class="line"><strong>MRN</strong><span>${this.escapeHtml(patientMrn)}</span></div>
               <div class="line"><strong>Status</strong><span>${this.escapeHtml(inv.status)}</span></div>
             </div>
             <div>
@@ -429,7 +628,7 @@ export class BillingInsuranceComponent {
           </div>
           <div class="signatures">
             <div class="sign-line">Cashier / Billing Officer</div>
-            <div class="sign-line">${this.escapeHtml(inv.patientName)}</div>
+            <div class="sign-line">${this.escapeHtml(patientName)}</div>
           </div>
         </section>
       </body>

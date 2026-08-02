@@ -4,7 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import type {
   ApiResponse, LoginRequest, LoginResponse,
-  BackendEmployee, BackendDoctorProfile, BackendPatient,
+  BackendEmployee, BackendDoctorProfile, BackendDoctorServicePrice, BackendDoctorServiceQuote, BackendPatient,
   BackendAppointment, BackendBed, BackendPrescription,
   BackendClinicalEncounter, BackendVitalSign, BackendDiagnosis,
   BackendLabRequest, BackendDiagnosticTest, BackendInvoice, BackendPayment,
@@ -140,13 +140,49 @@ export class ApiService {
     return this.http.get<ApiResponse<BackendDepartment[]>>(`${this.baseUrl}/api/departments`);
   }
 
-  createDepartment(payload: { code: string; name: string; type: string; location: string }): Observable<ApiResponse<BackendDepartment>> {
+  createDepartment(payload: { code: string; name: string; type: string; location: string; specializations?: string[] }): Observable<ApiResponse<BackendDepartment>> {
     return this.http.post<ApiResponse<BackendDepartment>>(`${this.baseUrl}/api/departments`, payload);
   }
 
   // ── Doctors ──
   getDoctors(): Observable<ApiResponse<BackendDoctorProfile[]>> {
     return this.http.get<ApiResponse<BackendDoctorProfile[]>>(`${this.baseUrl}/api/doctors`);
+  }
+
+  // ── Doctor Pricing ──
+  getDoctorPrices(doctorId?: string, activeOnly = false): Observable<ApiResponse<BackendDoctorServicePrice[]>> {
+    const params = new URLSearchParams();
+    if (doctorId) params.set('doctorId', doctorId);
+    params.set('activeOnly', String(activeOnly));
+    return this.http.get<ApiResponse<BackendDoctorServicePrice[]>>(
+      `${this.baseUrl}/api/billing/doctor-prices?${params.toString()}`
+    );
+  }
+
+  getDoctorPriceQuote(doctorId: string, serviceCode: string, patientId?: string): Observable<ApiResponse<BackendDoctorServiceQuote>> {
+    const query = new URLSearchParams({ doctorId, serviceCode });
+    if (patientId) query.set('patientId', patientId);
+    return this.http.get<ApiResponse<BackendDoctorServiceQuote>>(
+      `${this.baseUrl}/api/billing/doctor-prices/quote?${query.toString()}`
+    );
+  }
+
+  saveDoctorPrice(
+    doctorId: string,
+    serviceCode: string,
+    payload: { serviceName: string; amount: number; currency: string; validityDays: number; isActive: boolean }
+  ): Observable<ApiResponse<BackendDoctorServicePrice>> {
+    return this.http.put<ApiResponse<BackendDoctorServicePrice>>(
+      `${this.baseUrl}/api/billing/doctor-prices/${doctorId}/${encodeURIComponent(serviceCode)}`,
+      payload
+    );
+  }
+
+  updateDoctorPriceStatus(id: string, isActive: boolean): Observable<ApiResponse<BackendDoctorServicePrice>> {
+    return this.http.put<ApiResponse<BackendDoctorServicePrice>>(
+      `${this.baseUrl}/api/billing/doctor-prices/${id}/status`,
+      { isActive }
+    );
   }
 
   // ── Patients ──
@@ -166,7 +202,7 @@ export class ApiService {
   createInsuranceCompany(payload: {
     name: string; payerCode: string; contactPerson: string;
     phone: string; email: string; address: string;
-    coverageType: string; coveragePercent: number;
+    coverageType: string; coveragePercent: number; spouseCoverageAllowed?: boolean;
   }): Observable<ApiResponse<BackendInsuranceCompany>> {
     return this.http.post<ApiResponse<BackendInsuranceCompany>>(`${this.baseUrl}/api/insurance-companies`, payload);
   }
@@ -244,14 +280,14 @@ export class ApiService {
 
   createDiagnosticTest(payload: {
     groupName: string; subGroup?: string; testName: string; specimenType?: string;
-    unit?: string; referenceRange?: string; sortOrder?: number; isActive?: boolean;
+    unit?: string; referenceRange?: string; sortOrder?: number; price?: number; currency?: string; isActive?: boolean;
   }): Observable<ApiResponse<BackendDiagnosticTest>> {
     return this.http.post<ApiResponse<BackendDiagnosticTest>>(`${this.baseUrl}/api/clinical/diagnostic-tests`, payload);
   }
 
   updateDiagnosticTest(id: string, payload: {
     groupName: string; subGroup?: string; testName: string; specimenType?: string;
-    unit?: string; referenceRange?: string; sortOrder?: number; isActive?: boolean;
+    unit?: string; referenceRange?: string; sortOrder?: number; price?: number; currency?: string; isActive?: boolean;
   }): Observable<ApiResponse<BackendDiagnosticTest>> {
     return this.http.put<ApiResponse<BackendDiagnosticTest>>(`${this.baseUrl}/api/clinical/diagnostic-tests/${id}`, payload);
   }
@@ -320,6 +356,7 @@ export class ApiService {
     discount: number; tax: number; paymentType: string;
     insuranceProvider?: string; items?: Array<{
       serviceCode: string; description: string; quantity: number; unitPrice: number; discount: number;
+      referenceType?: string; referenceId?: string; serviceDateUtc?: string;
     }>;
   }): Observable<ApiResponse<BackendInvoice>> {
     return this.http.post<ApiResponse<BackendInvoice>>(`${this.baseUrl}/api/billing/invoices`, payload);

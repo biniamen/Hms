@@ -26,6 +26,7 @@ public sealed class PatientsDbContext(DbContextOptions<PatientsDbContext> option
             entity.Property(company => company.Address).HasColumnName("address");
             entity.Property(company => company.CoverageType).HasColumnName("coverage_type").HasMaxLength(80);
             entity.Property(company => company.CoveragePercent).HasColumnName("coverage_percent").HasPrecision(5, 2);
+            entity.Property(company => company.SpouseCoverageAllowed).HasColumnName("spouse_coverage_allowed");
             entity.Property(company => company.IsActive).HasColumnName("is_active");
             entity.Property(company => company.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
         });
@@ -135,6 +136,7 @@ public sealed class InsuranceCompany : Entity
     public string? Address { get; set; }
     public string CoverageType { get; set; } = "Corporate";
     public decimal CoveragePercent { get; set; } = 80;
+    public bool SpouseCoverageAllowed { get; set; }
     public bool IsActive { get; set; } = true;
     public List<Patient> Patients { get; set; } = [];
 }
@@ -176,9 +178,9 @@ public static class PatientsSeedData
     {
         var companies = new[]
         {
-            new InsuranceCompany { Id = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), Name = "EthioLife Corporate Insurance", PayerCode = "ELIFE", ContactPerson = "Abebe Insurance Desk", Phone = "0911200100", Email = "claims@ethiolife.example", Address = "Kazanchis, Addis Ababa", CoverageType = "Corporate", CoveragePercent = 85, IsActive = true },
-            new InsuranceCompany { Id = Guid.Parse("9c864a76-f3f1-4b1c-98ce-14034e7f8e67"), Name = "Unity Staff Medical Fund", PayerCode = "UNITY", ContactPerson = "Hirut Benefits Office", Phone = "0911200200", Email = "medical@unityfund.example", Address = "Bole, Addis Ababa", CoverageType = "Employer Fund", CoveragePercent = 70, IsActive = true },
-            new InsuranceCompany { Id = Guid.Parse("6fa694f8-f82c-4e58-96e5-3026077d4116"), Name = "Community Based Health Insurance", PayerCode = "CBHI", ContactPerson = "CBHI Liaison", Phone = "0911200300", Email = "support@cbhi.example", Address = "Kirkos, Addis Ababa", CoverageType = "Community", CoveragePercent = 60, IsActive = true }
+            new InsuranceCompany { Id = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), Name = "EthioLife Corporate Insurance", PayerCode = "ELIFE", ContactPerson = "Abebe Insurance Desk", Phone = "0911200100", Email = "claims@ethiolife.example", Address = "Kazanchis, Addis Ababa", CoverageType = "Corporate", CoveragePercent = 85, SpouseCoverageAllowed = true, IsActive = true },
+            new InsuranceCompany { Id = Guid.Parse("9c864a76-f3f1-4b1c-98ce-14034e7f8e67"), Name = "Unity Staff Medical Fund", PayerCode = "UNITY", ContactPerson = "Hirut Benefits Office", Phone = "0911200200", Email = "medical@unityfund.example", Address = "Bole, Addis Ababa", CoverageType = "Employer Fund", CoveragePercent = 70, SpouseCoverageAllowed = true, IsActive = true },
+            new InsuranceCompany { Id = Guid.Parse("6fa694f8-f82c-4e58-96e5-3026077d4116"), Name = "Community Based Health Insurance", PayerCode = "CBHI", ContactPerson = "CBHI Liaison", Phone = "0911200300", Email = "support@cbhi.example", Address = "Kirkos, Addis Ababa", CoverageType = "Community", CoveragePercent = 60, SpouseCoverageAllowed = false, IsActive = true }
         };
 
         foreach (var company in companies)
@@ -197,6 +199,7 @@ public static class PatientsSeedData
                 existing.Address = company.Address;
                 existing.CoverageType = company.CoverageType;
                 existing.CoveragePercent = company.CoveragePercent;
+                existing.SpouseCoverageAllowed = company.SpouseCoverageAllowed;
                 existing.IsActive = true;
             }
         }

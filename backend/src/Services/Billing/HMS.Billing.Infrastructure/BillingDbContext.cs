@@ -9,6 +9,7 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceItem> InvoiceItems => Set<InvoiceItem>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<DoctorServicePrice> DoctorServicePrices => Set<DoctorServicePrice>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,6 +44,9 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
             entity.Property(item => item.UnitPrice).HasColumnName("unit_price").HasPrecision(12, 2);
             entity.Property(item => item.Discount).HasColumnName("discount").HasPrecision(12, 2);
             entity.Property(item => item.LineTotal).HasColumnName("line_total").HasPrecision(12, 2);
+            entity.Property(item => item.ReferenceType).HasColumnName("reference_type").HasMaxLength(40);
+            entity.Property(item => item.ReferenceId).HasColumnName("reference_id");
+            entity.Property(item => item.ServiceDateUtc).HasColumnName("service_date_utc");
             entity.Property(item => item.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
             entity.HasOne(item => item.Invoice)
                 .WithMany(invoice => invoice.Items)
@@ -69,7 +73,44 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
                 .HasForeignKey(payment => payment.InvoiceId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<DoctorServicePrice>(entity =>
+        {
+            entity.ToTable("doctor_service_prices", table =>
+            {
+                table.HasCheckConstraint("ck_doctor_service_prices_amount_positive", "amount > 0");
+                table.HasCheckConstraint("ck_doctor_service_prices_validity_days_positive", "validity_days > 0");
+            });
+            entity.HasKey(price => price.Id);
+            entity.HasIndex(price => new { price.DoctorId, price.ServiceCode }).IsUnique();
+            entity.Property(price => price.DoctorId).HasColumnName("doctor_id");
+            entity.Property(price => price.ServiceCode).HasColumnName("service_code").HasMaxLength(40);
+            entity.Property(price => price.ServiceName).HasColumnName("service_name").HasMaxLength(120);
+            entity.Property(price => price.Amount).HasColumnName("amount").HasPrecision(12, 2);
+            entity.Property(price => price.Currency).HasColumnName("currency").HasMaxLength(3).HasDefaultValue("ETB");
+            entity.Property(price => price.ValidityDays).HasColumnName("validity_days").HasDefaultValue(10);
+            entity.Property(price => price.IsActive).HasColumnName("is_active");
+            entity.Property(price => price.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
+            entity.Property(price => price.UpdatedAtUtc).HasColumnName("updated_at_utc").HasDefaultValueSql("now()");
+            entity.Property(price => price.CreatedBy).HasColumnName("created_by");
+            entity.Property(price => price.UpdatedBy).HasColumnName("updated_by");
+            entity.Property(price => price.CreatedByIp).HasColumnName("created_by_ip").HasMaxLength(64);
+            entity.Property(price => price.IsDeleted).HasColumnName("is_deleted").HasDefaultValue(false);
+            entity.Property(price => price.DeletedAtUtc).HasColumnName("deleted_at_utc");
+        });
     }
+}
+
+public sealed class DoctorServicePrice : Entity
+{
+    public Guid DoctorId { get; set; }
+    public string ServiceCode { get; set; } = "";
+    public string ServiceName { get; set; } = "";
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "ETB";
+    public int ValidityDays { get; set; } = 10;
+    public bool IsActive { get; set; } = true;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class Invoice : Entity
@@ -99,6 +140,9 @@ public sealed class InvoiceItem : Entity
     public decimal UnitPrice { get; set; }
     public decimal Discount { get; set; }
     public decimal LineTotal { get; set; }
+    public string? ReferenceType { get; set; }
+    public Guid? ReferenceId { get; set; }
+    public DateTime? ServiceDateUtc { get; set; }
     public Invoice? Invoice { get; set; }
 }
 
@@ -119,13 +163,19 @@ public static class BillingSeedData
 {
     public static async Task SeedAsync(BillingDbContext db)
     {
-        if (await db.Invoices.AnyAsync())
+        if (!await db.DoctorServicePrices.AnyAsync())
         {
-            return;
+            var seededDoctorId = Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201");
+            db.DoctorServicePrices.AddRange(
+                new DoctorServicePrice { Id = Guid.Parse("ae43a4c5-7f6b-4f97-a774-9923e3c1a001"), DoctorId = seededDoctorId, ServiceCode = "CONSULTATION", ServiceName = "Consultation", Amount = 500, Currency = "ETB", ValidityDays = 10 },
+                new DoctorServicePrice { Id = Guid.Parse("ae43a4c5-7f6b-4f97-a774-9923e3c1a002"), DoctorId = seededDoctorId, ServiceCode = "FOLLOW_UP", ServiceName = "Follow-up Visit", Amount = 300, Currency = "ETB", ValidityDays = 15 },
+                new DoctorServicePrice { Id = Guid.Parse("ae43a4c5-7f6b-4f97-a774-9923e3c1a003"), DoctorId = seededDoctorId, ServiceCode = "EMERGENCY", ServiceName = "Emergency Consultation", Amount = 800, Currency = "ETB", ValidityDays = 1 });
         }
 
-        var cashInvoice = new Invoice
+        if (!await db.Invoices.AnyAsync())
         {
+            var cashInvoice = new Invoice
+            {
             Id = Guid.Parse("9ba2c72a-29f0-4f4c-8f43-890a53b327da"),
             InvoiceNumber = "INV-2026-0001",
             PatientId = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a"),
@@ -144,10 +194,10 @@ public static class BillingSeedData
                 new InvoiceItem { Id = Guid.Parse("639967cd-4ed2-49da-bdb3-72f82124a5bd"), ServiceCode = "CONS", Description = "General consultation", Quantity = 1, UnitPrice = 350, Discount = 0, LineTotal = 350 },
                 new InvoiceItem { Id = Guid.Parse("523fc856-9019-48f0-83d4-42d8a64679c5"), ServiceCode = "MED", Description = "Medication package", Quantity = 1, UnitPrice = 400, Discount = 0, LineTotal = 400 }
             ]
-        };
+            };
 
-        var insuranceInvoice = new Invoice
-        {
+            var insuranceInvoice = new Invoice
+            {
             Id = Guid.Parse("295a57f4-2334-428d-a6f9-a596614684ad"),
             InvoiceNumber = "INV-2026-0002",
             PatientId = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80"),
@@ -171,9 +221,11 @@ public static class BillingSeedData
             [
                 new Payment { Id = Guid.Parse("afcf9f59-b025-4014-9711-f92c0af6af03"), ReceiptNumber = "RCT-20260708-0001", Amount = 500, Method = "Insurance", Reference = "ELIFE-CLAIM-0001", ReceivedBy = "Accountant Selam", PaidAtUtc = DateTime.UtcNow.AddHours(-1), BalanceAfterPayment = 580 }
             ]
-        };
+            };
 
-        db.Invoices.AddRange(cashInvoice, insuranceInvoice);
+            db.Invoices.AddRange(cashInvoice, insuranceInvoice);
+        }
+
         await db.SaveChangesAsync();
     }
 }

@@ -20,7 +20,7 @@ import { StoreService } from '../../core/services/store.service';
 
         @if (!isFormVisible()) {
           <button 
-            (click)="isFormVisible.set(true)" 
+            (click)="openPrescriptionForm()"
             class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 self-start sm:self-auto hover:bg-slate-800 transition-all active:scale-95">
             <span class="material-icons text-base">medication</span>
             <span>New Prescription Order</span>
@@ -120,11 +120,11 @@ import { StoreService } from '../../core/services/store.service';
                   <span class="material-icons text-2xl">pill</span>
                 </div>
                 <div>
-                  <h3 class="text-base font-bold text-slate-900">{{ rx.patientName }}</h3>
+                  <h3 class="text-base font-bold text-slate-900">{{ store.patientDisplayName(rx.patientId) }}</h3>
                   <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-[10px] text-slate-400 font-mono uppercase tracking-widest">MRN: {{ rx.patientMrn }}</span>
+                    <span class="text-[10px] text-slate-400 font-mono uppercase tracking-widest">MRN: {{ store.patientMrn(rx.patientId) }}</span>
                     <span class="w-1 h-1 bg-slate-200 rounded-full"></span>
-                    <span class="text-[10px] text-slate-400 font-medium italic">Ordered by {{ rx.doctorName }} • {{ rx.date }}</span>
+                    <span class="text-[10px] text-slate-400 font-medium italic">Ordered by {{ store.doctorDisplayName(rx.doctorId) }} • {{ rx.date }}</span>
                   </div>
                 </div>
               </div>
@@ -192,13 +192,18 @@ export class PharmacyComponent {
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 transition-all';
 
   rxForm = new FormGroup({
-    patientId: new FormControl('p-1', [Validators.required]),
+    patientId: new FormControl('', [Validators.required]),
     medName: new FormControl('', [Validators.required]),
     dosage: new FormControl('500mg', [Validators.required]),
     frequency: new FormControl('Twice daily', [Validators.required]),
     duration: new FormControl('14 days', [Validators.required]),
     instructions: new FormControl('Take after breakfast and dinner')
   });
+
+  openPrescriptionForm() {
+    this.rxForm.patchValue({ patientId: this.store.patients()[0]?.id || '' });
+    this.isFormVisible.set(true);
+  }
 
   submitPrescription() {
     if (this.rxForm.invalid) {
@@ -214,8 +219,8 @@ export class PharmacyComponent {
         patientId: patient.id,
         patientName: patient.name,
         patientMrn: patient.mrn,
-        doctorId: this.store.currentUser()?.id || 'u-101',
-        doctorName: this.store.currentUser()?.name || 'Dr. Sarah Jenkins',
+        doctorId: this.store.currentUser()?.id || '',
+        doctorName: this.store.currentUser()?.name || 'Doctor record unavailable',
         medications: [{
           name: val.medName!,
           dosage: val.dosage!,
@@ -227,6 +232,12 @@ export class PharmacyComponent {
     }
 
     this.isFormVisible.set(false);
-    this.rxForm.reset({ patientId: 'p-1', dosage: '500mg', frequency: 'Twice daily', duration: '14 days' });
+    this.rxForm.reset({
+      patientId: this.store.patients()[0]?.id || '',
+      dosage: '500mg',
+      frequency: 'Twice daily',
+      duration: '14 days',
+      instructions: 'Take after breakfast and dinner',
+    });
   }
 }

@@ -64,6 +64,11 @@ namespace HMS.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(160)")
                         .HasColumnName("name");
 
+                    b.Property<string>("Specializations")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("specializations");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(80)

@@ -232,6 +232,10 @@ namespace HMS.Patients.Infrastructure.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("phone");
 
+                    b.Property<bool>("SpouseCoverageAllowed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("spouse_coverage_allowed");
+
                     b.Property<Guid?>("UpdatedBy")
                         .HasColumnType("uuid");
 

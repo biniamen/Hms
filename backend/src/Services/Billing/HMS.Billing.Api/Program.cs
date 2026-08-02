@@ -1,7 +1,9 @@
 using HMS.Billing.Infrastructure;
 using HMS.Contracts;
 using HMS.SharedKernel;
+using HMS.SharedKernel.Constants;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +38,137 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "billing", status = "healthy" })));
+
+app.MapGet("/api/billing/doctor-prices", async (BillingDbContext db, Guid? doctorId, bool activeOnly = false) =>
+{
+    var query = db.DoctorServicePrices
+        .AsNoTracking()
+        .Where(price => !price.IsDeleted);
+
+    if (doctorId.HasValue)
+    {
+        query = query.Where(price => price.DoctorId == doctorId.Value);
+    }
+
+    if (activeOnly)
+    {
+        query = query.Where(price => price.IsActive);
+    }
+
+    var priceEntities = await query
+        .OrderBy(price => price.DoctorId)
+        .ThenBy(price => price.ServiceName)
+        .ToListAsync();
+    var prices = priceEntities.Select(ToDoctorServicePriceDto).ToList();
+
+    return Results.Ok(ApiResponse<IEnumerable<DoctorServicePriceDto>>.Ok(prices));
+});
+
+app.MapGet("/api/billing/doctor-prices/quote", async (Guid doctorId, string serviceCode, Guid? patientId, BillingDbContext db) =>
+{
+    if (doctorId == Guid.Empty || string.IsNullOrWhiteSpace(serviceCode))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Doctor and service code are required."));
+    }
+
+    var normalizedServiceCode = NormalizeServiceCode(serviceCode);
+    var price = await db.DoctorServicePrices
+        .AsNoTracking()
+        .FirstOrDefaultAsync(item =>
+            item.DoctorId == doctorId &&
+            item.ServiceCode == normalizedServiceCode &&
+            item.IsActive &&
+            !item.IsDeleted);
+
+    return price is null
+        ? Results.NotFound(ApiResponse<object>.Fail("No active price is configured for this doctor and service."))
+        : Results.Ok(ApiResponse<DoctorServicePriceQuoteDto>.Ok(await BuildDoctorServiceQuoteAsync(db, price, patientId)));
+});
+
+app.MapPut("/api/billing/doctor-prices/{doctorId:guid}/{serviceCode}", async (
+    Guid doctorId,
+    string serviceCode,
+    UpsertDoctorServicePriceRequest request,
+    BillingDbContext db,
+    HttpContext httpContext) =>
+{
+    if (doctorId == Guid.Empty || string.IsNullOrWhiteSpace(serviceCode))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Doctor and service code are required."));
+    }
+
+    var normalizedServiceCode = NormalizeServiceCode(serviceCode);
+    if (normalizedServiceCode.Length > 40)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Service code cannot exceed 40 characters."));
+    }
+
+    var now = DateTime.UtcNow;
+    var currentUserId = CurrentUserId(httpContext);
+    var price = await db.DoctorServicePrices.FirstOrDefaultAsync(item =>
+        item.DoctorId == doctorId &&
+        item.ServiceCode == normalizedServiceCode);
+
+    var wasCreated = price is null;
+    if (price is null)
+    {
+        price = new DoctorServicePrice
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctorId,
+            ServiceCode = normalizedServiceCode,
+            CreatedAtUtc = now,
+            CreatedBy = currentUserId,
+            CreatedByIp = httpContext.Connection.RemoteIpAddress?.ToString()
+        };
+        db.DoctorServicePrices.Add(price);
+    }
+
+    price.ServiceName = request.ServiceName.Trim();
+    price.Amount = request.Amount;
+    price.Currency = request.Currency.Trim().ToUpperInvariant();
+    price.ValidityDays = request.ValidityDays;
+    price.IsActive = request.IsActive;
+    price.IsDeleted = false;
+    price.DeletedAtUtc = null;
+    price.UpdatedAtUtc = now;
+    price.UpdatedBy = currentUserId;
+
+    await db.SaveChangesAsync();
+
+    var response = ApiResponse<DoctorServicePriceDto>.Ok(
+        ToDoctorServicePriceDto(price),
+        wasCreated ? "Doctor price created." : "Doctor price updated.");
+
+    return wasCreated
+        ? Results.Created($"/api/billing/doctor-prices/{doctorId}/{normalizedServiceCode}", response)
+        : Results.Ok(response);
+})
+.WithValidation<UpsertDoctorServicePriceRequest>()
+.RequireHmsRoles(HmsRoles.Admin, HmsRoles.Accountant);
+
+app.MapPut("/api/billing/doctor-prices/{id:guid}/status", async (
+    Guid id,
+    UpdateDoctorServicePriceStatusRequest request,
+    BillingDbContext db,
+    HttpContext httpContext) =>
+{
+    var price = await db.DoctorServicePrices.FirstOrDefaultAsync(item => item.Id == id && !item.IsDeleted);
+    if (price is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Doctor price not found."));
+    }
+
+    price.IsActive = request.IsActive;
+    price.UpdatedAtUtc = DateTime.UtcNow;
+    price.UpdatedBy = CurrentUserId(httpContext);
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<DoctorServicePriceDto>.Ok(
+        ToDoctorServicePriceDto(price),
+        request.IsActive ? "Doctor price activated." : "Doctor price deactivated."));
+})
+.RequireHmsRoles(HmsRoles.Admin, HmsRoles.Accountant);
 
 app.MapGet("/api/billing/invoices", async (BillingDbContext db) =>
 {
@@ -102,7 +235,10 @@ app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, Billin
             Quantity = item.Quantity,
             UnitPrice = item.UnitPrice,
             Discount = item.Discount,
-            LineTotal = item.LineTotal
+            LineTotal = item.LineTotal,
+            ReferenceType = item.ReferenceType,
+            ReferenceId = item.ReferenceId,
+            ServiceDateUtc = item.ServiceDateUtc
         }).ToList()
     };
 
@@ -239,6 +375,101 @@ app.MapGet("/api/billing/receipts/{id:guid}", async (Guid id, BillingDbContext d
 
 app.Run();
 
+static DoctorServicePriceDto ToDoctorServicePriceDto(DoctorServicePrice price) =>
+    new(
+        price.Id,
+        price.DoctorId,
+        price.ServiceCode,
+        price.ServiceName,
+        price.Amount,
+        price.Currency,
+        price.ValidityDays,
+        price.IsActive,
+        price.CreatedAtUtc,
+        price.UpdatedAtUtc);
+
+static async Task<DoctorServicePriceQuoteDto> BuildDoctorServiceQuoteAsync(
+    BillingDbContext db,
+    DoctorServicePrice price,
+    Guid? patientId)
+{
+    if (patientId is null || patientId.Value == Guid.Empty)
+    {
+        return new DoctorServicePriceQuoteDto(
+            price.DoctorId,
+            price.ServiceCode,
+            price.ServiceName,
+            price.Amount,
+            price.Currency,
+            price.ValidityDays,
+            price.IsActive,
+            true,
+            null,
+            "Consultation payment is required before vitals and doctor review.");
+    }
+
+    var paidInvoices = await db.Invoices
+        .AsNoTracking()
+        .Include(invoice => invoice.Items)
+        .Where(invoice => invoice.PatientId == patientId.Value && invoice.Status == "Paid")
+        .ToListAsync();
+
+    var lastCoveredServiceDate = paidInvoices
+        .SelectMany(invoice => invoice.Items
+            .Where(item =>
+                item.ServiceCode == price.ServiceCode &&
+                item.ReferenceType == "DOCTOR" &&
+                item.ReferenceId == price.DoctorId)
+            .Select(item => item.ServiceDateUtc ?? invoice.CreatedAtUtc))
+        .OrderByDescending(serviceDate => serviceDate)
+        .FirstOrDefault();
+
+    if (lastCoveredServiceDate == default)
+    {
+        return new DoctorServicePriceQuoteDto(
+            price.DoctorId,
+            price.ServiceCode,
+            price.ServiceName,
+            price.Amount,
+            price.Currency,
+            price.ValidityDays,
+            price.IsActive,
+            true,
+            null,
+            "No paid consultation coverage exists for this patient and doctor.");
+    }
+
+    var coveredUntil = lastCoveredServiceDate.AddDays(price.ValidityDays);
+    var chargeRequired = DateTime.UtcNow > coveredUntil;
+
+    return new DoctorServicePriceQuoteDto(
+        price.DoctorId,
+        price.ServiceCode,
+        price.ServiceName,
+        price.Amount,
+        price.Currency,
+        price.ValidityDays,
+        price.IsActive,
+        chargeRequired,
+        coveredUntil,
+        chargeRequired
+            ? "Previous coverage has expired. Consultation payment is required."
+            : $"Patient is covered for this doctor until {coveredUntil:yyyy-MM-dd}.");
+}
+
+static string NormalizeServiceCode(string serviceCode) =>
+    string.Join('_', serviceCode
+        .Trim()
+        .ToUpperInvariant()
+        .Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries));
+
+static Guid? CurrentUserId(HttpContext httpContext)
+{
+    var subject = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? httpContext.User.FindFirstValue("sub");
+    return Guid.TryParse(subject, out var userId) ? userId : null;
+}
+
 static InvoiceDto ToInvoiceDto(Invoice invoice) =>
     new(
         invoice.Id,
@@ -256,7 +487,17 @@ static InvoiceDto ToInvoiceDto(Invoice invoice) =>
         invoice.CreatedAtUtc,
         invoice.Items
             .OrderBy(item => item.Description)
-            .Select(item => new InvoiceItemDto(item.Id, item.ServiceCode, item.Description, item.Quantity, item.UnitPrice, item.Discount, item.LineTotal))
+            .Select(item => new InvoiceItemDto(
+                item.Id,
+                item.ServiceCode,
+                item.Description,
+                item.Quantity,
+                item.UnitPrice,
+                item.Discount,
+                item.LineTotal,
+                item.ReferenceType,
+                item.ReferenceId,
+                item.ServiceDateUtc))
             .ToArray());
 
 static ReceiptDto ToReceiptDto(Payment payment) =>
@@ -290,7 +531,10 @@ static InvoiceItemDto[] BuildInvoiceItems(CreateInvoiceRequest request)
                     item.Quantity,
                     item.UnitPrice,
                     discount,
-                    lineTotal);
+                    lineTotal,
+                    CleanOrNull(item.ReferenceType)?.ToUpperInvariant(),
+                    item.ReferenceId,
+                    item.ServiceDateUtc ?? DateTime.UtcNow);
             })
             .ToArray();
     }
@@ -309,7 +553,10 @@ static InvoiceItemDto[] BuildInvoiceItems(CreateInvoiceRequest request)
             1,
             request.Amount,
             0,
-            request.Amount)
+            request.Amount,
+            null,
+            null,
+            DateTime.UtcNow)
     ];
 }
 

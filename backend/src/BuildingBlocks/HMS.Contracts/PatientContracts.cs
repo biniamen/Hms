@@ -84,6 +84,7 @@ public sealed record InsuranceCompanyDto(
     string Address,
     string CoverageType,
     decimal CoveragePercent,
+    bool SpouseCoverageAllowed,
     bool IsActive);
 
 public sealed record CreateInsuranceCompanyRequest(
@@ -95,4 +96,5 @@ public sealed record CreateInsuranceCompanyRequest(
     string Address,
     string CoverageType,
     [Range(0, 100, ErrorMessage = "Coverage percent must be between 0 and 100")]
-    decimal CoveragePercent);
+    decimal CoveragePercent,
+    bool SpouseCoverageAllowed);

@@ -187,7 +187,7 @@ app.MapGet("/api/clinical/diagnostic-tests", async (ClinicalDbContext db) =>
         .ThenBy(test => test.SubGroup)
         .ThenBy(test => test.SortOrder)
         .ThenBy(test => test.TestName)
-        .Select(test => new DiagnosticTestDto(test.Id, test.GroupName, test.SubGroup, test.TestName, test.SpecimenType, test.Unit, test.ReferenceRange, test.SortOrder, test.IsActive))
+        .Select(test => new DiagnosticTestDto(test.Id, test.GroupName, test.SubGroup, test.TestName, test.SpecimenType, test.Unit, test.ReferenceRange, test.SortOrder, test.Price, test.Currency, test.IsActive))
         .ToListAsync();
 
     return Results.Ok(ApiResponse<IEnumerable<DiagnosticTestDto>>.Ok(tests));
@@ -226,6 +226,8 @@ app.MapPost("/api/clinical/diagnostic-tests", async (CreateDiagnosticTestRequest
     test.Unit = Clean(request.Unit, "");
     test.ReferenceRange = Clean(request.ReferenceRange, "");
     test.SortOrder = request.SortOrder;
+    test.Price = Math.Max(0, request.Price);
+    test.Currency = Clean(request.Currency, "ETB").ToUpperInvariant();
     test.IsActive = request.IsActive;
     test.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -256,6 +258,8 @@ app.MapPut("/api/clinical/diagnostic-tests/{id:guid}", async (Guid id, CreateDia
     test.Unit = Clean(request.Unit, "");
     test.ReferenceRange = Clean(request.ReferenceRange, "");
     test.SortOrder = request.SortOrder;
+    test.Price = Math.Max(0, request.Price);
+    test.Currency = Clean(request.Currency, "ETB").ToUpperInvariant();
     test.IsActive = request.IsActive;
     test.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -510,6 +514,8 @@ static DiagnosticTestDto ToDiagnosticTestDto(DiagnosticTest test) => new(
     test.Unit,
     test.ReferenceRange,
     test.SortOrder,
+    test.Price,
+    test.Currency,
     test.IsActive);
 
 static IReadOnlyList<Guid> ParseCatalogIds(string value) =>

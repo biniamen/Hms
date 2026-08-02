@@ -5,11 +5,11 @@ import type {
   User, UserRole, Patient, Appointment, Prescription, LabOrder,
   BillingInvoice, Department, Bed, InsuranceClaim, MedicalRecord,
   ToastMessage, VitalSigns, EnterpriseModule, DiagnosticTest, LabResultItem, ClinicalVitalEntry,
-  ClinicalDiagnosis, BackendEmployee,
+  ClinicalDiagnosis, BackendEmployee, BackendDoctorProfile,
   BackendPatient, BackendAppointment, BackendLabRequest,
   BackendPrescription, BackendDepartment, BackendBed, BackendDiagnosticTest, BackendVitalSign, BackendDiagnosis,
   BackendInvoice, BackendInvoiceItem, BackendEnterpriseRecord,
-  BackendClinicalEncounter,
+  BackendClinicalEncounter, BackendInsuranceCompany,
 } from '../models';
 import { AVATARS } from '../models';
 
@@ -35,6 +35,7 @@ export class StoreService {
 
   // ── Data Signals (Backend-backed) ──
   readonly employees = signal<BackendEmployee[]>([]);
+  readonly doctors = signal<BackendDoctorProfile[]>([]);
   readonly patients = signal<Patient[]>([]);
   readonly appointments = signal<Appointment[]>([]);
   readonly beds = signal<Bed[]>([]);
@@ -47,6 +48,7 @@ export class StoreService {
   readonly billingInvoices = signal<BillingInvoice[]>([]);
   readonly medicalRecords = signal<MedicalRecord[]>([]);
   readonly insuranceClaims = signal<InsuranceClaim[]>([]);
+  readonly insuranceCompanies = signal<BackendInsuranceCompany[]>([]);
   readonly enterpriseRecords = signal<BackendEnterpriseRecord[]>([]);
 
   // ── Employees as Users (for staff directory) ──
@@ -83,6 +85,33 @@ export class StoreService {
     const total = this.beds().length;
     const occupied = this.beds().filter(b => b.isOccupied).length;
     return total > 0 ? Math.round((occupied / total) * 100) : 0;
+  });
+
+  readonly clinicalWorklistPatients = computed(() => {
+    const user = this.currentUser();
+    const settledPatientIds = new Set(
+      this.billingInvoices()
+        .filter(invoice => this.invoiceClearsClinicalAccess(invoice))
+        .map(invoice => invoice.patientId)
+    );
+
+    return this.patients().filter(patient => {
+      if (!settledPatientIds.has(patient.id)) return false;
+      if (user?.role === 'DOCTOR') {
+        return this.appointments().some(appointment =>
+          appointment.patientId === patient.id &&
+          appointment.doctorId === user.id &&
+          appointment.status !== 'CANCELLED' &&
+          appointment.status !== 'NO_SHOW');
+      }
+      if (user?.role === 'NURSE') {
+        return this.appointments().some(appointment =>
+          appointment.patientId === patient.id &&
+          appointment.status !== 'CANCELLED' &&
+          appointment.status !== 'NO_SHOW');
+      }
+      return true;
+    });
   });
 
   // ── Enterprise Modules ──
@@ -154,6 +183,7 @@ export class StoreService {
     this.patients.set([]);
     this.appointments.set([]);
     this.employees.set([]);
+    this.doctors.set([]);
     this.prescriptions.set([]);
     this.labOrders.set([]);
     this.diagnosticTests.set([]);
@@ -162,6 +192,7 @@ export class StoreService {
     this.billingInvoices.set([]);
     this.beds.set([]);
     this.departments.set([]);
+    this.insuranceCompanies.set([]);
     this.enterpriseRecords.set([]);
     this.medicalRecords.set([]);
     this.insuranceClaims.set([]);
@@ -213,6 +244,24 @@ export class StoreService {
     if (endpoints.length === 0) this.isLoading.set(false);
   }
 
+  loadDepartments() {
+    this.api.getDepartments().subscribe({
+      next: (r) => {
+        if (r.data) this.departments.set(r.data.map(d => this.mapBackendDepartment(d)));
+      },
+      error: () => this.addToast('error', 'Departments Unavailable', 'Department master data could not be loaded.'),
+    });
+  }
+
+  loadInsuranceCompanies() {
+    this.api.getInsuranceCompanies().subscribe({
+      next: (r) => {
+        if (r.data) this.insuranceCompanies.set(r.data);
+      },
+      error: () => this.addToast('error', 'Insurance Unavailable', 'Insurance company master data could not be loaded.'),
+    });
+  }
+
   private callEndpoint(key: string) {
     const dec = () => {
       this.pending.update(p => p - 1);
@@ -224,19 +273,22 @@ export class StoreService {
 
     switch (key) {
       case 'employees':
-        this.api.getEmployees().subscribe({ next: (r) => { if (r.data) this.employees.set(r.data); dec(); }, error: dec });
+        this.api.getEmployees().subscribe({ next: (r) => { if (r.data) { this.employees.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
         break;
       case 'doctors':
-        this.api.getDoctors().subscribe({ next: (r) => dec(), error: dec });
+        this.api.getDoctors().subscribe({ next: (r) => { if (r.data) { this.doctors.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
         break;
       case 'patients':
-        this.api.getPatients().subscribe({ next: (r) => { if (r.data) this.patients.set(r.data.map(p => this.mapBackendPatient(p))); dec(); }, error: dec });
+        this.api.getPatients().subscribe({ next: (r) => { if (r.data) { this.patients.set(r.data.map(p => this.mapBackendPatient(p))); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
         break;
       case 'appointments':
         this.api.getAppointments().subscribe({ next: (r) => { if (r.data) this.appointments.set(r.data.map(a => this.mapBackendAppointment(a))); dec(); }, error: dec });
         break;
       case 'departments':
         this.api.getDepartments().subscribe({ next: (r) => { if (r.data) this.departments.set(r.data.map(d => this.mapBackendDepartment(d))); dec(); }, error: dec });
+        break;
+      case 'insuranceCompanies':
+        this.api.getInsuranceCompanies().subscribe({ next: (r) => { if (r.data) this.insuranceCompanies.set(r.data); dec(); }, error: dec });
         break;
       case 'beds':
         this.api.getBeds().subscribe({ next: (r) => { if (r.data) this.beds.set(r.data.map(b => this.mapBackendBed(b))); dec(); }, error: dec });
@@ -272,17 +324,17 @@ export class StoreService {
 
   private getEndpointsForRole(role: string): string[] {
     const roleEndpoints: Record<string, string[]> = {
-      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
-      DOCTOR: ['patients', 'appointments', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
-      NURSE: ['patients', 'appointments', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
-      RECEPTIONIST: ['patients', 'appointments', 'departments', 'beds'],
-      PHARMACIST: ['patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
-      LAB_TECHNICIAN: ['patients', 'appointments', 'diagnosticTests', 'labRequests', 'enterpriseRecords'],
-      ACCOUNTANT: ['patients', 'invoices', 'enterpriseRecords'],
-      CASHIER: ['invoices'],
+      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
+      DOCTOR: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
+      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
+      RECEPTIONIST: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'invoices'],
+      PHARMACIST: ['doctors', 'patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
+      LAB_TECHNICIAN: ['doctors', 'patients', 'appointments', 'diagnosticTests', 'labRequests', 'enterpriseRecords'],
+      ACCOUNTANT: ['patients', 'insuranceCompanies', 'invoices', 'enterpriseRecords'],
+      CASHIER: ['patients', 'insuranceCompanies', 'invoices'],
       HR_MANAGER: ['employees', 'departments'],
     };
-    return roleEndpoints[role] || ['patients', 'appointments'];
+    return roleEndpoints[role] || ['doctors', 'patients', 'appointments'];
   }
 
   // ── Mapping Functions (Backend DTO -> Frontend Model) ──
@@ -331,10 +383,10 @@ export class StoreService {
     return {
       id: a.id,
       patientId: a.patientId,
-      patientName: patient?.name || a.patientId,
-      patientMrn: patient?.mrn || '',
+      patientName: this.patientDisplayName(a.patientId),
+      patientMrn: this.patientMrn(a.patientId),
       doctorId: a.doctorId,
-      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : a.doctorId,
+      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : this.doctorDisplayName(a.doctorId),
       department: a.department,
       dateTime: a.startsAtUtc,
       timeSlot: timeStr,
@@ -354,6 +406,7 @@ export class StoreService {
       code: d.code,
       type: d.type,
       location: d.location,
+      specializations: d.specializations?.length ? d.specializations : this.defaultSpecializationsForDepartment(d.name),
       headDoctorName: 'Department Head',
       totalBeds: 20,
       occupiedBeds: 12,
@@ -374,18 +427,20 @@ export class StoreService {
   }
 
   private mapBackendDiagnosticTest(test: BackendDiagnosticTest): DiagnosticTest {
-    return {
-      id: test.id,
-      groupName: test.groupName,
-      subGroup: test.subGroup || 'General',
-      testName: test.testName,
-      specimenType: test.specimenType || '',
-      unit: test.unit || '',
-      referenceRange: test.referenceRange || '',
-      sortOrder: test.sortOrder || 0,
-      isActive: test.isActive,
-    };
-  }
+  return {
+    id: test.id,
+    groupName: test.groupName,
+    subGroup: test.subGroup || 'General',
+    testName: test.testName,
+    specimenType: test.specimenType || '',
+    unit: test.unit || '',
+    referenceRange: test.referenceRange || '',
+    sortOrder: test.sortOrder || 0,
+    isActive: test.isActive,
+    price: test.price ?? 0,
+    currency: test.currency || 'ETB',
+  };
+}
 
   private mapBackendPrescription(p: BackendPrescription): Prescription {
     const patient = this.patients().find(pat => pat.id === p.patientId);
@@ -393,10 +448,10 @@ export class StoreService {
     return {
       id: p.id,
       patientId: p.patientId,
-      patientName: patient?.name || p.patientId,
-      patientMrn: patient?.mrn || '',
+      patientName: this.patientDisplayName(p.patientId),
+      patientMrn: this.patientMrn(p.patientId),
       doctorId: p.doctorId,
-      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : p.doctorId,
+      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : this.doctorDisplayName(p.doctorId),
       date: p.orderedAtUtc ? new Date(p.orderedAtUtc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       medications: [{
         name: p.medication,
@@ -424,10 +479,10 @@ export class StoreService {
     return {
       id: l.id,
       patientId: l.patientId,
-      patientName: patient?.name || l.patientId,
-      patientMrn: patient?.mrn || '',
+      patientName: this.patientDisplayName(l.patientId),
+      patientMrn: this.patientMrn(l.patientId),
       doctorId: l.doctorId,
-      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : l.doctorId,
+      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : this.doctorDisplayName(l.doctorId),
       testName: l.testName,
       testCatalogIds: l.testCatalogIds || [],
       category: (l.category as LabOrder['category']) || 'Biochemistry',
@@ -454,8 +509,8 @@ export class StoreService {
     return {
       id: v.id,
       patientId: v.patientId,
-      patientName: patient?.name || v.patientId,
-      patientMrn: patient?.mrn || '',
+      patientName: this.patientDisplayName(v.patientId),
+      patientMrn: this.patientMrn(v.patientId),
       temperatureC: v.temperatureC,
       pulse: v.pulse,
       respiratoryRate: v.respiratoryRate,
@@ -472,10 +527,10 @@ export class StoreService {
     return {
       id: d.id,
       patientId: d.patientId,
-      patientName: patient?.name || d.patientId,
-      patientMrn: patient?.mrn || '',
+      patientName: this.patientDisplayName(d.patientId),
+      patientMrn: this.patientMrn(d.patientId),
       doctorId: d.doctorId,
-      doctorName: employee ? `${employee.firstName} ${employee.lastName}` : d.doctorId,
+      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : this.doctorDisplayName(d.doctorId),
       code: d.code,
       description: d.description,
       severity: d.severity,
@@ -489,9 +544,9 @@ export class StoreService {
     return {
       id: e.id,
       patientId: e.patientId,
-      patientName: patient?.name || e.patientId,
+      patientName: this.patientDisplayName(e.patientId),
       doctorId: e.doctorId,
-      doctorName: employee ? `${employee.firstName} ${employee.lastName}` : e.doctorId,
+      doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : this.doctorDisplayName(e.doctorId),
       date: e.encounterAtUtc ? new Date(e.encounterAtUtc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       diagnosis: e.assessment || 'N/A',
       icdCode: undefined,
@@ -511,8 +566,8 @@ export class StoreService {
       id: i.id,
       invoiceNumber: i.invoiceNumber,
       patientId: i.patientId,
-      patientName: patient?.name || i.patientId,
-      patientMrn: patient?.mrn || '',
+      patientName: this.patientDisplayName(i.patientId),
+      patientMrn: this.patientMrn(i.patientId),
       date: i.createdAtUtc ? new Date(i.createdAtUtc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       dueDate: i.dueAtUtc ? new Date(i.dueAtUtc).toISOString().split('T')[0] : '',
       items: i.items.map((item: BackendInvoiceItem) => ({
@@ -524,13 +579,108 @@ export class StoreService {
       totalAmount: i.total,
       insuranceCoveredAmount: Math.round(insurancePortion * 100) / 100,
       patientPaidAmount: i.paid || 0,
-      status: i.status === 'Unpaid' ? 'UNPAID' : i.status === 'Paid' ? 'PAID' : 'UNPAID',
+      status: this.mapInvoiceStatus(i.status),
     };
+  }
+
+  private mapInvoiceStatus(status: string): BillingInvoice['status'] {
+    const value = (status || '').toLowerCase();
+    if (value.includes('unpaid') || value.includes('open')) return 'UNPAID';
+    if (value.includes('partial')) return 'PARTIALLY_PAID';
+    if (value.includes('paid') || value.includes('settled')) return 'PAID';
+    if (value.includes('insurance')) return 'INSURANCE_PENDING';
+    return 'UNPAID';
+  }
+
+  private invoiceClearsClinicalAccess(invoice: BillingInvoice): boolean {
+    const balance = invoice.totalAmount - invoice.insuranceCoveredAmount - invoice.patientPaidAmount;
+    return invoice.status === 'PAID' || balance <= 0;
+  }
+
+  patientHasClinicalPayment(patientId: string): boolean {
+    return this.billingInvoices().some(invoice => invoice.patientId === patientId && this.invoiceClearsClinicalAccess(invoice));
+  }
+
+  private defaultSpecializationsForDepartment(departmentName: string): string[] {
+    const key = (departmentName || '').toLowerCase();
+    if (key.includes('emergency')) return ['Emergency Medicine', 'Trauma Care', 'Critical Care Nursing', 'Triage'];
+    if (key.includes('pedia')) return ['Pediatrics', 'Neonatology', 'Pediatric Nursing'];
+    if (key.includes('maternity') || key.includes('obstetric')) return ['Obstetrics', 'Gynecology', 'Midwifery', 'Maternal Health'];
+    if (key.includes('laboratory')) return ['Hematology', 'Clinical Chemistry', 'Microbiology', 'Serology'];
+    if (key.includes('pharmacy')) return ['Dispensing', 'Clinical Pharmacy', 'Inventory Control'];
+    if (key.includes('finance') || key.includes('billing')) return ['Revenue Cycle', 'Cashier', 'Claims Management'];
+    if (key.includes('admin')) return ['Platform Administration', 'Human Resources', 'Operations'];
+    return ['Internal Medicine', 'General Practice', 'Nursing'];
   }
 
   // ── Patient Search / Utilities ──
   patientById(id: string): Patient | undefined {
     return this.patients().find(p => p.id === id);
+  }
+
+  patientDisplayName(id: string): string {
+    return this.patientById(id)?.name || 'Patient record unavailable';
+  }
+
+  patientMrn(id: string): string {
+    return this.patientById(id)?.mrn || 'MRN unavailable';
+  }
+
+  doctorDisplayName(id: string): string {
+    const doctor = this.doctors().find(item => item.id === id);
+    if (doctor) return `Dr. ${doctor.firstName} ${doctor.lastName}`;
+
+    const employee = this.employees().find(item => item.id === id && item.role === 'DOCTOR');
+    if (employee) return `Dr. ${employee.firstName} ${employee.lastName}`;
+
+    const current = this.currentUser();
+    if (current?.id === id && current.role === 'DOCTOR') {
+      return current.name.startsWith('Dr.') ? current.name : `Dr. ${current.name}`;
+    }
+
+    return 'Doctor record unavailable';
+  }
+
+  private refreshResolvedDisplayValues() {
+    this.appointments.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      patientMrn: this.patientMrn(item.patientId),
+      doctorName: this.doctorDisplayName(item.doctorId),
+    })));
+    this.prescriptions.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      patientMrn: this.patientMrn(item.patientId),
+      doctorName: this.doctorDisplayName(item.doctorId),
+    })));
+    this.labOrders.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      patientMrn: this.patientMrn(item.patientId),
+      doctorName: this.doctorDisplayName(item.doctorId),
+    })));
+    this.clinicalVitals.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      patientMrn: this.patientMrn(item.patientId),
+    })));
+    this.clinicalDiagnoses.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      patientMrn: this.patientMrn(item.patientId),
+      doctorName: this.doctorDisplayName(item.doctorId),
+    })));
+    this.billingInvoices.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      patientMrn: this.patientMrn(item.patientId),
+    })));
+    this.medicalRecords.update(items => items.map(item => ({
+      ...item,
+      patientName: this.patientDisplayName(item.patientId),
+      doctorName: this.doctorDisplayName(item.doctorId),
+    })));
   }
 
   employeeById(id: string): BackendEmployee | undefined {
@@ -569,6 +719,12 @@ export class StoreService {
       email: patient.email,
       address: patient.address,
       bloodType: patient.bloodType,
+      insuranceCompanyId: patient.insuranceCompanyId || undefined,
+      insuranceProvider: patient.insuranceProvider || undefined,
+      insurancePolicyNumber: patient.insurancePolicyNumber || undefined,
+      emergencyContactName: patient.emergencyContact?.name || undefined,
+      emergencyContactPhone: patient.emergencyContact?.phone || undefined,
+      photoDataUrl: patient.photoDataUrl || undefined,
     };
     this.api.createPatient(payload as any).subscribe({
       next: (res) => {
@@ -606,13 +762,44 @@ export class StoreService {
     this.api.createAppointment(payload).subscribe({
       next: (res) => {
         if (res.data) {
-          this.appointments.update(current => [this.mapBackendAppointment(res.data), ...current]);
+          const mapped = this.mapBackendAppointment(res.data);
+          this.appointments.update(current => [mapped, ...current]);
+          this.createAppointmentConsultationInvoice(mapped);
           this.addToast('success', 'Appointment Booked', `Scheduled for ${apt.patientName}.`);
         }
       },
       error: () => {
         this.addToast('info', 'Appointment Booked', `Scheduled for ${apt.patientName} (offline mode).`);
       },
+    });
+  }
+
+  private createAppointmentConsultationInvoice(appointment: Appointment) {
+    const patient = this.patientById(appointment.patientId);
+    const description = `Consultation clearance - ${appointment.department} with ${appointment.doctorName}`;
+    this.api.createInvoice({
+      patientId: appointment.patientId,
+      description,
+      amount: 500,
+      discount: 0,
+      tax: 0,
+      paymentType: 'CASH',
+      insuranceProvider: patient?.insuranceProvider,
+      items: [{
+        serviceCode: 'CONSULTATION',
+        description,
+        quantity: 1,
+        unitPrice: 500,
+        discount: 0,
+        referenceType: 'Appointment',
+        referenceId: appointment.id,
+        serviceDateUtc: appointment.dateTime || new Date().toISOString(),
+      }],
+    }).subscribe({
+      next: (invoice) => {
+        if (invoice.data) this.billingInvoices.update(current => [this.mapBackendInvoice(invoice.data), ...current]);
+      },
+      error: () => this.addToast('warning', 'Invoice Pending', 'Appointment was booked, but billing clearance invoice was not created. Create it from Billing before clinical handoff.'),
     });
   }
 
@@ -629,20 +816,31 @@ export class StoreService {
   }
 
   addPrescription(rx: Omit<Prescription, 'id' | 'date' | 'status'>) {
+    const medicationText = rx.medications.map(item => `${item.name} ${item.dosage}`.trim()).join('; ');
+    const instructionText = rx.medications.map(item => `${item.name}: ${item.frequency}, ${item.duration}. ${item.instructions}`.trim()).join('\n');
     const payload = {
       patientId: rx.patientId,
       doctorId: rx.doctorId,
-      medication: rx.medications[0]?.name || 'Medication',
-      instructions: rx.medications[0]?.instructions || 'As directed',
+      medication: medicationText || 'Medication',
+      instructions: instructionText || 'As directed',
     };
     this.api.createPrescription(payload).subscribe({
       next: (res) => {
         if (res.data) {
-          this.prescriptions.update(current => [this.mapBackendPrescription(res.data), ...current]);
+          const mapped = { ...this.mapBackendPrescription(res.data), medications: rx.medications };
+          this.prescriptions.update(current => [mapped, ...current]);
           this.addToast('success', 'Prescription Created', `Prescription for ${rx.patientName}.`);
         }
       },
-      error: () => this.addToast('success', 'Prescription Created', `Prescription for ${rx.patientName} (offline mode).`),
+      error: () => {
+        this.prescriptions.update(current => [{
+          ...rx,
+          id: 'rx-' + Math.floor(100 + Math.random() * 900),
+          date: new Date().toISOString().split('T')[0],
+          status: 'PENDING' as const,
+        }, ...current]);
+        this.addToast('success', 'Prescription Created', `Prescription for ${rx.patientName} (offline mode).`);
+      },
     });
   }
 
@@ -938,6 +1136,8 @@ export class StoreService {
       discount: 0,
       tax: 0,
       paymentType: 'CASH',
+      insuranceProvider: this.patientById(inv.patientId)?.insuranceProvider,
+      items,
     };
     this.api.createInvoice(payload).subscribe({
       next: (res) => {
@@ -951,18 +1151,48 @@ export class StoreService {
   }
 
   payInvoice(id: string, amount: number, paymentMethod?: string) {
-    this.billingInvoices.update(current =>
-      current.map(inv => {
-        if (inv.id === id) {
-          const newPaid = inv.patientPaidAmount + amount;
-          const totalDue = inv.totalAmount - inv.insuranceCoveredAmount;
-          const status = newPaid >= totalDue ? 'PAID' : 'PARTIALLY_PAID';
-          return { ...inv, patientPaidAmount: newPaid, status, paymentMethod: paymentMethod as any };
-        }
-        return inv;
-      })
-    );
-    this.addToast('success', 'Payment Processed', `$${amount} payment recorded.`);
+    const applyLocalPayment = () => {
+      this.billingInvoices.update(current =>
+        current.map(inv => {
+          if (inv.id === id) {
+            const newPaid = inv.patientPaidAmount + amount;
+            const totalDue = inv.totalAmount - inv.insuranceCoveredAmount;
+            const status = newPaid >= totalDue ? 'PAID' : 'PARTIALLY_PAID';
+            return { ...inv, patientPaidAmount: newPaid, status, paymentMethod: paymentMethod as any };
+          }
+          return inv;
+        })
+      );
+    };
+
+    this.api.recordPayment({
+      invoiceId: id,
+      amount,
+      method: paymentMethod || 'Cash',
+      receivedBy: this.currentUser()?.name || 'Billing Desk',
+    }).subscribe({
+      next: () => {
+        this.api.getInvoice(id).subscribe({
+          next: (res) => {
+            if (res.data) {
+              const mapped = this.mapBackendInvoice(res.data);
+              this.billingInvoices.update(current => current.map(inv => inv.id === id ? mapped : inv));
+            } else {
+              applyLocalPayment();
+            }
+            this.addToast('success', 'Payment Processed', `$${amount} payment recorded.`);
+          },
+          error: () => {
+            applyLocalPayment();
+            this.addToast('success', 'Payment Processed', `$${amount} payment recorded.`);
+          },
+        });
+      },
+      error: () => {
+        applyLocalPayment();
+        this.addToast('success', 'Payment Processed', `$${amount} payment recorded (offline mode).`);
+      },
+    });
   }
 
   submitInsuranceClaim(invoiceId: string) {
