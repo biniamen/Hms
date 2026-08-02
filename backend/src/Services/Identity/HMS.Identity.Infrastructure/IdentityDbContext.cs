@@ -299,6 +299,10 @@ public static class IdentitySeedData
             new Department { Id = Guid.Parse("69915464-0999-4353-a3f5-91d3472ec98a"), Code = "ER", Name = "Emergency", Type = "Clinical", Location = "Ground Floor", Specializations = "Emergency Medicine|Trauma Care|Critical Care|Triage Nursing" },
             new Department { Id = Guid.Parse("ea4b9765-f7d2-409d-a67f-a8f98695629a"), Code = "PED", Name = "Pediatrics", Type = "Clinical", Location = "Block B", Specializations = "Pediatrics|Neonatology|Pediatric Nursing|Child Health" },
             new Department { Id = Guid.Parse("53b54a7a-c189-4fea-b3ba-f85dbe368601"), Code = "MAT", Name = "Maternity", Type = "Clinical", Location = "Block C", Specializations = "Obstetrics|Gynecology|Midwifery|Maternal Health" },
+            new Department { Id = Guid.Parse("8f6ea5bc-3381-4553-9739-80f01ce21101"), Code = "CARD", Name = "Cardiology", Type = "Clinical", Location = "Block A", Specializations = "Cardiology|Interventional Cardiology|Echo Clinic|Hypertension Clinic" },
+            new Department { Id = Guid.Parse("7b00b665-6037-426c-976a-b62e5cf0d212"), Code = "SURG", Name = "Surgery", Type = "Clinical", Location = "Block D", Specializations = "General Surgery|Minor Procedure|Surgical Follow-up|Wound Care" },
+            new Department { Id = Guid.Parse("b567ced3-72e7-431c-84c4-8d2e62c7a313"), Code = "ORTHO", Name = "Orthopedics", Type = "Clinical", Location = "Block D", Specializations = "Orthopedics|Fracture Clinic|Physiotherapy Referral|Joint Care" },
+            new Department { Id = Guid.Parse("84b537c8-a776-45f6-bff4-f6f75a7c1414"), Code = "RAD", Name = "Radiology", Type = "Clinical", Location = "Diagnostic Wing", Specializations = "Radiology|Ultrasound|X-Ray|CT Review" },
             new Department { Id = Guid.Parse("0a48cb6a-c097-4f33-a6f2-baa1181e4d9a"), Code = "FIN", Name = "Finance", Type = "Administration", Location = "Admin Block", Specializations = "Revenue Cycle|Cashier|Claims Management|Accounting" }
         };
 
@@ -336,14 +340,30 @@ public static class IdentitySeedData
             new Employee { Id = Guid.Parse("43a3b779-c6f9-496c-b8b6-81525947cf12"), EmployeeNo = "EMP-0004", FirstName = "Daniel", LastName = "Kebede", EmailAddress = "nurse@hms.local", Phone = "0900000004", RoleCode = "NURSE", Department = "Ward", Specialization = "General Nursing" },
             new Employee { Id = Guid.Parse("83f36db8-5c4d-4f2a-9b54-00c31a31ab7d"), EmployeeNo = "EMP-0005", FirstName = "Liya", LastName = "Tadesse", EmailAddress = "pharmacist@hms.local", Phone = "0900000005", RoleCode = "PHARMACIST", Department = "Pharmacy", Specialization = "Dispensing" },
             new Employee { Id = Guid.Parse("7c5b23a5-5970-4b95-8d02-c36c1c9ac8e1"), EmployeeNo = "EMP-0006", FirstName = "Yonatan", LastName = "Alemayehu", EmailAddress = "lab@hms.local", Phone = "0900000006", RoleCode = "LAB_TECHNICIAN", Department = "Laboratory", Specialization = "Hematology" },
-            new Employee { Id = Guid.Parse("fbdd5447-1864-4420-b42d-60ba5afaf23e"), EmployeeNo = "EMP-0007", FirstName = "Selam", LastName = "Desta", EmailAddress = "accountant@hms.local", Phone = "0900000007", RoleCode = "ACCOUNTANT", Department = "Finance", Specialization = "Revenue Cycle" }
+            new Employee { Id = Guid.Parse("fbdd5447-1864-4420-b42d-60ba5afaf23e"), EmployeeNo = "EMP-0007", FirstName = "Selam", LastName = "Desta", EmailAddress = "accountant@hms.local", Phone = "0900000007", RoleCode = "ACCOUNTANT", Department = "Finance", Specialization = "Revenue Cycle" },
+            new Employee { Id = Guid.Parse("47c3095d-adcc-4e1d-bfc0-b16d70c15201"), EmployeeNo = "EMP-0008", FirstName = "Samuel", LastName = "Bekele", EmailAddress = "doctor.emergency@hms.local", Phone = "0900000008", RoleCode = "DOCTOR", Department = "Emergency", Specialization = "Emergency Medicine" },
+            new Employee { Id = Guid.Parse("cd8bfaf4-1afa-43e0-a2c4-a813da015202"), EmployeeNo = "EMP-0009", FirstName = "Ruth", LastName = "Mekonnen", EmailAddress = "doctor.pediatrics@hms.local", Phone = "0900000009", RoleCode = "DOCTOR", Department = "Pediatrics", Specialization = "Pediatrics" },
+            new Employee { Id = Guid.Parse("a6303a4a-e409-409f-a21c-8abb44ea5303"), EmployeeNo = "EMP-0010", FirstName = "Miriam", LastName = "Ayele", EmailAddress = "doctor.maternity@hms.local", Phone = "0900000010", RoleCode = "DOCTOR", Department = "Maternity", Specialization = "Obstetrics" },
+            new Employee { Id = Guid.Parse("d7f768c4-e28c-4b46-94d8-68ed9a325404"), EmployeeNo = "EMP-0011", FirstName = "Dawit", LastName = "Alemu", EmailAddress = "doctor.cardiology@hms.local", Phone = "0900000011", RoleCode = "DOCTOR", Department = "Cardiology", Specialization = "Cardiology" },
+            new Employee { Id = Guid.Parse("f39efa6d-4fb1-4e41-8864-9661c6c85505"), EmployeeNo = "EMP-0012", FirstName = "Bethel", LastName = "Girma", EmailAddress = "doctor.surgery@hms.local", Phone = "0900000012", RoleCode = "DOCTOR", Department = "Surgery", Specialization = "General Surgery" },
+            new Employee { Id = Guid.Parse("03c36d30-0d15-4f13-bf3d-6e2804074506"), EmployeeNo = "EMP-0013", FirstName = "Yared", LastName = "Worku", EmailAddress = "doctor.orthopedics@hms.local", Phone = "0900000013", RoleCode = "DOCTOR", Department = "Orthopedics", Specialization = "Orthopedics" },
+            new Employee { Id = Guid.Parse("1a8da269-2429-4038-9725-c68341217407"), EmployeeNo = "EMP-0014", FirstName = "Sofia", LastName = "Kassa", EmailAddress = "doctor.radiology@hms.local", Phone = "0900000014", RoleCode = "DOCTOR", Department = "Radiology", Specialization = "Radiology" }
         };
+
+        var usedEmployeeNumbers = new HashSet<string>(
+            await db.Employees
+                .AsNoTracking()
+                .Select(item => item.EmployeeNo)
+                .Where(item => item != "")
+                .ToListAsync(),
+            StringComparer.OrdinalIgnoreCase);
 
         foreach (var employee in employees)
         {
             var existing = await db.Employees.FirstOrDefaultAsync(item => item.EmailAddress == employee.EmailAddress);
             if (existing is null)
             {
+                employee.EmployeeNo = ReserveEmployeeNo(employee.EmployeeNo, usedEmployeeNumbers);
                 employee.PasswordHash = seedPassword is null ? "" : IdentitySecurity.HashPassword(seedPassword);
                 employee.IsActive = true;
                 employee.PasswordSetupCompleted = seedPassword is not null;
@@ -351,7 +371,12 @@ public static class IdentitySeedData
             }
             else
             {
-                existing.EmployeeNo = employee.EmployeeNo;
+                usedEmployeeNumbers.Remove(existing.EmployeeNo);
+                var preferredEmployeeNo = usedEmployeeNumbers.Contains(employee.EmployeeNo)
+                    ? existing.EmployeeNo
+                    : employee.EmployeeNo;
+
+                existing.EmployeeNo = ReserveEmployeeNo(preferredEmployeeNo, usedEmployeeNumbers);
                 existing.FirstName = employee.FirstName;
                 existing.LastName = employee.LastName;
                 existing.Phone = employee.Phone;
@@ -366,6 +391,41 @@ public static class IdentitySeedData
                 }
             }
         }
+    }
+
+    private static string ReserveEmployeeNo(string? preferredEmployeeNo, HashSet<string> usedEmployeeNumbers)
+    {
+        var preferred = CleanEmployeeNo(preferredEmployeeNo);
+        if (!string.IsNullOrWhiteSpace(preferred) && !usedEmployeeNumbers.Contains(preferred))
+        {
+            usedEmployeeNumbers.Add(preferred);
+            return preferred;
+        }
+
+        var next = usedEmployeeNumbers
+            .Select(EmployeeNoSequence)
+            .DefaultIfEmpty(0)
+            .Max() + 1;
+
+        string candidate;
+        do
+        {
+            candidate = $"EMP-{next:0000}";
+            next++;
+        }
+        while (usedEmployeeNumbers.Contains(candidate));
+
+        usedEmployeeNumbers.Add(candidate);
+        return candidate;
+    }
+
+    private static string CleanEmployeeNo(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "" : value.Trim().ToUpperInvariant();
+
+    private static int EmployeeNoSequence(string value)
+    {
+        var segment = value.Split('-', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        return int.TryParse(segment, out var number) ? number : 0;
     }
 }
 

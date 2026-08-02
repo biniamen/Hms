@@ -253,6 +253,18 @@ export class StoreService {
     });
   }
 
+  loadDoctors() {
+    this.api.getDoctors().subscribe({
+      next: (r) => {
+        if (r.data) {
+          this.doctors.set(r.data);
+          this.refreshResolvedDisplayValues();
+        }
+      },
+      error: () => this.addToast('error', 'Doctors Unavailable', 'Doctor master data could not be loaded.'),
+    });
+  }
+
   loadInsuranceCompanies() {
     this.api.getInsuranceCompanies().subscribe({
       next: (r) => {

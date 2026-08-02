@@ -1,3 +1,5 @@
+using HMS.Identity.Infrastructure;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +7,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace HMS.Identity.Infrastructure.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(IdentityDbContext))]
+    [Migration("20260802090000_AddDepartmentSpecializations")]
     public partial class AddDepartmentSpecializations : Migration
     {
         /// <inheritdoc />

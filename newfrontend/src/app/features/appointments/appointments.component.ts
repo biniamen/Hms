@@ -1,8 +1,15 @@
-import { ChangeDetectionStrategy, Component, signal, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal, computed, effect, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
-import { AppointmentStatus, AppointmentType } from '../../core/models';
+import { AppointmentStatus, AppointmentType, Department } from '../../core/models';
+
+type AppointmentDoctor = {
+  id: string;
+  name: string;
+  department: string;
+  specialization?: string;
+};
 
 @Component({
   selector: 'app-appointments',
@@ -223,6 +230,7 @@ export class AppointmentsComponent {
 
   isFormVisible = signal(false);
   selectedStatusFilter = signal<string>('ALL');
+  selectedDepartment = signal<string>('Outpatient');
 
   // Unified input classes to avoid @apply bug
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/5 transition-all';
@@ -237,26 +245,45 @@ export class AppointmentsComponent {
     const profiles = this.store.doctors().map(doctor => ({
       id: doctor.id,
       name: `Dr. ${doctor.firstName} ${doctor.lastName}`,
-      department: doctor.department || doctor.specialization || 'General',
+      department: this.resolveDepartmentName(doctor.department, doctor.specialization),
+      specialization: doctor.specialization || '',
     }));
     if (profiles.length > 0) return profiles;
     return this.store.employeesAsUsers()
       .filter(employee => employee.role === 'DOCTOR')
-      .map(employee => ({ id: employee.id, name: employee.name, department: employee.department }));
+      .map(employee => ({
+        id: employee.id,
+        name: employee.name,
+        department: this.resolveDepartmentName(employee.department, employee.specialization),
+        specialization: employee.specialization || '',
+      }));
   });
 
   departmentOptions = computed(() => {
-    const departments = this.store.departments().filter(dept => dept.type !== 'Finance');
-    if (departments.length > 0) return departments;
-    return [
-      { id: 'opd', name: 'Outpatient', code: 'OPD', type: 'Clinical', location: 'Block A', specializations: ['Internal Medicine'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'local_hospital' },
-      { id: 'er', name: 'Emergency', code: 'ER', type: 'Clinical', location: 'Ground Floor', specializations: ['Emergency Medicine'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'emergency' },
-    ];
+    const options = new Map<string, Department>();
+    const add = (dept: Department) => {
+      const key = this.departmentKey(dept.name || dept.code);
+      if (key && this.isAppointmentDepartment(dept)) options.set(key, dept);
+    };
+
+    this.store.departments().forEach(add);
+    this.doctors().forEach(doctor => {
+      const key = this.departmentKey(doctor.department);
+      if (!key || options.has(key)) return;
+      options.set(key, this.fallbackDepartment(doctor.department, doctor.specialization));
+    });
+
+    if (options.size > 0) {
+      return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return this.defaultAppointmentDepartments();
   });
 
   filteredDoctors = computed(() => {
-    const department = this.aptForm.controls.department.value || '';
-    return this.doctors().filter(doc => !department || doc.department === department);
+    const department = this.selectedDepartment();
+    const selected = this.departmentOptions().find(dept => this.sameDepartment(dept, department));
+    return this.doctors().filter(doctor => this.doctorBelongsToDepartment(doctor, selected, department));
   });
 
   aptForm = new FormGroup({
@@ -268,13 +295,28 @@ export class AppointmentsComponent {
     reason: new FormControl('', [Validators.required])
   });
 
+  constructor() {
+    this.store.loadDepartments();
+    this.store.loadDoctors();
+
+    effect(() => {
+      if (!this.isFormVisible()) return;
+
+      const doctors = this.filteredDoctors();
+      const currentDoctorId = this.aptForm.controls.doctorId.value || '';
+      if (!doctors.some(doctor => doctor.id === currentDoctorId)) {
+        this.aptForm.patchValue({ doctorId: doctors[0]?.id || '' }, { emitEvent: false });
+      }
+    });
+  }
+
   updateStatus(id: string, status: AppointmentStatus) {
     this.store.updateAppointmentStatus(id, status);
   }
 
   openBookingForm() {
     const department = this.departmentOptions()[0]?.name || 'Outpatient';
-    this.aptForm.patchValue({ department });
+    this.setSelectedDepartment(department);
     const doctor = this.filteredDoctors()[0] || this.doctors()[0];
     this.aptForm.patchValue({
       patientId: this.store.patients()[0]?.id || '',
@@ -285,7 +327,7 @@ export class AppointmentsComponent {
 
   onDepartmentChange(event: Event) {
     const department = (event.target as HTMLSelectElement).value;
-    this.aptForm.patchValue({ department });
+    this.setSelectedDepartment(department);
     const doctor = this.filteredDoctors()[0];
     this.aptForm.patchValue({ doctorId: doctor?.id || '' });
   }
@@ -316,10 +358,11 @@ export class AppointmentsComponent {
     }
 
     this.isFormVisible.set(false);
+    this.setSelectedDepartment(this.departmentOptions()[0]?.name || 'Outpatient');
     this.aptForm.reset({
       patientId: this.store.patients()[0]?.id || '',
-      doctorId: this.doctors()[0]?.id || '',
-      department: this.departmentOptions()[0]?.name || 'Outpatient',
+      doctorId: this.filteredDoctors()[0]?.id || '',
+      department: this.selectedDepartment(),
       timeSlot: '09:00 AM',
       type: 'CONSULTATION',
       reason: '',
@@ -334,5 +377,95 @@ export class AppointmentsComponent {
       case 'CANCELLED': return 'bg-rose-50 text-rose-700 border-rose-200';
       default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
+  }
+
+  private setSelectedDepartment(department: string) {
+    this.selectedDepartment.set(department);
+    this.aptForm.patchValue({ department }, { emitEvent: false });
+  }
+
+  private resolveDepartmentName(department?: string, specialization?: string): string {
+    const raw = (department || '').trim();
+    const byDepartment = this.store.departments().find(dept => this.sameDepartment(dept, raw));
+    if (byDepartment) return byDepartment.name;
+
+    const bySpecialization = this.store.departments().find(dept =>
+      dept.specializations.some(item => this.cleanText(item) === this.cleanText(specialization || '')));
+    if (bySpecialization) return bySpecialization.name;
+
+    return raw || 'Outpatient';
+  }
+
+  private doctorBelongsToDepartment(doctor: AppointmentDoctor, department?: Department, selectedDepartment = ''): boolean {
+    if (!selectedDepartment) return true;
+    if (department && this.sameDepartment(department, doctor.department)) return true;
+    if (department && doctor.specialization) {
+      return department.specializations.some(item => this.cleanText(item) === this.cleanText(doctor.specialization || ''));
+    }
+    return this.departmentKey(doctor.department) === this.departmentKey(selectedDepartment);
+  }
+
+  private sameDepartment(department: Department, value?: string): boolean {
+    const key = this.departmentKey(value);
+    if (!key) return false;
+    return key === this.departmentKey(department.name) || key === this.departmentKey(department.code);
+  }
+
+  private departmentKey(value?: string): string {
+    const key = this.cleanText(value || '');
+    const aliases: Record<string, string> = {
+      opd: 'outpatient',
+      outpatientdepartment: 'outpatient',
+      er: 'emergency',
+      emergencyroom: 'emergency',
+      ped: 'pediatrics',
+      paediatrics: 'pediatrics',
+      mat: 'maternity',
+      obs: 'maternity',
+      obgyn: 'maternity',
+      card: 'cardiology',
+      surg: 'surgery',
+      generalsurgery: 'surgery',
+      ortho: 'orthopedics',
+      orthopaedics: 'orthopedics',
+      radio: 'radiology',
+    };
+    return aliases[key] || key;
+  }
+
+  private cleanText(value: string): string {
+    return value.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '').trim();
+  }
+
+  private isAppointmentDepartment(dept: Department): boolean {
+    const key = this.departmentKey(`${dept.name} ${dept.code} ${dept.type}`);
+    const excluded = ['finance', 'administration', 'billing', 'pharmacy', 'laboratory', 'lab', 'frontdesk', 'ward'];
+    return !excluded.some(item => key.includes(item));
+  }
+
+  private fallbackDepartment(name: string, specialization = ''): Department {
+    const cleanName = name || 'Outpatient';
+    return {
+      id: `dept-${this.departmentKey(cleanName)}`,
+      name: cleanName,
+      code: this.departmentKey(cleanName).slice(0, 6).toUpperCase(),
+      type: 'Clinical',
+      location: 'Main Campus',
+      specializations: specialization ? [specialization] : ['General Practice'],
+      headDoctorName: '',
+      totalBeds: 0,
+      occupiedBeds: 0,
+      activeStaffCount: 0,
+      icon: 'local_hospital',
+    };
+  }
+
+  private defaultAppointmentDepartments(): Department[] {
+    return [
+      { id: 'opd', name: 'Outpatient', code: 'OPD', type: 'Clinical', location: 'Block A', specializations: ['Internal Medicine', 'General Practice'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'local_hospital' },
+      { id: 'er', name: 'Emergency', code: 'ER', type: 'Clinical', location: 'Ground Floor', specializations: ['Emergency Medicine', 'Trauma Care'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'emergency' },
+      { id: 'ped', name: 'Pediatrics', code: 'PED', type: 'Clinical', location: 'Block B', specializations: ['Pediatrics', 'Neonatology'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'child_care' },
+      { id: 'mat', name: 'Maternity', code: 'MAT', type: 'Clinical', location: 'Block C', specializations: ['Obstetrics', 'Gynecology'], headDoctorName: '', totalBeds: 0, occupiedBeds: 0, activeStaffCount: 0, icon: 'pregnant_woman' },
+    ];
   }
 }

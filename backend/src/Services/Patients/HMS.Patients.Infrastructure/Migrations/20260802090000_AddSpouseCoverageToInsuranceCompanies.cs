@@ -1,3 +1,5 @@
+using HMS.Patients.Infrastructure;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +7,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace HMS.Patients.Infrastructure.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(PatientsDbContext))]
+    [Migration("20260802090000_AddSpouseCoverageToInsuranceCompanies")]
     public partial class AddSpouseCoverageToInsuranceCompanies : Migration
     {
         /// <inheritdoc />
