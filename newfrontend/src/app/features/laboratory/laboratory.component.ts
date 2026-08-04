@@ -19,14 +19,25 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
           <p class="text-xs text-slate-500 mt-1">Pathology, biochemistry, and automated diagnostic result documentation</p>
         </div>
 
-        @if (!isFormVisible() && !selectedLabForResult()) {
-          <button 
-            (click)="openOrderForm()" 
-            class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 self-start sm:self-auto hover:bg-slate-800 transition-all active:scale-95">
-            <span class="material-icons text-base">biotech</span>
-            <span>Order Lab Test</span>
-          </button>
-        }
+        <div class="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          @if (canEnterLabResult()) {
+            <button
+              type="button"
+              (click)="refreshPaidQueue()"
+              class="px-4 py-2.5 bg-white text-purple-700 font-semibold rounded-2xl text-xs border border-purple-100 shadow-sm flex items-center gap-2 hover:bg-purple-50 transition-all">
+              <span class="material-icons text-base">refresh</span>
+              <span>Refresh Paid Queue</span>
+            </button>
+          }
+          @if (!isFormVisible() && !selectedLabForResult() && canOrderLab()) {
+            <button
+              (click)="openOrderForm()"
+              class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95">
+              <span class="material-icons text-base">biotech</span>
+              <span>Order Lab Test</span>
+            </button>
+          }
+        </div>
       </div>
 
       <!-- INLINE FORM AREA (Order Entry or Result Entry) -->
@@ -121,6 +132,7 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                               <strong class="block text-xs">{{ test.testName }}</strong>
                               <span class="text-[10px] font-semibold opacity-70">{{ test.subGroup }} - {{ test.specimenType || 'As applicable' }}</span>
                               <span class="mt-1 block text-[10px] font-bold text-slate-400">Ref: {{ test.referenceRange || 'Report based' }} {{ test.unit }}</span>
+                              <span class="mt-1 block text-[11px] font-black text-purple-700">{{ test.price.toFixed(2) }} {{ test.currency }}</span>
                             </span>
                           </button>
                         }
@@ -130,12 +142,18 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                 </div>
 
                 <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <h4 class="text-sm font-black text-slate-900">Order basket</h4>
+                  <div class="flex items-center justify-between gap-3">
+                    <h4 class="text-sm font-black text-slate-900">Order basket</h4>
+                    <span class="rounded-full bg-purple-100 px-2.5 py-1 text-[10px] font-black text-purple-700">
+                      {{ selectedOrderTotal().toFixed(2) }} {{ selectedOrderCurrency() }}
+                    </span>
+                  </div>
                   <div class="mt-3 space-y-2">
                     @for (test of selectedOrderTests(); track test.id) {
                       <div class="rounded-xl border-l-4 border-purple-500 bg-white p-3 text-xs font-bold text-slate-700 shadow-sm">
                         <div>{{ test.testName }}</div>
                         <div class="mt-1 text-[10px] font-semibold text-slate-400">{{ test.groupName }} / {{ test.subGroup }}</div>
+                        <div class="mt-1 text-[10px] font-black text-purple-700">{{ test.price.toFixed(2) }} {{ test.currency }}</div>
                       </div>
                     } @empty {
                       <div class="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-[11px] font-bold text-slate-400">
@@ -358,13 +376,21 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
 
               <!-- Action Bar -->
               <div class="pt-2">
-                @if (lab.status !== 'COMPLETED') {
+                @if (lab.status === 'AWAITING_PAYMENT') {
+                  <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center text-[10px] font-black uppercase tracking-widest text-amber-700">
+                    Payment required — not released to laboratory
+                  </div>
+                } @else if (lab.status !== 'COMPLETED' && canEnterLabResult()) {
                   <button 
                     (click)="openResultForm(lab)" 
                     class="w-full py-2.5 bg-slate-900 hover:bg-purple-600 text-white font-bold rounded-xl text-[11px] shadow-lg shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2">
                     <span class="material-icons text-base">science</span>
                     Record Result
                   </button>
+                } @else if (lab.status !== 'COMPLETED') {
+                  <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                    Paid — available to laboratory technician
+                  </div>
                 } @else {
                   <div class="flex items-center justify-between gap-3 border-t border-slate-50 pt-2">
                     <span class="text-[9px] font-bold uppercase tracking-widest text-slate-400">Tech: {{ lab.labTechName || 'Lab' }}</span>
@@ -418,6 +444,12 @@ export class LaboratoryComponent {
     this.selectedOrderTestIds()
       .map(id => this.store.diagnosticTests().find(test => test.id === id))
       .filter((test): test is DiagnosticTest => !!test));
+
+  selectedOrderTotal = computed(() =>
+    this.selectedOrderTests().reduce((total, test) => total + test.price, 0));
+
+  selectedOrderCurrency = computed(() =>
+    this.selectedOrderTests()[0]?.currency || 'ETB');
 
   orderDoctors = computed(() => {
     const profiles = this.store.doctors().map(doctor => ({
@@ -494,6 +526,20 @@ export class LaboratoryComponent {
     return this.selectedOrderTestIds().includes(id);
   }
 
+  canOrderLab(): boolean {
+    const role = this.store.currentUser()?.role;
+    return role === 'DOCTOR' || role === 'ADMIN';
+  }
+
+  canEnterLabResult(): boolean {
+    const role = this.store.currentUser()?.role;
+    return role === 'LAB_TECHNICIAN' || role === 'ADMIN';
+  }
+
+  refreshPaidQueue() {
+    this.store.refreshLabOrders();
+  }
+
   submitOrder() {
     if (this.orderForm.invalid) {
       this.orderForm.markAllAsTouched();
@@ -534,6 +580,14 @@ export class LaboratoryComponent {
   }
 
   openResultForm(lab: LabOrder) {
+    if (lab.status === 'AWAITING_PAYMENT') {
+      this.store.addToast('error', 'Payment Required', 'This request has not been fully paid and cannot be processed by the laboratory.');
+      return;
+    }
+    if (!this.canEnterLabResult()) {
+      this.store.addToast('error', 'Laboratory Role Required', 'Only a laboratory technician can enter diagnostic results.');
+      return;
+    }
     this.selectedLabForResult.set(lab);
     this.isFormVisible.set(false); // Close order form if open
     this.resultRows.set(this.buildResultRows(lab));
@@ -807,6 +861,7 @@ export class LaboratoryComponent {
 
   getLabStatusClass(status: string): string {
     switch (status) {
+      case 'AWAITING_PAYMENT': return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'ORDERED': return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'SAMPLE_COLLECTED': return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'IN_ANALYSIS': return 'bg-purple-50 text-purple-700 border-purple-200';

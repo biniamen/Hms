@@ -1,7 +1,10 @@
 using HMS.Clinical.Infrastructure;
 using HMS.Contracts;
 using HMS.SharedKernel;
+using HMS.SharedKernel.Constants;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,6 +12,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
 builder.Services.AddHmsCors(builder.Configuration);
+builder.Services.AddHttpClient();
 
 var connectionString = builder.Configuration.RequireConnectionString("ClinicalDb");
 var resetLegacySchema = builder.Configuration.GetValue("Database:ResetLegacySchemaOnStartup", false);
@@ -268,23 +272,95 @@ app.MapPut("/api/clinical/diagnostic-tests/{id:guid}", async (Guid id, CreateDia
     return Results.Ok(ApiResponse<DiagnosticTestDto>.Ok(ToDiagnosticTestDto(test), "Diagnostic catalog item updated."));
 }).WithValidation<CreateDiagnosticTestRequest>();
 
-app.MapGet("/api/clinical/lab-requests", async (ClinicalDbContext db) =>
+app.MapGet("/api/clinical/lab-requests", async (
+    ClinicalDbContext db,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext) =>
 {
     var records = await db.LabRequests
         .AsNoTracking()
         .OrderByDescending(request => request.OrderedAtUtc)
         .ToListAsync();
 
-    var labRequests = records.Select(ToLabRequestDto).ToList();
+    var paymentSnapshot = await GetLabPaymentSnapshotAsync(httpClientFactory, configuration, httpContext);
+    var role = httpContext.User.FindFirstValue(ClaimTypes.Role) ?? "";
+    var isLabTechnician = role.Equals(HmsRoles.LabTechnician, StringComparison.OrdinalIgnoreCase);
+
+    if (isLabTechnician && !paymentSnapshot.Success)
+    {
+        return Results.Problem(
+            detail: paymentSnapshot.Message,
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Billing verification unavailable");
+    }
+
+    var visibleRecords = isLabTechnician
+        ? records.Where(request => paymentSnapshot.PaidLabRequestIds.Contains(request.Id))
+        : records;
+
+    var labRequests = visibleRecords
+        .Select(request =>
+        {
+            var dto = ToLabRequestDto(request);
+            return paymentSnapshot.PaidLabRequestIds.Contains(request.Id) &&
+                   request.Status.Equals("Awaiting Payment", StringComparison.OrdinalIgnoreCase)
+                ? dto with { Status = "Requested" }
+                : dto;
+        })
+        .ToList();
 
     return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(labRequests));
-});
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.LabTechnician, HmsRoles.Admin);
 
-app.MapPost("/api/clinical/lab-requests", async (CreateLabRequestRequest request, ClinicalDbContext db) =>
+app.MapPost("/api/clinical/lab-requests", async (
+    CreateLabRequestRequest request,
+    ClinicalDbContext db,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext) =>
 {
     if (string.IsNullOrWhiteSpace(request.TestName))
     {
         return Results.BadRequest(ApiResponse<object>.Fail("At least one diagnostic test is required."));
+    }
+
+    var catalogIds = (request.TestCatalogIds ?? Array.Empty<Guid>())
+        .Where(id => id != Guid.Empty)
+        .Distinct()
+        .ToArray();
+
+    if (catalogIds.Length == 0)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Select one or more priced diagnostic catalog tests."));
+    }
+
+    var selectedTests = await db.DiagnosticTests
+        .AsNoTracking()
+        .Where(test => catalogIds.Contains(test.Id) && test.IsActive)
+        .OrderBy(test => test.GroupName)
+        .ThenBy(test => test.TestName)
+        .ToListAsync();
+
+    if (selectedTests.Count != catalogIds.Length)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("One or more selected diagnostic tests are missing or inactive."));
+    }
+
+    if (selectedTests.Any(test => test.Price <= 0))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Every selected diagnostic test must have a price greater than zero before it can be ordered."));
+    }
+
+    var currencies = selectedTests
+        .Select(test => Clean(test.Currency, "ETB").ToUpperInvariant())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    if (currencies.Length != 1)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("All tests in one laboratory request must use the same currency."));
     }
 
     var labRequest = new LabRequest
@@ -293,12 +369,12 @@ app.MapPost("/api/clinical/lab-requests", async (CreateLabRequestRequest request
         PatientId = request.PatientId,
         DoctorId = request.DoctorId,
         TestName = Clean(request.TestName, ""),
-        TestCatalogIds = string.Join(",", (request.TestCatalogIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty)),
+        TestCatalogIds = string.Join(",", catalogIds),
         Category = Clean(request.Category, "Laboratory"),
         Priority = Clean(request.Priority, "Routine"),
         SpecimenType = Clean(request.SpecimenType, ""),
         ClinicalNote = Clean(request.ClinicalNote, ""),
-        Status = "Requested",
+        Status = "Awaiting Payment",
         OrderedAtUtc = DateTime.UtcNow,
         UpdatedAtUtc = DateTime.UtcNow
     };
@@ -306,12 +382,53 @@ app.MapPost("/api/clinical/lab-requests", async (CreateLabRequestRequest request
     db.LabRequests.Add(labRequest);
     await db.SaveChangesAsync();
 
+    var invoiceRequest = new CreateInvoiceRequest(
+        labRequest.PatientId,
+        $"Laboratory services - {labRequest.TestName} ({currencies[0]})",
+        0,
+        0,
+        0,
+        "Cash",
+        null,
+        selectedTests.Select(test => new InvoiceItemRequest(
+            $"LAB-{test.Id.ToString("N")[..8]}",
+            test.TestName,
+            1,
+            test.Price,
+            0,
+            "LAB_REQUEST",
+            labRequest.Id,
+            labRequest.OrderedAtUtc)).ToArray());
+
+    var invoiceResult = await CreateLabInvoiceAsync(
+        invoiceRequest,
+        httpClientFactory,
+        configuration,
+        httpContext);
+
+    if (!invoiceResult.Success)
+    {
+        db.LabRequests.Remove(labRequest);
+        await db.SaveChangesAsync();
+        return Results.Problem(
+            detail: invoiceResult.Message,
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Laboratory invoice could not be created");
+    }
+
     return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(
         ToLabRequestDto(labRequest),
-        "Lab request created."));
-});
+        "Lab request sent to Billing. It will be released to the laboratory after full payment."));
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Admin);
 
-app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (Guid id, UpdateLabResultRequest request, ClinicalDbContext db) =>
+app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (
+    Guid id,
+    UpdateLabResultRequest request,
+    ClinicalDbContext db,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext) =>
 {
     var allowedStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -333,6 +450,21 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (Guid id, Update
     if (labRequest is null)
     {
         return Results.NotFound(ApiResponse<object>.Fail("Lab request not found."));
+    }
+
+    var paymentSnapshot = await GetLabPaymentSnapshotAsync(httpClientFactory, configuration, httpContext);
+    if (!paymentSnapshot.Success)
+    {
+        return Results.Problem(
+            detail: paymentSnapshot.Message,
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Billing verification unavailable");
+    }
+
+    if (!paymentSnapshot.PaidLabRequestIds.Contains(labRequest.Id))
+    {
+        return Results.Conflict(ApiResponse<object>.Fail(
+            "Laboratory payment is not fully cleared. Results cannot be entered until the related invoice is paid."));
     }
 
     var nextStatus = request.Status.Trim();
@@ -361,7 +493,8 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (Guid id, Update
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<LabRequestDto>.Ok(ToLabRequestDto(labRequest), "Lab result updated."));
-});
+})
+.RequireHmsRoles(HmsRoles.LabTechnician, HmsRoles.Admin);
 
 app.MapGet("/api/clinical/enterprise-records", async (string? area, ClinicalDbContext db) =>
 {
@@ -577,6 +710,89 @@ static int StatusOrder(string status) => status switch
     _ => 5
 };
 
+static async Task<ServiceCallResult> CreateLabInvoiceAsync(
+    CreateInvoiceRequest invoiceRequest,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{BillingBaseUrl(configuration)}/api/billing/invoices")
+        {
+            Content = JsonContent.Create(invoiceRequest)
+        };
+        ForwardAuthorization(httpContext, request);
+
+        using var response = await client.SendAsync(request);
+        if (response.IsSuccessStatusCode)
+        {
+            return new ServiceCallResult(true, "Invoice created.");
+        }
+
+        var error = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        return new ServiceCallResult(false, error?.Message ?? "Billing service rejected the laboratory invoice.");
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+    {
+        return new ServiceCallResult(false, $"Billing service is unavailable: {exception.Message}");
+    }
+}
+
+static async Task<LabPaymentSnapshot> GetLabPaymentSnapshotAsync(
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{BillingBaseUrl(configuration)}/api/billing/invoices");
+        ForwardAuthorization(httpContext, request);
+
+        using var response = await client.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            return new LabPaymentSnapshot(false, [], "Billing service rejected the payment verification request.");
+        }
+
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<InvoiceDto[]>>();
+        var paidLabRequestIds = (envelope?.Data ?? [])
+            .Where(invoice =>
+                invoice.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase) &&
+                invoice.Balance <= 0)
+            .SelectMany(invoice => invoice.Items)
+            .Where(item =>
+                item.ReferenceType?.Equals("LAB_REQUEST", StringComparison.OrdinalIgnoreCase) == true &&
+                item.ReferenceId.HasValue)
+            .Select(item => item.ReferenceId!.Value)
+            .ToHashSet();
+
+        return new LabPaymentSnapshot(true, paidLabRequestIds, "Payment information loaded.");
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+    {
+        return new LabPaymentSnapshot(false, [], $"Billing service is unavailable: {exception.Message}");
+    }
+}
+
+static string BillingBaseUrl(IConfiguration configuration) =>
+    Clean(configuration["Services:BillingBaseUrl"], "http://localhost:5105").TrimEnd('/');
+
+static void ForwardAuthorization(HttpContext httpContext, HttpRequestMessage request)
+{
+    var authorization = httpContext.Request.Headers.Authorization.ToString();
+    if (!string.IsNullOrWhiteSpace(authorization))
+    {
+        request.Headers.TryAddWithoutValidation("Authorization", authorization);
+    }
+}
+
 static string Clean(string? value, string fallback) =>
     string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
@@ -596,6 +812,10 @@ sealed record CreateEnterpriseRecordRequest(
     string? Details);
 
 sealed record EnterpriseStatusRequest(string Status);
+
+sealed record ServiceCallResult(bool Success, string Message);
+
+sealed record LabPaymentSnapshot(bool Success, HashSet<Guid> PaidLabRequestIds, string Message);
 
 sealed record EnterpriseRecordDto(
     Guid Id,

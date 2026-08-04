@@ -463,7 +463,7 @@ export interface Prescription {
   pharmacyNotes?: string;
 }
 
-export type LabOrderStatus = 'ORDERED' | 'SAMPLE_COLLECTED' | 'IN_ANALYSIS' | 'COMPLETED';
+export type LabOrderStatus = 'AWAITING_PAYMENT' | 'ORDERED' | 'SAMPLE_COLLECTED' | 'IN_ANALYSIS' | 'COMPLETED';
 
 export interface LabOrder {
   id: string;
@@ -547,9 +547,12 @@ export interface ClinicalDiagnosis {
 
 export interface InvoiceItem {
   id: string;
+  serviceCode?: string;
   description: string;
   category: 'Consultation' | 'Pharmacy' | 'Laboratory' | 'Room Charge' | 'Procedure' | 'Surgery';
   amount: number;
+  referenceType?: string;
+  referenceId?: string;
 }
 
 export type InvoiceStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'INSURANCE_PENDING';

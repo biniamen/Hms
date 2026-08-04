@@ -194,7 +194,7 @@ export class MainLayoutComponent {
     { label: 'Appointments', route: '/appointments', icon: 'event', badge: () => this.store.appointments().length },
     { label: 'Clinical EHR', route: '/clinical-ehr', icon: 'description', allowedRoles: ['DOCTOR', 'NURSE', 'ADMIN'] },
     { label: 'Pharmacy', route: '/pharmacy', icon: 'medication', badge: () => this.store.pendingPrescriptionsCount(), allowedRoles: ['PHARMACIST', 'DOCTOR', 'ADMIN', 'NURSE'] },
-    { label: 'Laboratory', route: '/laboratory', icon: 'biotech', badge: () => this.store.pendingLabOrdersCount(), allowedRoles: ['LAB_TECHNICIAN', 'DOCTOR', 'NURSE', 'ADMIN'] },
+    { label: 'Laboratory', route: '/laboratory', icon: 'biotech', badge: () => this.store.pendingLabOrdersCount(), allowedRoles: ['LAB_TECHNICIAN', 'DOCTOR', 'ADMIN'] },
     { label: 'Billing', route: '/billing', icon: 'payments', allowedRoles: ['ACCOUNTANT', 'CASHIER', 'ADMIN', 'RECEPTIONIST'] },
     { label: 'Doctor Pricing', route: '/doctor-pricing', icon: 'price_change', allowedRoles: ['ACCOUNTANT', 'ADMIN'] },
     { label: 'Wards & Beds', route: '/wards-beds', icon: 'king_bed', badge: () => `${this.store.bedOccupancyRate()}%`, allowedRoles: ['NURSE', 'DOCTOR', 'ADMIN', 'RECEPTIONIST'] },

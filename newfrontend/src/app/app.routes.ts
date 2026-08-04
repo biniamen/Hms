@@ -15,7 +15,7 @@ export const routes: Routes = [
       { path: 'appointments', loadComponent: () => import('./features/appointments/appointments.component').then(m => m.AppointmentsComponent) },
       { path: 'clinical-ehr', loadComponent: () => import('./features/clinical-ehr/clinical-ehr.component').then(m => m.ClinicalEhrComponent), canActivate: [roleGuard], data: { roles: ['DOCTOR', 'NURSE', 'ADMIN'] } },
       { path: 'pharmacy', loadComponent: () => import('./features/pharmacy/pharmacy.component').then(m => m.PharmacyComponent), canActivate: [roleGuard], data: { roles: ['PHARMACIST', 'DOCTOR', 'NURSE', 'ADMIN'] } },
-      { path: 'laboratory', loadComponent: () => import('./features/laboratory/laboratory.component').then(m => m.LaboratoryComponent), canActivate: [roleGuard], data: { roles: ['LAB_TECHNICIAN', 'DOCTOR', 'NURSE', 'ADMIN'] } },
+      { path: 'laboratory', loadComponent: () => import('./features/laboratory/laboratory.component').then(m => m.LaboratoryComponent), canActivate: [roleGuard], data: { roles: ['LAB_TECHNICIAN', 'DOCTOR', 'ADMIN'] } },
       { path: 'billing', loadComponent: () => import('./features/billing/billing-insurance.component').then(m => m.BillingInsuranceComponent), canActivate: [roleGuard], data: { roles: ['ACCOUNTANT', 'CASHIER', 'ADMIN', 'RECEPTIONIST'] } },
       { path: 'doctor-pricing', loadComponent: () => import('./features/billing/doctor-pricing.component').then(m => m.DoctorPricingComponent), canActivate: [roleGuard], data: { roles: ['ACCOUNTANT', 'ADMIN'] } },
       { path: 'wards-beds', loadComponent: () => import('./features/wards/wards-beds.component').then(m => m.WardsBedsComponent), canActivate: [roleGuard], data: { roles: ['NURSE', 'DOCTOR', 'ADMIN', 'RECEPTIONIST'] } },

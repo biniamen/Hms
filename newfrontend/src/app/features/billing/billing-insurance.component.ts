@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, signal, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
@@ -21,6 +21,13 @@ import { BillingInvoice } from '../../core/models';
         </div>
 
         <div class="flex flex-wrap gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            (click)="store.refreshBillingInvoices()"
+            class="px-4 py-2.5 bg-white text-purple-700 font-semibold rounded-xl text-xs shadow-sm border border-purple-100 flex items-center gap-2 hover:bg-purple-50">
+            <span class="material-icons text-base">refresh</span>
+            <span>Refresh Payment Queue</span>
+          </button>
           <button 
             (click)="openInsuranceModal()" 
             class="px-4 py-2.5 bg-white text-blue-700 font-semibold rounded-xl text-xs shadow-sm border border-blue-100 flex items-center gap-2 hover:bg-blue-50">
@@ -37,7 +44,7 @@ import { BillingInvoice } from '../../core/models';
       </div>
 
       <!-- SUMMARY TILES STRIP -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div class="bg-white p-5 rounded-2xl border border-slate-200/80 subtle-shadow">
           <div class="text-xs font-semibold text-slate-500 uppercase">Outstanding Receivables</div>
           <div class="text-2xl font-black font-display text-slate-900 mt-1">
@@ -60,6 +67,16 @@ import { BillingInvoice } from '../../core/models';
             &#36;3,650.00
           </div>
           <div class="text-[10px] text-emerald-600 font-semibold mt-1">Cleared transactions</div>
+        </div>
+
+        <div class="bg-white p-5 rounded-2xl border border-purple-200 subtle-shadow">
+          <div class="text-xs font-semibold text-slate-500 uppercase">Pending Lab Payments</div>
+          <div class="text-2xl font-black font-display text-purple-700 mt-1">
+            {{ pendingLabInvoices().length }}
+          </div>
+          <div class="text-[10px] text-purple-600 font-semibold mt-1">
+            {{ pendingLabAmount().toLocaleString('en-US', { minimumFractionDigits: 2 }) }} awaiting clearance
+          </div>
         </div>
       </div>
 
@@ -138,6 +155,11 @@ import { BillingInvoice } from '../../core/models';
                   <td class="py-3.5 px-4 font-mono">
                     <div class="font-bold text-slate-900">{{ inv.invoiceNumber }}</div>
                     <div class="text-[10px] text-slate-400">Date: {{ inv.date }}</div>
+                    @if (isLabInvoice(inv)) {
+                      <span class="mt-1 inline-flex rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-purple-700">
+                        Lab payment clearance
+                      </span>
+                    }
                   </td>
 
                   <td class="py-3.5 px-4">
@@ -148,7 +170,7 @@ import { BillingInvoice } from '../../core/models';
                   <td class="py-3.5 px-4">
                     <div class="text-[11px] text-slate-700">
                       @for (item of inv.items; track item.id) {
-                        <div>• {{ item.description }} (&#36;{{ item.amount }})</div>
+                        <div>• {{ item.description }} ({{ item.amount.toFixed(2) }})</div>
                       }
                     </div>
                   </td>
@@ -287,6 +309,9 @@ import { BillingInvoice } from '../../core/models';
               <div>
                 <h3 class="text-base font-bold text-slate-900 font-display">Record Patient Payment</h3>
                 <p class="text-xs text-slate-400">{{ selectedInvForPayment()?.invoiceNumber }} for {{ store.patientDisplayName(selectedInvForPayment()?.patientId || '') }}</p>
+                @if (isLabInvoice(selectedInvForPayment())) {
+                  <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-purple-700">Full payment releases this request to the laboratory technician.</p>
+                }
               </div>
               <button (click)="selectedInvForPayment.set(null)" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
                 <span class="material-icons">close</span>
@@ -400,6 +425,14 @@ export class BillingInsuranceComponent {
   isInvoiceModalOpen = signal(false);
   isInsuranceModalOpen = signal(false);
   selectedInvForPayment = signal<BillingInvoice | null>(null);
+
+  pendingLabInvoices = computed(() =>
+    this.store.billingInvoices().filter(invoice => this.isLabInvoice(invoice) && invoice.status !== 'PAID'));
+
+  pendingLabAmount = computed(() =>
+    this.pendingLabInvoices().reduce(
+      (total, invoice) => total + Math.max(0, invoice.totalAmount - invoice.patientPaidAmount),
+      0));
 
   invForm = new FormGroup({
     patientId: new FormControl('', [Validators.required]),
@@ -524,6 +557,10 @@ export class BillingInsuranceComponent {
     this.selectedInvForPayment.set(inv);
     const due = inv.totalAmount - inv.insuranceCoveredAmount - inv.patientPaidAmount;
     this.payForm.patchValue({ amount: Math.max(due, 0) });
+  }
+
+  isLabInvoice(invoice: BillingInvoice | null | undefined): boolean {
+    return !!invoice && invoice.items.some(item => item.referenceType?.toUpperCase() === 'LAB_REQUEST');
   }
 
   submitPayment() {

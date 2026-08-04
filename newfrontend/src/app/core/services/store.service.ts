@@ -338,7 +338,7 @@ export class StoreService {
     const roleEndpoints: Record<string, string[]> = {
       ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
       DOCTOR: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
-      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
+      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'diagnosticTests', 'prescriptions', 'vitals', 'diagnoses', 'clinicalEncounters'],
       RECEPTIONIST: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'invoices'],
       PHARMACIST: ['doctors', 'patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
       LAB_TECHNICIAN: ['doctors', 'patients', 'appointments', 'diagnosticTests', 'labRequests', 'enterpriseRecords'],
@@ -481,7 +481,9 @@ export class StoreService {
     const employee = this.employees().find(e => e.id === l.doctorId);
     const normalizedStatus = (l.status || '').toLowerCase();
     const status: LabOrder['status'] =
-      normalizedStatus.includes('complete') || normalizedStatus.includes('verified') || normalizedStatus.includes('result')
+      normalizedStatus.includes('awaiting') && normalizedStatus.includes('payment')
+        ? 'AWAITING_PAYMENT'
+        : normalizedStatus.includes('complete') || normalizedStatus.includes('verified') || normalizedStatus.includes('result')
         ? 'COMPLETED'
         : normalizedStatus.includes('collected')
           ? 'SAMPLE_COLLECTED'
@@ -572,8 +574,6 @@ export class StoreService {
 
   private mapBackendInvoice(i: BackendInvoice): BillingInvoice {
     const patient = this.patients().find(p => p.id === i.patientId);
-    const totalDue = i.total;
-    const insurancePortion = i.paid > 0 ? Math.min(i.paid * 0.7, totalDue * 0.8) : 0;
     return {
       id: i.id,
       invoiceNumber: i.invoiceNumber,
@@ -584,12 +584,19 @@ export class StoreService {
       dueDate: i.dueAtUtc ? new Date(i.dueAtUtc).toISOString().split('T')[0] : '',
       items: i.items.map((item: BackendInvoiceItem) => ({
         id: item.id,
+        serviceCode: item.serviceCode,
         description: item.description,
-        category: 'Procedure' as const,
+        category: item.referenceType?.toUpperCase() === 'LAB_REQUEST'
+          ? 'Laboratory' as const
+          : item.referenceType?.toUpperCase() === 'DOCTOR'
+            ? 'Consultation' as const
+            : 'Procedure' as const,
         amount: item.lineTotal,
+        referenceType: item.referenceType,
+        referenceId: item.referenceId,
       })),
       totalAmount: i.total,
-      insuranceCoveredAmount: Math.round(insurancePortion * 100) / 100,
+      insuranceCoveredAmount: 0,
       patientPaidAmount: i.paid || 0,
       status: this.mapInvoiceStatus(i.status),
     };
@@ -871,10 +878,38 @@ export class StoreService {
       next: (res) => {
         if (res.data) {
           this.labOrders.update(current => [this.mapBackendLabRequest(res.data), ...current]);
-          this.addToast('success', 'Lab Test Ordered', `${lab.testName} for ${lab.patientName}.`);
+          this.addToast('success', 'Sent to Billing', `${lab.testName} was invoiced for ${lab.patientName}. The laboratory will receive it after full payment.`);
         }
       },
-      error: () => this.addToast('success', 'Lab Test Ordered', `${lab.testName} (offline mode).`),
+      error: (error) => this.addToast(
+        'error',
+        'Lab Order Not Created',
+        error?.error?.detail || error?.error?.message || 'The lab request or its invoice could not be created.'
+      ),
+    });
+  }
+
+  refreshLabOrders() {
+    this.api.getLabRequests().subscribe({
+      next: (response) => {
+        if (response.data) {
+          this.labOrders.set(response.data.map(item => this.mapBackendLabRequest(item)));
+          this.refreshResolvedDisplayValues();
+        }
+      },
+      error: () => this.addToast('error', 'Queue Refresh Failed', 'Unable to verify paid laboratory requests with Billing.'),
+    });
+  }
+
+  refreshBillingInvoices() {
+    this.api.getInvoices().subscribe({
+      next: (response) => {
+        if (response.data) {
+          this.billingInvoices.set(response.data.map(item => this.mapBackendInvoice(item)));
+          this.refreshResolvedDisplayValues();
+        }
+      },
+      error: () => this.addToast('error', 'Billing Refresh Failed', 'Unable to load the latest laboratory and patient invoices.'),
     });
   }
 
@@ -887,6 +922,8 @@ export class StoreService {
       unit: test.unit,
       referenceRange: test.referenceRange,
       sortOrder: test.sortOrder,
+      price: test.price,
+      currency: test.currency,
       isActive: test.isActive,
     };
     const request = test.id

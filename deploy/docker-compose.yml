@@ -158,10 +158,13 @@ services:
       <<: *api-base
       <<: *jwt-env
       ConnectionStrings__ClinicalDb: Host=postgres;Port=5432;Database=hms_clinical_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      Services__BillingBaseUrl: http://billing-api:8080
     ports:
       - "5104:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      billing-api:
         condition: service_healthy
     healthcheck:
       <<: *healthcheck
