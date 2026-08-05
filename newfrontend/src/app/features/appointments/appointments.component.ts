@@ -64,12 +64,25 @@ type AppointmentDoctor = {
                 </h4>
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Select Patient *</label>
-                  <select formControlName="patientId" [class]="inputClasses">
+                  <select formControlName="patientId" (change)="onBookingPatientChange($event)" [class]="inputClasses">
                     @for (p of store.patients(); track p.id) {
                       <option [value]="p.id">{{ p.name }} ({{ p.mrn }})</option>
                     }
                   </select>
                 </div>
+
+                <!-- Insurance detection before the consultation fee is processed for payment -->
+                @if (bookingPatientInsurance()?.isInsured) {
+                  <div class="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-[11px] font-semibold text-blue-900">
+                    <span class="material-icons text-sm text-blue-600">verified_user</span>
+                    <span>Insurance detected — {{ bookingPatientInsurance()?.provider }} ({{ bookingPatientInsurance()?.coveragePercent }}% covered). The consultation fee will be routed through insurance; only the patient's copay is collected at the desk.</span>
+                  </div>
+                } @else {
+                  <div class="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-semibold text-slate-500">
+                    <span class="material-icons text-sm text-slate-400">payments</span>
+                    <span>No insurance on file — the consultation fee will be billed as a cash charge.</span>
+                  </div>
+                }
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Attending Physician *</label>
                   <select formControlName="doctorId" [class]="inputClasses">
@@ -231,6 +244,7 @@ export class AppointmentsComponent {
   isFormVisible = signal(false);
   selectedStatusFilter = signal<string>('ALL');
   selectedDepartment = signal<string>('Outpatient');
+  bookingPatientInsurance = signal<{ isInsured: boolean; provider: string; coveragePercent: number } | null>(null);
 
   // Unified input classes to avoid @apply bug
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/5 transition-all';
@@ -322,7 +336,22 @@ export class AppointmentsComponent {
       patientId: this.store.patients()[0]?.id || '',
       doctorId: doctor?.id || '',
     });
+    this.bookingPatientInsurance.set(this.insuranceOf(this.store.patients()[0]?.id));
     this.isFormVisible.set(true);
+  }
+
+  onBookingPatientChange(event: Event) {
+    const patientId = (event.target as HTMLSelectElement).value;
+    this.bookingPatientInsurance.set(this.insuranceOf(patientId));
+  }
+
+  /** Detects the patient's insurance before the consultation fee is processed for payment. */
+  private insuranceOf(patientId?: string): { isInsured: boolean; provider: string; coveragePercent: number } | null {
+    if (!patientId) return null;
+    const coverage = this.store.insuranceCoverageFor(patientId);
+    return coverage.isInsured
+      ? { isInsured: true, provider: coverage.provider, coveragePercent: coverage.coveragePercent }
+      : { isInsured: false, provider: '', coveragePercent: 0 };
   }
 
   onDepartmentChange(event: Event) {
@@ -358,6 +387,7 @@ export class AppointmentsComponent {
     }
 
     this.isFormVisible.set(false);
+    this.bookingPatientInsurance.set(null);
     this.setSelectedDepartment(this.departmentOptions()[0]?.name || 'Outpatient');
     this.aptForm.reset({
       patientId: this.store.patients()[0]?.id || '',

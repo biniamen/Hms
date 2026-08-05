@@ -179,8 +179,11 @@ import { BillingInvoice } from '../../core/models';
                     &#36;{{ inv.totalAmount.toFixed(2) }}
                   </td>
 
-                  <td class="py-3.5 px-4 font-bold text-blue-700 font-mono">
-                    &#36;{{ inv.insuranceCoveredAmount.toFixed(2) }}
+                  <td class="py-3.5 px-4">
+                    <div class="font-bold text-blue-700 font-mono">&#36;{{ inv.insuranceCoveredAmount.toFixed(2) }}</div>
+                    @if (inv.insuranceProvider) {
+                      <div class="mt-0.5 max-w-[140px] truncate text-[9px] font-black uppercase tracking-widest text-blue-500">{{ inv.insuranceProvider }}</div>
+                    }
                   </td>
 
                   <td class="py-3.5 px-4 font-bold text-emerald-700 font-mono">
@@ -200,7 +203,7 @@ import { BillingInvoice } from '../../core/models';
                           Record Payment
                         </button>
                       }
-                      @if (inv.status === 'UNPAID' && inv.insuranceCoveredAmount > 0) {
+                      @if ((inv.status === 'UNPAID' || inv.status === 'PARTIALLY_PAID') && inv.insuranceCoveredAmount > 0) {
                         <button (click)="store.submitInsuranceClaim(inv.id)" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] shadow-xs">
                           Submit Claim
                         </button>
@@ -267,11 +270,19 @@ import { BillingInvoice } from '../../core/models';
             <form [formGroup]="invForm" (ngSubmit)="submitInvoice()" class="space-y-4 text-xs">
               <div>
                 <label for="inv-patient-id" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Select Patient *</label>
-                <select id="inv-patient-id" formControlName="patientId" class="w-full px-3 py-2 border rounded-xl text-xs">
+                <select id="inv-patient-id" formControlName="patientId" (change)="onInvoicePatientChange($event)" class="w-full px-3 py-2 border rounded-xl text-xs">
                   @for (p of store.patients(); track p.id) {
                     <option [value]="p.id">{{ p.name }} ({{ p.mrn }})</option>
                   }
                 </select>
+                @if (invoiceCoverage()) {
+                  <p class="mt-1 text-[10px] font-semibold text-blue-700 flex items-center gap-1">
+                    <span class="material-icons text-xs">verified_user</span>
+                    Insurance detected — {{ invoiceCoverage()?.provider }} ({{ invoiceCoverage()?.coveragePercent }}% covered). This invoice will be routed through insurance for claim settlement.
+                  </p>
+                } @else {
+                  <p class="mt-1 text-[10px] font-semibold text-slate-400">No insurance on file — this invoice will be billed as cash.</p>
+                }
               </div>
 
               <div>
@@ -318,6 +329,28 @@ import { BillingInvoice } from '../../core/models';
               </button>
             </div>
 
+            @if (selectedPaymentCoverage()?.isInsured) {
+              <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4 space-y-2">
+                <div class="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-blue-800">
+                  <span class="material-icons text-sm">verified_user</span> Insurance detected
+                </div>
+                <p class="text-xs font-semibold text-blue-900">
+                  {{ selectedPaymentCoverage()?.provider }} covers {{ selectedPaymentCoverage()?.coveragePercent }}% of this charge.
+                  Insured portion: &#36;{{ (selectedPaymentCoverage()?.insuredAmount ?? 0).toFixed(2) }}
+                  @if (selectedPaymentCoverage()?.settleViaInsurance) {
+                    <span> — patient copay already collected.</span>
+                  } @else {
+                    <span> — patient copay: &#36;{{ (selectedPaymentCoverage()?.copay ?? 0).toFixed(2) }}.</span>
+                  }
+                </p>
+                @if (selectedPaymentCoverage()?.settleViaInsurance) {
+                  <p class="text-[11px] text-blue-700">The remaining balance is the insured portion. Settle it with the <strong>Insurance Direct</strong> method to release the service for the laboratory and clinical teams.</p>
+                } @else {
+                  <p class="text-[11px] text-blue-700">Collect the copay here, then submit a claim for the insured portion.</p>
+                }
+              </div>
+            }
+
             <form [formGroup]="payForm" (ngSubmit)="submitPayment()" class="space-y-4 text-xs">
               
               <div>
@@ -333,6 +366,9 @@ import { BillingInvoice } from '../../core/models';
                   <option value="Insurance Direct">Insurance Payer Wire</option>
                   <option value="Wire Transfer">Bank Electronic Transfer</option>
                 </select>
+                @if (selectedPaymentCoverage()?.isInsured) {
+                  <p class="mt-1 text-[10px] font-semibold text-blue-600">Use <strong>Insurance Direct</strong> to record the payer's remittance that settles the insured portion.</p>
+                }
               </div>
 
               <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
@@ -425,6 +461,25 @@ export class BillingInsuranceComponent {
   isInvoiceModalOpen = signal(false);
   isInsuranceModalOpen = signal(false);
   selectedInvForPayment = signal<BillingInvoice | null>(null);
+  invoiceCoverage = signal<{ isInsured: boolean; provider: string; coveragePercent: number } | null>(null);
+
+  /** Insurance detection performed before payment is collected on the selected invoice. */
+  selectedPaymentCoverage = computed(() => {
+    const inv = this.selectedInvForPayment();
+    if (!inv) return null;
+    const coverage = this.store.insuranceCoverageFor(inv.patientId);
+    if (!coverage.isInsured) return null;
+    const insuredAmount = Math.round(inv.totalAmount * (coverage.coveragePercent / 100) * 100) / 100;
+    const copay = Math.max(0, inv.totalAmount - insuredAmount - inv.patientPaidAmount);
+    const due = Math.max(0, inv.totalAmount - inv.patientPaidAmount);
+    return {
+      ...coverage,
+      insuredAmount,
+      copay,
+      due,
+      settleViaInsurance: copay <= 0 && due > 0,
+    };
+  });
 
   pendingLabInvoices = computed(() =>
     this.store.billingInvoices().filter(invoice => this.isLabInvoice(invoice) && invoice.status !== 'PAID'));
@@ -511,11 +566,38 @@ export class BillingInsuranceComponent {
 
   openInvoiceModal() {
     this.invForm.patchValue({ patientId: this.store.patients()[0]?.id || '' });
+    this.applyInvoiceInsurance();
     this.isInvoiceModalOpen.set(true);
+  }
+
+  onInvoicePatientChange(event: Event) {
+    const patientId = (event.target as HTMLSelectElement).value;
+    this.invForm.patchValue({ patientId });
+    this.applyInvoiceInsurance();
+  }
+
+  /** Detects the selected patient's coverage and pre-fills the insured portion. */
+  private applyInvoiceInsurance() {
+    const patientId = this.invForm.value.patientId;
+    if (!patientId) {
+      this.invoiceCoverage.set(null);
+      return;
+    }
+    const coverage = this.store.insuranceCoverageFor(patientId);
+    this.invoiceCoverage.set(coverage.isInsured
+      ? { isInsured: true, provider: coverage.provider, coveragePercent: coverage.coveragePercent }
+      : null);
+    const total = Number(this.invForm.value.totalAmount || 0);
+    this.invForm.patchValue({
+      insuranceCovered: coverage.isInsured
+        ? Math.round(total * (coverage.coveragePercent / 100) * 100) / 100
+        : 0,
+    });
   }
 
   closeInvoiceModal() {
     this.isInvoiceModalOpen.set(false);
+    this.invoiceCoverage.set(null);
   }
 
   submitInvoice() {
@@ -555,8 +637,22 @@ export class BillingInsuranceComponent {
 
   openPayModal(inv: BillingInvoice) {
     this.selectedInvForPayment.set(inv);
-    const due = inv.totalAmount - inv.insuranceCoveredAmount - inv.patientPaidAmount;
-    this.payForm.patchValue({ amount: Math.max(due, 0) });
+
+    // Detect the patient's insurance before processing payment: collect only the
+    // patient's copay and let the payer settle the insured portion through a claim.
+    const coverage = this.store.insuranceCoverageFor(inv.patientId);
+    const insuredAmount = coverage.isInsured
+      ? Math.round(inv.totalAmount * (coverage.coveragePercent / 100) * 100) / 100
+      : 0;
+    const paid = inv.patientPaidAmount;
+    const remainingCopay = Math.max(0, inv.totalAmount - insuredAmount - paid);
+    const due = Math.max(0, inv.totalAmount - paid);
+
+    const settleInsuredPortion = coverage.isInsured && remainingCopay <= 0 && due > 0;
+    this.payForm.patchValue({
+      amount: coverage.isInsured ? (remainingCopay > 0 ? remainingCopay : due) : due,
+      method: settleInsuredPortion ? 'Insurance Direct' : 'Credit Card',
+    });
   }
 
   isLabInvoice(invoice: BillingInvoice | null | undefined): boolean {

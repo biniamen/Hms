@@ -63,6 +63,8 @@ public sealed record InvoiceDto(
     decimal Paid,
     decimal Balance,
     string Status,
+    string PaymentType,
+    string? InsuranceProvider,
     DateTime DueAtUtc,
     DateTime CreatedAtUtc,
     InvoiceItemDto[] Items);

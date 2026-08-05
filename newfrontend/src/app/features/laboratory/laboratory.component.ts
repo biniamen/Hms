@@ -72,7 +72,7 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Target Patient *</label>
-                  <select formControlName="patientId" [class]="inputClasses">
+                  <select formControlName="patientId" (change)="onOrderPatientChange($event)" [class]="inputClasses">
                     @for (p of store.patients(); track p.id) {
                       <option [value]="p.id">{{ p.name }} (MRN: {{ p.mrn }})</option>
                     }
@@ -111,6 +111,25 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                   <div class="mt-1 text-2xl font-black text-slate-900">{{ selectedOrderTests().length }}</div>
                 </div>
               </div>
+
+              <!-- Insurance detection performed before this order is invoiced for payment -->
+              @if (orderPatientInsurance()?.isInsured) {
+                <div class="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                  <span class="material-icons text-blue-600 text-base mt-0.5">verified_user</span>
+                  <div>
+                    <p class="text-[11px] font-black uppercase tracking-widest text-blue-800">Insurance detected — {{ orderPatientInsurance()?.provider }} ({{ orderPatientInsurance()?.coveragePercent }}% covered)</p>
+                    <p class="mt-0.5 text-[11px] font-semibold text-blue-700">This order will be invoiced through insurance and released to the laboratory after the copay is collected and the claim is settled.</p>
+                  </div>
+                </div>
+              } @else {
+                <div class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <span class="material-icons text-slate-400 text-base mt-0.5">payments</span>
+                  <div>
+                    <p class="text-[11px] font-black uppercase tracking-widest text-slate-500">No insurance on file</p>
+                    <p class="mt-0.5 text-[11px] font-semibold text-slate-500">This order will be billed as a cash charge and released to the laboratory after full payment.</p>
+                  </div>
+                </div>
+              }
 
               <div class="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_300px]">
                 <div class="space-y-4">
@@ -423,6 +442,7 @@ export class LaboratoryComponent {
   selectedLabForResult = signal<LabOrder | null>(null);
   selectedOrderTestIds = signal<string[]>([]);
   resultRows = signal<LabResultItem[]>([]);
+  orderPatientInsurance = signal<{ isInsured: boolean; provider: string; coveragePercent: number } | null>(null);
 
   diagnosticOrderGroups = computed(() => {
     const groups = new Map<string, DiagnosticTest[]>();
@@ -496,6 +516,7 @@ export class LaboratoryComponent {
       priority: 'Routine',
       specimenType: 'Whole blood',
     });
+    this.orderPatientInsurance.set(null);
     this.resultForm.reset();
   }
 
@@ -509,7 +530,22 @@ export class LaboratoryComponent {
       priority: 'Routine',
       specimenType: 'Whole blood',
     });
+    this.orderPatientInsurance.set(this.insuranceOf(this.orderForm.value.patientId || undefined));
     this.isFormVisible.set(true);
+  }
+
+  onOrderPatientChange(event: Event) {
+    const patientId = (event.target as HTMLSelectElement).value;
+    this.orderPatientInsurance.set(this.insuranceOf(patientId));
+  }
+
+  /** Detects the patient's insurance before the order is sent to Billing for payment. */
+  private insuranceOf(patientId?: string): { isInsured: boolean; provider: string; coveragePercent: number } | null {
+    if (!patientId) return null;
+    const coverage = this.store.insuranceCoverageFor(patientId);
+    return coverage.isInsured
+      ? { isInsured: true, provider: coverage.provider, coveragePercent: coverage.coveragePercent }
+      : { isInsured: false, provider: '', coveragePercent: 0 };
   }
 
   toggleOrderTest(test: DiagnosticTest) {

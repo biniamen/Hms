@@ -574,6 +574,7 @@ export class StoreService {
 
   private mapBackendInvoice(i: BackendInvoice): BillingInvoice {
     const patient = this.patients().find(p => p.id === i.patientId);
+    const paymentType = (i.paymentType || '').toUpperCase() === 'INSURANCE' ? 'INSURANCE' as const : 'CASH' as const;
     return {
       id: i.id,
       invoiceNumber: i.invoiceNumber,
@@ -596,10 +597,19 @@ export class StoreService {
         referenceId: item.referenceId,
       })),
       totalAmount: i.total,
-      insuranceCoveredAmount: 0,
+      insuranceCoveredAmount: this.invoiceInsuranceCovered(i.total, i.paymentType, i.insuranceProvider, i.patientId),
       patientPaidAmount: i.paid || 0,
       status: this.mapInvoiceStatus(i.status),
+      paymentType,
+      insuranceProvider: i.insuranceProvider || undefined,
     };
+  }
+
+  private invoiceInsuranceCovered(total: number, paymentType?: string, insuranceProvider?: string, patientId?: string): number {
+    const isInsuranceRouted = (paymentType || '').toUpperCase() === 'INSURANCE' || !!insuranceProvider;
+    if (!isInsuranceRouted) return 0;
+    const coverage = this.insuranceCoverageFor(patientId || '');
+    return Math.round(total * (coverage.coveragePercent / 100) * 100) / 100;
   }
 
   private mapInvoiceStatus(status: string): BillingInvoice['status'] {
@@ -694,6 +704,11 @@ export class StoreService {
       ...item,
       patientName: this.patientDisplayName(item.patientId),
       patientMrn: this.patientMrn(item.patientId),
+      insuranceCoveredAmount: this.invoiceInsuranceCovered(
+        item.totalAmount,
+        item.paymentType,
+        item.insuranceProvider,
+        item.patientId),
     })));
     this.medicalRecords.update(items => items.map(item => ({
       ...item,
@@ -793,8 +808,34 @@ export class StoreService {
     });
   }
 
+  /**
+   * Insurance detection used before processing any payment: consultation fees and
+   * laboratory charges are routed through the payer whenever the patient is covered.
+   */
+  insuranceCoverageFor(patientId: string): { isInsured: boolean; provider: string; policyNumber: string; coveragePercent: number } {
+    const patient = this.patientById(patientId);
+    if (!patient) return { isInsured: false, provider: '', policyNumber: '', coveragePercent: 0 };
+
+    const company = patient.insuranceCompanyId
+      ? this.insuranceCompanies().find(c => c.id === patient.insuranceCompanyId)
+      : undefined;
+    const selfPay = (patient.insuranceProvider || '').trim().toLowerCase() === 'self pay';
+    const provider = patient.insuranceCompanyName
+      || (!selfPay ? patient.insuranceProvider || '' : '')
+      || company?.name
+      || '';
+
+    const isInsured = !!patient.insuranceCompanyId || !!provider;
+    return {
+      isInsured,
+      provider: company?.name || patient.insuranceCompanyName || (!selfPay ? patient.insuranceProvider || '' : '') || '',
+      policyNumber: patient.insurancePolicyNumber || '',
+      coveragePercent: isInsured ? (company?.coveragePercent ?? 80) : 0,
+    };
+  }
+
   private createAppointmentConsultationInvoice(appointment: Appointment) {
-    const patient = this.patientById(appointment.patientId);
+    const coverage = this.insuranceCoverageFor(appointment.patientId);
     const description = `Consultation clearance - ${appointment.department} with ${appointment.doctorName}`;
     this.api.createInvoice({
       patientId: appointment.patientId,
@@ -802,8 +843,8 @@ export class StoreService {
       amount: 500,
       discount: 0,
       tax: 0,
-      paymentType: 'CASH',
-      insuranceProvider: patient?.insuranceProvider,
+      paymentType: coverage.isInsured ? 'INSURANCE' : 'CASH',
+      insuranceProvider: coverage.isInsured ? coverage.provider : undefined,
       items: [{
         serviceCode: 'CONSULTATION',
         description,
@@ -1178,14 +1219,15 @@ export class StoreService {
       unitPrice: item.amount,
       discount: 0,
     }));
+    const coverage = this.insuranceCoverageFor(inv.patientId);
     const payload = {
       patientId: inv.patientId,
       description: `Invoice for ${inv.patientName}`,
       amount: inv.totalAmount,
       discount: 0,
       tax: 0,
-      paymentType: 'CASH',
-      insuranceProvider: this.patientById(inv.patientId)?.insuranceProvider,
+      paymentType: coverage.isInsured ? 'INSURANCE' : 'CASH',
+      insuranceProvider: coverage.isInsured ? coverage.provider : undefined,
       items,
     };
     this.api.createInvoice(payload).subscribe({
@@ -1248,15 +1290,19 @@ export class StoreService {
     const inv = this.billingInvoices().find(i => i.id === invoiceId);
     if (!inv) return;
     const patient = this.patients().find(p => p.id === inv.patientId);
+    const coverage = this.insuranceCoverageFor(inv.patientId);
+    const claimAmount = inv.insuranceCoveredAmount > 0
+      ? inv.insuranceCoveredAmount
+      : Math.round(inv.totalAmount * (coverage.coveragePercent / 100) * 100) / 100;
     const newClaim: InsuranceClaim = {
       id: 'clm-' + Math.floor(100 + Math.random() * 900),
       claimNumber: 'CLM-' + Math.floor(100000 + Math.random() * 900000),
       invoiceId,
       patientName: inv.patientName,
       patientMrn: inv.patientMrn,
-      provider: patient?.insuranceProvider || 'Primary Insurance',
-      policyNumber: patient?.insurancePolicyNumber || 'POL-9921',
-      claimAmount: inv.insuranceCoveredAmount || inv.totalAmount * 0.8,
+      provider: coverage.provider || patient?.insuranceProvider || 'Primary Insurance',
+      policyNumber: coverage.policyNumber || patient?.insurancePolicyNumber || 'POL-9921',
+      claimAmount,
       status: 'SUBMITTED',
       submittedDate: new Date().toISOString().split('T')[0],
     };

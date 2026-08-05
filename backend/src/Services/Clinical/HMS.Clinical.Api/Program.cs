@@ -382,14 +382,20 @@ app.MapPost("/api/clinical/lab-requests", async (
     db.LabRequests.Add(labRequest);
     await db.SaveChangesAsync();
 
+    // Payment collection must first detect whether the patient has insurance so the
+    // laboratory charge is routed through the payer (claim) instead of a cash sale.
+    var coverage = await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, labRequest.PatientId);
+    var paymentType = coverage.HasInsurance ? "Insurance" : "Cash";
+    var insuranceProvider = coverage.HasInsurance ? coverage.Provider : null;
+
     var invoiceRequest = new CreateInvoiceRequest(
         labRequest.PatientId,
         $"Laboratory services - {labRequest.TestName} ({currencies[0]})",
         0,
         0,
         0,
-        "Cash",
-        null,
+        paymentType,
+        insuranceProvider,
         selectedTests.Select(test => new InvoiceItemRequest(
             $"LAB-{test.Id.ToString("N")[..8]}",
             test.TestName,
@@ -416,9 +422,13 @@ app.MapPost("/api/clinical/lab-requests", async (
             title: "Laboratory invoice could not be created");
     }
 
+    var releaseMessage = coverage.HasInsurance
+        ? $"Lab request sent to Billing. It will be cleared through {coverage.Provider} and released to the laboratory after claim settlement."
+        : "Lab request sent to Billing. It will be released to the laboratory after full payment.";
+
     return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(
         ToLabRequestDto(labRequest),
-        "Lab request sent to Billing. It will be released to the laboratory after full payment."));
+        releaseMessage));
 })
 .RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Admin);
 
@@ -781,6 +791,55 @@ static async Task<LabPaymentSnapshot> GetLabPaymentSnapshotAsync(
     }
 }
 
+static async Task<PatientInsuranceSnapshot> GetPatientInsuranceAsync(
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext,
+    Guid patientId)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{PatientsBaseUrl(configuration)}/api/patients/{patientId}");
+        ForwardAuthorization(httpContext, request);
+
+        using var response = await client.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            return new PatientInsuranceSnapshot(false, null, null, "Patient service rejected the insurance lookup.");
+        }
+
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<PatientDto>>();
+        var patient = envelope?.Data;
+        if (patient is null)
+        {
+            return new PatientInsuranceSnapshot(false, null, null, "Patient record could not be loaded.");
+        }
+
+        var hasInsurance = patient.InsuranceCompanyId is not null
+            || !string.IsNullOrWhiteSpace(patient.InsuranceProvider)
+            || !string.IsNullOrWhiteSpace(patient.InsuranceCompanyName);
+        var provider = patient.InsuranceCompanyName ?? patient.InsuranceProvider;
+
+        return new PatientInsuranceSnapshot(
+            hasInsurance,
+            hasInsurance ? provider : null,
+            patient.InsurancePolicyNumber,
+            hasInsurance
+                ? $"Patient is covered by {provider}."
+                : "No insurance coverage is recorded for this patient.");
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+    {
+        return new PatientInsuranceSnapshot(false, null, null, $"Patient service is unavailable: {exception.Message}");
+    }
+}
+
+static string PatientsBaseUrl(IConfiguration configuration) =>
+    Clean(configuration["Services:PatientsBaseUrl"], "http://localhost:5102").TrimEnd('/');
+
 static string BillingBaseUrl(IConfiguration configuration) =>
     Clean(configuration["Services:BillingBaseUrl"], "http://localhost:5105").TrimEnd('/');
 
@@ -814,6 +873,12 @@ sealed record CreateEnterpriseRecordRequest(
 sealed record EnterpriseStatusRequest(string Status);
 
 sealed record ServiceCallResult(bool Success, string Message);
+
+sealed record PatientInsuranceSnapshot(
+    bool HasInsurance,
+    string? Provider,
+    string? PolicyNumber,
+    string Message);
 
 sealed record LabPaymentSnapshot(bool Success, HashSet<Guid> PaidLabRequestIds, string Message);
 

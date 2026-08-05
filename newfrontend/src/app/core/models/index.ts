@@ -232,6 +232,8 @@ export interface BackendInvoice {
   paid: number;
   balance: number;
   status: string;
+  paymentType?: string;
+  insuranceProvider?: string;
   dueAtUtc: string;
   createdAtUtc: string;
   items: BackendInvoiceItem[];
@@ -570,6 +572,8 @@ export interface BillingInvoice {
   insuranceCoveredAmount: number;
   patientPaidAmount: number;
   status: InvoiceStatus;
+  paymentType?: 'CASH' | 'INSURANCE';
+  insuranceProvider?: string;
   paymentMethod?: 'Credit Card' | 'Cash' | 'Insurance Direct' | 'Wire Transfer';
 }
 

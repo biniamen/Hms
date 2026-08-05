@@ -3,6 +3,7 @@ using HMS.Contracts;
 using HMS.SharedKernel;
 using HMS.SharedKernel.Constants;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
 using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +12,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
 builder.Services.AddHmsCors(builder.Configuration);
+builder.Services.AddHttpClient();
 
 var connectionString = builder.Configuration.RequireConnectionString("BillingDb");
 
@@ -194,7 +196,12 @@ app.MapGet("/api/billing/invoices/{id:guid}", async (Guid id, BillingDbContext d
         : Results.Ok(ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice)));
 });
 
-app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, BillingDbContext db) =>
+app.MapPost("/api/billing/invoices", async (
+    CreateInvoiceRequest request,
+    BillingDbContext db,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext) =>
 {
     if (request.PatientId == Guid.Empty || string.IsNullOrWhiteSpace(request.Description))
     {
@@ -205,6 +212,31 @@ app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, Billin
     if (items.Length == 0)
     {
         return Results.BadRequest(ApiResponse<object>.Fail("At least one invoice item is required."));
+    }
+
+    // Payment collection must first detect whether the patient has insurance so the
+    // charge is routed through the payer (claim) instead of collected as a cash sale.
+    // An explicitly supplied payment type is always respected: only an absent type is
+    // resolved here, and the payer name is only attached to insurance-routed invoices.
+    var paymentType = Clean(request.PaymentType, "");
+    var insuranceProvider = CleanOrNull(request.InsuranceProvider);
+    if (string.IsNullOrWhiteSpace(paymentType))
+    {
+        var coverage = await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, request.PatientId);
+        paymentType = coverage.HasInsurance ? "Insurance" : "Cash";
+        insuranceProvider = coverage.HasInsurance ? coverage.Provider : null;
+    }
+    else if (paymentType.Equals("Insurance", StringComparison.OrdinalIgnoreCase) && insuranceProvider is null)
+    {
+        var coverage = await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, request.PatientId);
+        insuranceProvider = coverage.HasInsurance ? coverage.Provider : null;
+    }
+
+    var isInsuranceRouted = paymentType.Equals("Insurance", StringComparison.OrdinalIgnoreCase);
+    if (isInsuranceRouted && string.IsNullOrWhiteSpace(insuranceProvider))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail(
+            "An insurance-routed invoice requires the payer name. Confirm the patient's insurance provider before charging."));
     }
 
     var subtotal = items.Sum(item => item.LineTotal);
@@ -225,8 +257,8 @@ app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, Billin
         Status = "Unpaid",
         DueAtUtc = DateTime.UtcNow.AddDays(7),
         CreatedAtUtc = DateTime.UtcNow,
-        PaymentType = Clean(request.PaymentType, "Cash"),
-        InsuranceProvider = CleanOrNull(request.InsuranceProvider),
+        PaymentType = paymentType,
+        InsuranceProvider = insuranceProvider,
         Items = items.Select(item => new InvoiceItem
         {
             Id = item.Id,
@@ -245,7 +277,10 @@ app.MapPost("/api/billing/invoices", async (CreateInvoiceRequest request, Billin
     db.Invoices.Add(invoice);
     await db.SaveChangesAsync();
 
-    return Results.Created($"/api/billing/invoices/{invoice.Id}", ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice), "Invoice created."));
+    var message = isInsuranceRouted
+        ? $"Invoice created and routed through {insuranceProvider} for claim settlement."
+        : "Invoice created.";
+    return Results.Created($"/api/billing/invoices/{invoice.Id}", ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice), message));
 }).WithValidation<CreateInvoiceRequest>();
 
 app.MapPut("/api/billing/invoices/{id:guid}/status", async (Guid id, UpdateInvoiceStatusRequest request, BillingDbContext db) =>
@@ -320,6 +355,19 @@ app.MapPost("/api/billing/payments", async (PaymentRequest request, BillingDbCon
     if (request.Amount > balance)
     {
         return Results.BadRequest(ApiResponse<object>.Fail("Payment amount cannot exceed the current invoice balance."));
+    }
+
+    // Insurance detection guard: a charge routed through a payer must never be fully
+    // settled with patient cash. Collect only the copay, then settle the insured
+    // portion by submitting a claim or recording the insurer's remittance.
+    var insuranceRouted = invoice.PaymentType?.Equals("Insurance", StringComparison.OrdinalIgnoreCase) == true
+        || !string.IsNullOrWhiteSpace(invoice.InsuranceProvider);
+    if (insuranceRouted && balance > 0 && request.Amount >= balance && IsPatientPaymentMethod(request.Method))
+    {
+        var payer = invoice.InsuranceProvider ?? "the patient's insurance payer";
+        return Results.BadRequest(ApiResponse<object>.Fail(
+            $"This charge is covered by {payer}. Collect only the patient's copay here and settle the insured " +
+            "portion by submitting a claim, or record the insurer's remittance using an insurance payment method."));
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync();
@@ -457,6 +505,70 @@ static async Task<DoctorServicePriceQuoteDto> BuildDoctorServiceQuoteAsync(
             : $"Patient is covered for this doctor until {coveredUntil:yyyy-MM-dd}.");
 }
 
+static async Task<PatientInsuranceSnapshot> GetPatientInsuranceAsync(
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext,
+    Guid patientId)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{PatientsBaseUrl(configuration)}/api/patients/{patientId}");
+        ForwardAuthorization(httpContext, request);
+
+        using var response = await client.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            return new PatientInsuranceSnapshot(false, null, null, "Patient service rejected the insurance lookup.");
+        }
+
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<PatientDto>>();
+        var patient = envelope?.Data;
+        if (patient is null)
+        {
+            return new PatientInsuranceSnapshot(false, null, null, "Patient record could not be loaded.");
+        }
+
+        var hasInsurance = patient.InsuranceCompanyId is not null
+            || !string.IsNullOrWhiteSpace(patient.InsuranceProvider)
+            || !string.IsNullOrWhiteSpace(patient.InsuranceCompanyName);
+        var provider = patient.InsuranceCompanyName ?? patient.InsuranceProvider;
+
+        return new PatientInsuranceSnapshot(
+            hasInsurance,
+            hasInsurance ? provider : null,
+            patient.InsurancePolicyNumber,
+            hasInsurance
+                ? $"Patient is covered by {provider}."
+                : "No insurance coverage is recorded for this patient.");
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+    {
+        return new PatientInsuranceSnapshot(false, null, null, $"Patient service is unavailable: {exception.Message}");
+    }
+}
+
+static string PatientsBaseUrl(IConfiguration configuration) =>
+    Clean(configuration["Services:PatientsBaseUrl"], "http://localhost:5102").TrimEnd('/');
+
+static void ForwardAuthorization(HttpContext httpContext, HttpRequestMessage request)
+{
+    var authorization = httpContext.Request.Headers.Authorization.ToString();
+    if (!string.IsNullOrWhiteSpace(authorization))
+    {
+        request.Headers.TryAddWithoutValidation("Authorization", authorization);
+    }
+}
+
+static bool IsPatientPaymentMethod(string method)
+{
+    var value = method.Trim().ToLowerInvariant();
+    return !value.Contains("insurance");
+}
+
 static string NormalizeServiceCode(string serviceCode) =>
     string.Join('_', serviceCode
         .Trim()
@@ -483,6 +595,8 @@ static InvoiceDto ToInvoiceDto(Invoice invoice) =>
         invoice.Paid,
         invoice.Total - invoice.Paid,
         invoice.Status,
+        invoice.PaymentType,
+        invoice.InsuranceProvider,
         invoice.DueAtUtc,
         invoice.CreatedAtUtc,
         invoice.Items
@@ -613,3 +727,9 @@ static string Clean(string? value, string fallback) =>
 
 static string? CleanOrNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+sealed record PatientInsuranceSnapshot(
+    bool HasInsurance,
+    string? Provider,
+    string? PolicyNumber,
+    string Message);
