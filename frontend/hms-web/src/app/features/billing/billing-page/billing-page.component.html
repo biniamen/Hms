@@ -1,0 +1,30 @@
+﻿          <section class="grid gap-4">
+            <div class="enterprise-panel p-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn-secondary" [class.bg-brand-50]="vm.billingTab() === 'invoices'" (click)="vm.billingTab.set('invoices')">Invoices</button>
+                  <button class="btn-secondary" [class.bg-brand-50]="vm.billingTab() === 'payments'" (click)="vm.billingTab.set('payments')">Payments</button>
+                  <button class="btn-secondary" [class.bg-brand-50]="vm.billingTab() === 'receipts'" (click)="vm.billingTab.set('receipts')">Receipts</button>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button class="btn-primary" type="button" (click)="vm.openInvoiceModal()">Create Invoice</button>
+                  <button class="btn-secondary" type="button" (click)="vm.openPaymentModal()">Collect Payment</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-4 gap-4 max-[1100px]:grid-cols-2 max-[640px]:grid-cols-1">
+              <article class="enterprise-panel p-4"><span class="badge badge-blue">Billed</span><strong class="mt-3 block text-2xl text-slate-900">{{ vm.totalBilled() | currency:'ETB' }}</strong></article>
+              <article class="enterprise-panel p-4"><span class="badge badge-green">Collected</span><strong class="mt-3 block text-2xl text-slate-900">{{ vm.totalCollected() | currency:'ETB' }}</strong></article>
+              <article class="enterprise-panel p-4"><span class="badge">Open</span><strong class="mt-3 block text-2xl text-slate-900">{{ vm.totalOpenBalance() | currency:'ETB' }}</strong></article>
+              <article class="enterprise-panel p-4"><span class="badge">Receipts</span><strong class="mt-3 block text-2xl text-slate-900">{{ vm.receipts().length }}</strong></article>
+            </div>
+
+            <div class="enterprise-panel overflow-auto p-4" [ngSwitch]="vm.billingTab()">
+              <div class="mb-3 flex justify-end gap-2"><button class="btn-secondary" (click)="vm.exportExcel('billing-' + vm.billingTab(), vm.billingTab() === 'invoices' ? vm.invoices() : vm.billingTab() === 'payments' ? vm.payments() : vm.receipts())">Excel</button><button class="btn-secondary" (click)="vm.printTable('billing-' + vm.billingTab(), vm.billingTab() === 'invoices' ? vm.invoices() : vm.billingTab() === 'payments' ? vm.payments() : vm.receipts())">Print</button></div>
+              <table *ngSwitchCase="'invoices'" class="data-table"><thead><tr><th>Invoice</th><th>Patient</th><th>Description</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Due</th><th>Action</th></tr></thead><tbody><tr *ngFor="let row of vm.filtered(vm.invoices())"><td class="font-black">{{ row.invoiceNumber }}</td><td>{{ vm.patientName(row.patientId) }}<br><span class="text-xs text-slate-500">{{ vm.patientById(row.patientId)?.insuranceCompanyName || vm.patientById(row.patientId)?.insuranceProvider || 'Self Pay' }}</span></td><td>{{ row.description }}<br><span class="text-xs text-slate-500">{{ row.items.length }} line item(s)</span></td><td>{{ row.total | currency:'ETB' }}</td><td>{{ row.paid | currency:'ETB' }}</td><td>{{ row.balance | currency:'ETB' }}</td><td><span class="badge" [class.badge-green]="row.status === 'Paid'" [class.badge-blue]="row.status === 'Partially Paid'">{{ row.status }}</span></td><td>{{ row.dueAtUtc | date:'shortDate' }}</td><td><div class="flex flex-wrap gap-1"><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="vm.printInvoice(row)">Invoice</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" [disabled]="row.balance <= 0 || row.status === 'Cancelled' || row.status === 'Voided'" (click)="vm.collectInvoice(row)">Collect</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" [disabled]="row.paid > 0 || row.status === 'Cancelled'" (click)="vm.updateInvoiceStatus(row, 'Cancelled')">Cancel</button><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" *ngIf="row.status === 'Cancelled' || row.status === 'Voided'" (click)="vm.updateInvoiceStatus(row, 'Unpaid')">Reopen</button></div></td></tr></tbody></table>
+              <table *ngSwitchCase="'payments'" class="data-table"><thead><tr><th>Receipt</th><th>Invoice</th><th>Amount</th><th>Method</th><th>Reference</th><th>Received By</th><th>Paid At</th></tr></thead><tbody><tr *ngFor="let row of vm.filtered(vm.payments())"><td class="font-black">{{ row.receiptNumber }}</td><td>{{ vm.invoiceFor(row.invoiceId)?.invoiceNumber }}</td><td>{{ row.amount | currency:'ETB' }}</td><td>{{ row.method }}</td><td>{{ row.reference || '-' }}</td><td>{{ row.receivedBy }}</td><td>{{ row.paidAtUtc | date:'short' }}</td></tr></tbody></table>
+              <table *ngSwitchCase="'receipts'" class="data-table"><thead><tr><th>Receipt</th><th>Invoice</th><th>Patient</th><th>Amount</th><th>Method</th><th>Balance After</th><th>Print</th></tr></thead><tbody><tr *ngFor="let row of vm.filtered(vm.receipts())"><td class="font-black">{{ row.receiptNumber }}</td><td>{{ row.invoiceNumber }}</td><td>{{ vm.patientName(row.patientId) }}</td><td>{{ row.amount | currency:'ETB' }}</td><td>{{ row.method }}</td><td>{{ row.balanceAfterPayment | currency:'ETB' }}</td><td><button class="btn-secondary !min-h-8 !px-2 !py-1" type="button" (click)="vm.printReceipt(row)">Receipt</button></td></tr></tbody></table>
+            </div>
+          </section>
+

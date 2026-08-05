@@ -197,6 +197,52 @@ http://localhost:5200
 
 Wait about 60-90 seconds for Angular to compile after starting the script.
 
+## Seed Local Database
+
+Use this after cloning the project on a new developer machine, or when a teammate needs the default HMS test data in PostgreSQL.
+
+1. Create local runtime config:
+
+```powershell
+cd "D:\Mine Only\Private\hms-platform"
+Copy-Item .\hms.local.example.ps1 .\hms.local.ps1
+notepad .\hms.local.ps1
+```
+
+2. Set these values in `hms.local.ps1`:
+
+```powershell
+$env:HMS_POSTGRES_HOST = "localhost"
+$env:HMS_POSTGRES_PORT = "5432"
+$env:HMS_POSTGRES_USER = "postgres"
+$env:HMS_POSTGRES_PASSWORD = "your-postgres-password"
+$env:Security__Jwt__SigningKey = "at-least-32-random-characters"
+$env:Seed__DefaultPassword = "your-local-login-password"
+```
+
+3. Run the seed script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\seed-hms.ps1
+```
+
+The script creates/migrates and seeds:
+
+```text
+hms_identity_db
+hms_patient_management_db
+hms_clinical_db
+hms_billing_db
+```
+
+It seeds default users, roles, permissions, departments, doctors, patients, insurance companies, appointments, beds, vitals, encounters, prescriptions, lab requests, diagnostic tests, invoices, payments, and enterprise operation records.
+
+After seeding, start the system:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-hms.ps1
+```
+
 ## Run With Docker
 
 ```powershell
@@ -335,6 +381,7 @@ Included:
 ```text
 README.md
 start-hms.ps1
+seed-hms.ps1
 hms.local.example.ps1
 smtp.local.example.ps1
 backend/
