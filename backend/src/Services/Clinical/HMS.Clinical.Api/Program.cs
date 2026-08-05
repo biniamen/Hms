@@ -484,6 +484,22 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (
         return Results.BadRequest(ApiResponse<object>.Fail("Enter the result summary or result value before releasing the result."));
     }
 
+    // Laboratory workflow gate: results may only be released once the specimen has been
+    // successfully collected. The technician marks the request "Specimen Collected" first,
+    // which records the collection timestamp that authorizes result entry.
+    var specimenCollected = labRequest.CollectedAtUtc is not null
+        || labRequest.Status.Equals("Specimen Collected", StringComparison.OrdinalIgnoreCase);
+    if (resultRequired && !specimenCollected)
+    {
+        return Results.Conflict(ApiResponse<object>.Fail(
+            "The specimen has not been collected yet. Mark the request as 'Specimen Collected' before entering results."));
+    }
+
+    if (nextStatus.Equals("Specimen Collected", StringComparison.OrdinalIgnoreCase) && labRequest.CollectedAtUtc is null)
+    {
+        labRequest.CollectedAtUtc = request.CollectedAtUtc is null ? DateTime.UtcNow : ToUtc(request.CollectedAtUtc.Value);
+    }
+
     labRequest.Status = nextStatus;
     labRequest.SpecimenType = Clean(request.SpecimenType, labRequest.SpecimenType);
     labRequest.ResultSummary = Clean(request.ResultSummary, labRequest.ResultSummary);

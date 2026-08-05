@@ -204,6 +204,7 @@ export interface BackendLabRequest {
   performedBy?: string;
   verifiedBy?: string;
   resultItemsJson?: string;
+  collectedAtUtc?: string;
   resultedAtUtc?: string;
 }
 
@@ -492,6 +493,7 @@ export interface LabOrder {
   isAbnormal?: boolean;
   orderedDate: string;
   completedDate?: string;
+  collectedDate?: string;
   labTechName?: string;
 }
 

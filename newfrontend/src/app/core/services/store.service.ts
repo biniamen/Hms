@@ -514,6 +514,7 @@ export class StoreService {
       isAbnormal: l.resultFlag === 'Abnormal' || l.resultFlag === 'Critical',
       orderedDate: l.orderedAtUtc ? new Date(l.orderedAtUtc).toLocaleString() : new Date().toLocaleString(),
       completedDate: l.resultedAtUtc ? new Date(l.resultedAtUtc).toLocaleString() : undefined,
+      collectedDate: l.collectedAtUtc ? new Date(l.collectedAtUtc).toLocaleString() : undefined,
       labTechName: l.performedBy,
     };
   }
@@ -1187,6 +1188,55 @@ export class StoreService {
       error: () => {
         applyLocalUpdate();
         this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR (offline mode).');
+      },
+    });
+  }
+
+  /**
+   * Advances a laboratory request through the technician workflow: after payment is
+   * completed the technician marks the request "In Progress", then confirms the sample
+   * was collected before result entry is enabled.
+   */
+  updateLabStatus(id: string, status: LabOrder['status'], collectedAtUtc?: string) {
+    const backendStatus = status === 'SAMPLE_COLLECTED' ? 'Specimen Collected'
+      : status === 'IN_ANALYSIS' ? 'In Progress'
+      : status;
+    const message = status === 'SAMPLE_COLLECTED'
+      ? 'Specimen collected. Result entry is now enabled.'
+      : status === 'IN_ANALYSIS'
+        ? 'Request is now in progress.'
+        : `Status updated to ${status}.`;
+
+    const applyLocalUpdate = () => {
+      this.labOrders.update(current => current.map(l => l.id === id ? {
+        ...l,
+        status,
+        collectedDate: status === 'SAMPLE_COLLECTED'
+          ? (collectedAtUtc ? new Date(collectedAtUtc).toLocaleString() : new Date().toLocaleString())
+          : l.collectedDate,
+      } : l));
+    };
+
+    const payload: { status: string; collectedAtUtc?: string } = { status: backendStatus };
+    if (status === 'SAMPLE_COLLECTED') {
+      payload.collectedAtUtc = collectedAtUtc || new Date().toISOString();
+    }
+
+    this.api.updateLabResult(id, payload).subscribe({
+      next: (res) => {
+        if (res.data) {
+          const mapped = this.mapBackendLabRequest(res.data);
+          this.labOrders.update(current => current.map(l => l.id === id
+            ? { ...mapped, collectedDate: mapped.collectedDate ?? l.collectedDate }
+            : l));
+        } else {
+          applyLocalUpdate();
+        }
+        this.addToast('success', 'Lab Status Updated', message);
+      },
+      error: () => {
+        applyLocalUpdate();
+        this.addToast('success', 'Lab Status Updated', `${message} (offline mode)`);
       },
     });
   }

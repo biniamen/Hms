@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { StoreService } from '../../core/services/store.service';
 import type { ClinicalDiagnosis, ClinicalVitalEntry, DiagnosticTest, LabOrder, MedicalRecord, Medication, Patient, Prescription, UserRole } from '../../core/models';
@@ -116,29 +116,55 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
           @switch (activeForm()) {
             @case ('encounters') {
               <form [formGroup]="encounterForm" (ngSubmit)="submitEncounter()" class="space-y-6 p-6 sm:p-8">
+                @if (encounterSubmitAttempted()) {
+                  <div class="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
+                    <span class="material-icons text-rose-500">error_outline</span>
+                    <div class="text-[11px] font-semibold leading-relaxed text-rose-700">
+                      <strong class="block font-black">Encounter details incomplete</strong>
+                      Chief complaint, assessment, and plan are required before saving the encounter.
+                    </div>
+                  </div>
+                }
                 <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
-                  <label class="clinical-field">Patient Chart
-                    <select formControlName="patientId" [class]="inputClasses">
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Patient Chart <span class="text-rose-500">*</span></span>
+                    <select formControlName="patientId" [class]="fieldClasses(encounterForm.controls.patientId)">
                       @for (p of clinicalPatients(); track p.id) {
                         <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
                       }
                     </select>
+                    @if (encounterForm.controls.patientId.touched && encounterForm.controls.patientId.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Select the patient chart.</span>
+                    }
                   </label>
-                  <label class="clinical-field">Visit Type
-                    <select formControlName="visitType" [class]="inputClasses">
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Visit Type <span class="text-rose-500">*</span></span>
+                    <select formControlName="visitType" [class]="fieldClasses(encounterForm.controls.visitType)">
                       @for (type of visitTypes; track type) {
                         <option [value]="type">{{ type }}</option>
                       }
                     </select>
                   </label>
-                  <label class="clinical-field">Chief Complaint
-                    <input formControlName="chiefComplaint" [class]="inputClasses" placeholder="Main reason for visit" />
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Chief Complaint <span class="text-rose-500">*</span></span>
+                    <input formControlName="chiefComplaint" [class]="fieldClasses(encounterForm.controls.chiefComplaint)" placeholder="Main reason for visit" />
+                    @if (encounterForm.controls.chiefComplaint.touched && encounterForm.controls.chiefComplaint.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Chief complaint is required.</span>
+                    }
                   </label>
-                  <label class="clinical-field lg:col-span-3">Assessment
-                    <textarea formControlName="assessment" rows="4" [class]="inputClasses" placeholder="Clinical findings, working impression, and diagnosis"></textarea>
+                  <label class="clinical-field lg:col-span-3">
+                    <span class="flex items-center gap-1">Assessment <span class="text-rose-500">*</span></span>
+                    <textarea formControlName="assessment" rows="4" [class]="fieldClasses(encounterForm.controls.assessment)" placeholder="Clinical findings, working impression, and diagnosis"></textarea>
+                    @if (encounterForm.controls.assessment.touched && encounterForm.controls.assessment.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Assessment is required.</span>
+                    }
                   </label>
-                  <label class="clinical-field lg:col-span-3">Plan
-                    <textarea formControlName="plan" rows="4" [class]="inputClasses" placeholder="Treatment plan, orders, follow-up, and care instructions"></textarea>
+                  <label class="clinical-field lg:col-span-3">
+                    <span class="flex items-center gap-1">Plan <span class="text-rose-500">*</span></span>
+                    <textarea formControlName="plan" rows="4" [class]="fieldClasses(encounterForm.controls.plan)" placeholder="Treatment plan, orders, follow-up, and care instructions"></textarea>
+                    @if (encounterForm.controls.plan.touched && encounterForm.controls.plan.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Plan is required.</span>
+                    }
                   </label>
                 </div>
                 <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
@@ -151,19 +177,59 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
             @case ('vitals') {
               <form [formGroup]="vitalsForm" (ngSubmit)="submitVitals()" class="space-y-6 p-6 sm:p-8">
                 <div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-                  <label class="clinical-field md:col-span-2">Patient Chart
-                    <select formControlName="patientId" [class]="inputClasses">
+                  <label class="clinical-field md:col-span-2">
+                    <span class="flex items-center gap-1">Patient Chart <span class="text-rose-500">*</span></span>
+                    <select formControlName="patientId" [class]="fieldClasses(vitalsForm.controls.patientId)">
                       @for (p of clinicalPatients(); track p.id) {
                         <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
                       }
                     </select>
+                    @if (vitalsForm.controls.patientId.touched && vitalsForm.controls.patientId.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Select the patient chart.</span>
+                    }
                   </label>
-                  <label class="clinical-field">Temperature C<input type="number" step="0.1" formControlName="temperatureC" [class]="inputClasses" /></label>
-                  <label class="clinical-field">Pulse<input type="number" formControlName="pulse" [class]="inputClasses" /></label>
-                  <label class="clinical-field">Resp. Rate<input type="number" formControlName="respiratoryRate" [class]="inputClasses" /></label>
-                  <label class="clinical-field">Blood Pressure<input formControlName="bloodPressure" [class]="inputClasses" placeholder="120/80" /></label>
-                  <label class="clinical-field">Weight Kg<input type="number" step="0.1" formControlName="weightKg" [class]="inputClasses" /></label>
-                  <label class="clinical-field">Height Cm<input type="number" step="0.1" formControlName="heightCm" [class]="inputClasses" /></label>
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Temperature C <span class="text-rose-500">*</span></span>
+                    <input type="number" step="0.1" formControlName="temperatureC" [class]="fieldClasses(vitalsForm.controls.temperatureC)" placeholder="e.g. 37.0" />
+                    @if (vitalsForm.controls.temperatureC.touched && vitalsForm.controls.temperatureC.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a temperature between 30°C and 45°C.</span>
+                    }
+                  </label>
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Pulse <span class="text-rose-500">*</span></span>
+                    <input type="number" formControlName="pulse" [class]="fieldClasses(vitalsForm.controls.pulse)" placeholder="bpm" />
+                    @if (vitalsForm.controls.pulse.touched && vitalsForm.controls.pulse.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a pulse between 20 and 240 bpm.</span>
+                    }
+                  </label>
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Resp. Rate <span class="text-rose-500">*</span></span>
+                    <input type="number" formControlName="respiratoryRate" [class]="fieldClasses(vitalsForm.controls.respiratoryRate)" placeholder="breaths/min" />
+                    @if (vitalsForm.controls.respiratoryRate.touched && vitalsForm.controls.respiratoryRate.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a rate between 5 and 80 breaths/min.</span>
+                    }
+                  </label>
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Blood Pressure <span class="text-rose-500">*</span></span>
+                    <input formControlName="bloodPressure" [class]="fieldClasses(vitalsForm.controls.bloodPressure)" placeholder="e.g. 120/80" />
+                    @if (vitalsForm.controls.bloodPressure.touched && vitalsForm.controls.bloodPressure.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter blood pressure, e.g. 120/80.</span>
+                    }
+                  </label>
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Weight Kg <span class="text-rose-500">*</span></span>
+                    <input type="number" step="0.1" formControlName="weightKg" [class]="fieldClasses(vitalsForm.controls.weightKg)" placeholder="e.g. 64" />
+                    @if (vitalsForm.controls.weightKg.touched && vitalsForm.controls.weightKg.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a weight between 1 and 350 kg.</span>
+                    }
+                  </label>
+                  <label class="clinical-field">
+                    <span class="flex items-center gap-1">Height Cm <span class="text-rose-500">*</span></span>
+                    <input type="number" step="0.1" formControlName="heightCm" [class]="fieldClasses(vitalsForm.controls.heightCm)" placeholder="e.g. 170" />
+                    @if (vitalsForm.controls.heightCm.touched && vitalsForm.controls.heightCm.invalid) {
+                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a height between 30 and 250 cm.</span>
+                    }
+                  </label>
                 </div>
                 <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
                   <button type="button" (click)="closeForm()" class="clinical-secondary">Discard</button>
@@ -551,7 +617,11 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
               </div>
               <div class="rounded-xl bg-white p-3 text-[10px] text-slate-500">
                 <strong class="block text-slate-700">Current vitals</strong>
-                BP {{ patient.vitals.bp }} / HR {{ patient.vitals.hr }} / Temp {{ patient.vitals.temp }} C
+                @if (latestVitals(); as vitals) {
+                  BP {{ vitals.bloodPressure }} / HR {{ vitals.pulse }} / Temp {{ vitals.temperatureC }} C
+                } @else {
+                  <span class="italic text-slate-400">No vitals recorded yet.</span>
+                }
               </div>
             </div>
           }
@@ -808,8 +878,14 @@ export class ClinicalEhrComponent {
   activeForm = signal<ClinicalTab | null>(null);
   selectedPatientId = signal('');
   prescriptionBasket = signal<Medication[]>([]);
+  encounterSubmitAttempted = signal(false);
 
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/5 transition-all';
+  readonly inputClassesError = 'w-full px-4 py-2.5 bg-rose-50/40 border border-rose-300 rounded-xl text-xs outline-none focus:bg-white focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10 transition-all';
+
+  fieldClasses(control: AbstractControl | null): string {
+    return control?.touched && control?.invalid ? this.inputClassesError : this.inputClasses;
+  }
 
   readonly visitTypes = ['Outpatient', 'Follow-up', 'Emergency', 'Inpatient Review', 'Procedure Review', 'Teleconsultation'];
   readonly medicationCatalog = ['Paracetamol', 'Amoxicillin', 'Azithromycin', 'Ceftriaxone', 'Metformin', 'Amlodipine', 'Omeprazole', 'Salbutamol', 'Losartan', 'Hydrochlorothiazide', 'ORS Sachet'];
@@ -857,12 +933,12 @@ export class ClinicalEhrComponent {
 
   vitalsForm = new FormGroup({
     patientId: new FormControl('', [Validators.required]),
-    temperatureC: new FormControl(36.8, [Validators.required, Validators.min(30), Validators.max(45)]),
-    pulse: new FormControl(78, [Validators.required, Validators.min(20), Validators.max(240)]),
-    respiratoryRate: new FormControl(18, [Validators.required, Validators.min(5), Validators.max(80)]),
-    bloodPressure: new FormControl('120/80', [Validators.required]),
-    weightKg: new FormControl(64, [Validators.required, Validators.min(1), Validators.max(350)]),
-    heightCm: new FormControl(170, [Validators.required, Validators.min(30), Validators.max(250)]),
+    temperatureC: new FormControl<number | null>(null, [Validators.required, Validators.min(30), Validators.max(45)]),
+    pulse: new FormControl<number | null>(null, [Validators.required, Validators.min(20), Validators.max(240)]),
+    respiratoryRate: new FormControl<number | null>(null, [Validators.required, Validators.min(5), Validators.max(80)]),
+    bloodPressure: new FormControl('', [Validators.required]),
+    weightKg: new FormControl<number | null>(null, [Validators.required, Validators.min(1), Validators.max(350)]),
+    heightCm: new FormControl<number | null>(null, [Validators.required, Validators.min(30), Validators.max(250)]),
   });
 
   diagnosisForm = new FormGroup({
@@ -906,6 +982,13 @@ export class ClinicalEhrComponent {
   });
 
   activePatient = computed(() => this.clinicalPatients().find(p => p.id === this.selectedPatientId()));
+  latestVitals = computed(() => {
+    const patient = this.activePatient();
+    if (!patient) return undefined;
+    return this.store.clinicalVitals()
+      .filter(v => v.patientId === patient.id)
+      .sort((a, b) => b.recordedAtUtc.localeCompare(a.recordedAtUtc))[0];
+  });
   visibleEncounters = computed(() => this.store.medicalRecords().filter(row => row.patientId === this.selectedPatientId()));
   visibleVitals = computed(() => this.store.clinicalVitals().filter(row => row.patientId === this.selectedPatientId()));
   visibleDiagnoses = computed(() => this.store.clinicalDiagnoses().filter(row => row.patientId === this.selectedPatientId()));
@@ -950,12 +1033,19 @@ export class ClinicalEhrComponent {
     }
     this.activeTab.set(tab);
     this.activeForm.set(tab);
+    // Open every form fresh: a previous failed submit may have marked fields as
+    // touched, which would otherwise show stale error styling on an untouched form.
+    this.encounterForm.markAsUntouched();
+    this.encounterForm.markAsPristine();
+    this.vitalsForm.markAsUntouched();
+    this.vitalsForm.markAsPristine();
     this.setPatientEverywhere(this.selectedPatientId() || this.clinicalPatients()[0]?.id || '');
   }
 
   closeForm() {
     this.activeForm.set(null);
     this.prescriptionBasket.set([]);
+    this.encounterSubmitAttempted.set(false);
   }
 
   toggleDiagnostic(test: DiagnosticTest) {
@@ -1015,7 +1105,9 @@ export class ClinicalEhrComponent {
 
   submitEncounter() {
     if (this.encounterForm.invalid) {
+      this.encounterSubmitAttempted.set(true);
       this.encounterForm.markAllAsTouched();
+      this.store.addToast('error', 'Encounter Validation', 'Chief complaint, assessment, and plan are required to save the encounter.');
       return;
     }
     const value = this.encounterForm.getRawValue();
@@ -1033,11 +1125,14 @@ export class ClinicalEhrComponent {
     });
     this.closeForm();
     this.encounterForm.patchValue({ chiefComplaint: '', assessment: '', plan: '' });
+    this.encounterForm.markAsPristine();
+    this.encounterForm.markAsUntouched();
   }
 
   submitVitals() {
     if (this.vitalsForm.invalid) {
       this.vitalsForm.markAllAsTouched();
+      this.store.addToast('error', 'Vitals Validation', 'All vital sign fields are required — temperature, pulse, respiratory rate, blood pressure, weight, and height.');
       return;
     }
     const value = this.vitalsForm.getRawValue();
@@ -1055,6 +1150,21 @@ export class ClinicalEhrComponent {
       heightCm: Number(value.heightCm),
     });
     this.closeForm();
+    this.resetVitalsForm();
+  }
+
+  private resetVitalsForm() {
+    this.vitalsForm.patchValue({
+      patientId: this.selectedPatientId() || '',
+      temperatureC: null,
+      pulse: null,
+      respiratoryRate: null,
+      bloodPressure: '',
+      weightKg: null,
+      heightCm: null,
+    });
+    this.vitalsForm.markAsPristine();
+    this.vitalsForm.markAsUntouched();
   }
 
   submitDiagnosis() {

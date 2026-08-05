@@ -1,12 +1,12 @@
-import { ChangeDetectionStrategy, Component, signal, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
+import { FormsModule, ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
 
 @Component({
   selector: 'app-pharmacy',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6 animate-fade-in pb-20">
@@ -41,7 +41,7 @@ import { StoreService } from '../../core/services/store.service';
                 <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Medication Order Entry</p>
               </div>
             </div>
-            <button (click)="isFormVisible.set(false)" class="p-2 hover:bg-white rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+            <button (click)="discardPrescriptionForm()" class="p-2 hover:bg-white rounded-full text-slate-400 hover:text-slate-600 transition-colors">
               <span class="material-icons">close</span>
             </button>
           </div>
@@ -57,6 +57,7 @@ import { StoreService } from '../../core/services/store.service';
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Select Patient *</label>
                   <select formControlName="patientId" [class]="inputClasses">
+                    <option value="" disabled>Choose a patient…</option>
                     @for (p of store.patients(); track p.id) {
                       <option [value]="p.id">{{ p.name }} ({{ p.mrn }})</option>
                     }
@@ -77,11 +78,11 @@ import { StoreService } from '../../core/services/store.service';
                   <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1">
                       <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Dosage *</label>
-                      <input type="text" formControlName="dosage" placeholder="500mg" [class]="inputClasses" />
+                      <input type="text" formControlName="dosage" placeholder="e.g. 500mg" [class]="inputClasses" />
                     </div>
                     <div class="space-y-1">
                       <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Duration *</label>
-                      <input type="text" formControlName="duration" placeholder="7 days" [class]="inputClasses" />
+                      <input type="text" formControlName="duration" placeholder="e.g. 7 days" [class]="inputClasses" />
                     </div>
                   </div>
                 </div>
@@ -89,18 +90,18 @@ import { StoreService } from '../../core/services/store.service';
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Frequency *</label>
-                    <input type="text" formControlName="frequency" placeholder="3x Daily" [class]="inputClasses" />
+                    <input type="text" formControlName="frequency" placeholder="e.g. 3x daily" [class]="inputClasses" />
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Special Instructions</label>
-                    <input type="text" formControlName="instructions" placeholder="Take after meals" [class]="inputClasses" />
+                    <input type="text" formControlName="instructions" placeholder="e.g. Take after meals" [class]="inputClasses" />
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
-              <button type="button" (click)="isFormVisible.set(false)" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Discard</button>
+              <button type="button" (click)="discardPrescriptionForm()" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">Discard</button>
               <button type="submit" class="px-8 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-500/20 transition-all hover:-translate-y-0.5 active:scale-95">
                 Authorize Prescription
               </button>
@@ -111,7 +112,14 @@ import { StoreService } from '../../core/services/store.service';
 
       <!-- PRESCRIPTIONS QUEUE -->
       <div class="space-y-4">
-        @for (rx of store.prescriptions(); track rx.id) {
+        <div class="flex flex-wrap items-center gap-2.5">
+          <h2 class="text-sm font-bold text-slate-900 font-display mr-1">Prescription Queue</h2>
+          <span class="text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 rounded-full px-2.5 py-1">{{ store.prescriptions().length }} total</span>
+          <span class="text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 rounded-full px-2.5 py-1">{{ store.pendingPrescriptionsCount() }} pending</span>
+          <span class="text-[10px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-700 rounded-full px-2.5 py-1">{{ dispensedCount() }} dispensed</span>
+        </div>
+
+        @for (rx of pagedPrescriptions(); track rx.id) {
           <div class="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow space-y-5">
             
             <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -179,6 +187,63 @@ import { StoreService } from '../../core/services/store.service';
              <p class="text-slate-400 text-xs font-bold uppercase tracking-widest">The Prescription Queue is Empty</p>
           </div>
         }
+
+        <!-- QUEUE PAGINATION -->
+        @if (store.prescriptions().length > 0) {
+          <div class="flex flex-col lg:flex-row items-center justify-between gap-4 pt-2">
+            <p class="text-[11px] text-slate-500 font-medium">
+              Showing <span class="font-bold text-slate-800">{{ pageStart() }}–{{ pageEnd() }}</span> of
+              <span class="font-bold text-slate-800">{{ totalPrescriptions() }}</span>
+              prescription{{ totalPrescriptions() === 1 ? '' : 's' }}
+            </p>
+
+            <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 mr-2">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rows</span>
+                <select
+                  [ngModel]="pageSize()"
+                  (ngModelChange)="changePageSize($event)"
+                  class="bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 px-2 py-1.5 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 cursor-pointer transition-all">
+                  @for (size of pageSizeOptions; track size) {
+                    <option [ngValue]="size">{{ size }}</option>
+                  }
+                </select>
+              </div>
+
+              <button
+                (click)="prevPage()"
+                [disabled]="currentPage() === 1"
+                class="p-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                aria-label="Previous page">
+                <span class="material-icons text-base">chevron_left</span>
+              </button>
+
+              @for (item of pageItems(); track $index) {
+                @if (item === '…') {
+                  <span class="px-1 text-slate-400 text-xs font-bold select-none">…</span>
+                } @else {
+                  <button
+                    (click)="goToPage(item)"
+                    [attr.aria-current]="item === currentPage() ? 'page' : null"
+                    [class]="item === currentPage()
+                      ? 'bg-slate-900 text-white shadow-md'
+                      : 'text-slate-600 hover:bg-slate-100'"
+                    class="w-8 h-8 rounded-xl text-[11px] font-bold transition-all active:scale-95">
+                    {{ item }}
+                  </button>
+                }
+              }
+
+              <button
+                (click)="nextPage()"
+                [disabled]="currentPage() === totalPages()"
+                class="p-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                aria-label="Next page">
+                <span class="material-icons text-base">chevron_right</span>
+              </button>
+            </div>
+          </div>
+        }
       </div>
 
     </div>
@@ -191,18 +256,26 @@ export class PharmacyComponent {
 
   readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/5 transition-all';
 
+  // ── Prescription Form ──
+  // Pristine by default: never pre-fill values so a fresh form never carries
+  // data from a previous entry or a previous submission.
   rxForm = new FormGroup({
     patientId: new FormControl('', [Validators.required]),
     medName: new FormControl('', [Validators.required]),
-    dosage: new FormControl('500mg', [Validators.required]),
-    frequency: new FormControl('Twice daily', [Validators.required]),
-    duration: new FormControl('14 days', [Validators.required]),
-    instructions: new FormControl('Take after breakfast and dinner')
+    dosage: new FormControl('', [Validators.required]),
+    frequency: new FormControl('', [Validators.required]),
+    duration: new FormControl('', [Validators.required]),
+    instructions: new FormControl('')
   });
 
   openPrescriptionForm() {
-    this.rxForm.patchValue({ patientId: this.store.patients()[0]?.id || '' });
+    this.rxForm.reset();
     this.isFormVisible.set(true);
+  }
+
+  discardPrescriptionForm() {
+    this.rxForm.reset();
+    this.isFormVisible.set(false);
   }
 
   submitPrescription() {
@@ -232,12 +305,68 @@ export class PharmacyComponent {
     }
 
     this.isFormVisible.set(false);
-    this.rxForm.reset({
-      patientId: this.store.patients()[0]?.id || '',
-      dosage: '500mg',
-      frequency: 'Twice daily',
-      duration: '14 days',
-      instructions: 'Take after breakfast and dinner',
-    });
+    // Fully clear the form after submission — no previous values are retained.
+    this.rxForm.reset();
+    // New prescriptions are prepended as PENDING, so jump back to the first page.
+    this.goToPage(1);
+  }
+
+  // ── Queue Pagination ──
+  readonly pageSizeOptions = [5, 10, 20, 50];
+  readonly pageSize = signal(5);
+  readonly currentPage = signal(1);
+
+  private readonly statusRank: Record<string, number> = { PENDING: 0, DISPENSED: 1, CANCELLED: 2 };
+
+  readonly dispensedCount = computed(() => this.store.prescriptions().filter(rx => rx.status === 'DISPENSED').length);
+
+  // Pending orders stay on top; the rest are newest-first.
+  private readonly sortedPrescriptions = computed(() =>
+    [...this.store.prescriptions()].sort((a, b) =>
+      (this.statusRank[a.status] ?? 3) - (this.statusRank[b.status] ?? 3) ||
+      b.date.localeCompare(a.date)
+    )
+  );
+
+  readonly totalPrescriptions = computed(() => this.sortedPrescriptions().length);
+  readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalPrescriptions() / this.pageSize())));
+  readonly pageStart = computed(() => this.totalPrescriptions() === 0 ? 0 : (this.currentPage() - 1) * this.pageSize() + 1);
+  readonly pageEnd = computed(() => Math.min(this.currentPage() * this.pageSize(), this.totalPrescriptions()));
+
+  readonly pagedPrescriptions = computed(() => {
+    const start = (this.currentPage() - 1) * this.pageSize();
+    return this.sortedPrescriptions().slice(start, start + this.pageSize());
+  });
+
+  // Windowed page numbers with ellipsis for long queues.
+  readonly pageItems = computed<(number | '…')[]>(() => {
+    const total = this.totalPages();
+    const current = this.currentPage();
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+    const items: (number | '…')[] = [1];
+    if (current > 3) items.push('…');
+    for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) items.push(p);
+    if (current < total - 2) items.push('…');
+    if (total > 1) items.push(total);
+    return items;
+  });
+
+  goToPage(page: number) {
+    const clamped = Math.min(Math.max(1, page), this.totalPages());
+    this.currentPage.set(clamped);
+  }
+
+  prevPage() {
+    this.goToPage(this.currentPage() - 1);
+  }
+
+  nextPage() {
+    this.goToPage(this.currentPage() + 1);
+  }
+
+  changePageSize(size: number) {
+    this.pageSize.set(size);
+    this.currentPage.set(1);
   }
 }

@@ -390,6 +390,33 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                     {{ lab.result }} <span class="text-xs font-normal text-slate-400 lowercase">{{ lab.unit }}</span>
                   </div>
                   <div class="text-[10px] text-slate-400 font-medium italic">Ref: {{ lab.normalRange }} {{ lab.unit }}</div>
+                  <div class="flex items-center justify-between border-t border-slate-100 pt-2 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                    <span>Sample: {{ lab.collectedDate ? lab.collectedDate.split(',')[0] : 'N/A' }}</span>
+                    <span>Reported: {{ lab.completedDate ? lab.completedDate.split(',')[0] : 'N/A' }}</span>
+                  </div>
+                </div>
+              }
+
+              <!-- Technician Workflow Stepper -->
+              @if (lab.status !== 'AWAITING_PAYMENT') {
+                <div class="pt-1">
+                  <div class="flex items-center">
+                    @for (step of labWorkflowSteps; track step.key) {
+                      <div class="flex flex-1 flex-col items-center gap-1">
+                        <span [class]="labStepClass(lab, step)" class="flex h-6 w-6 items-center justify-center rounded-full border-2 transition-all">
+                          @if (labWorkflowStep(lab) >= step.index) {
+                            <span class="material-icons text-[11px]">check</span>
+                          } @else {
+                            <span class="text-[9px] font-black">{{ step.index }}</span>
+                          }
+                        </span>
+                        <span [class]="labWorkflowStep(lab) >= step.index ? 'text-slate-600' : 'text-slate-300'" class="text-[7px] font-black uppercase tracking-wider">{{ step.label }}</span>
+                      </div>
+                      @if (!$last) {
+                        <span class="-mt-3.5 w-4 h-px bg-slate-200"></span>
+                      }
+                    }
+                  </div>
                 </div>
               }
 
@@ -400,12 +427,35 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                     Payment required — not released to laboratory
                   </div>
                 } @else if (lab.status !== 'COMPLETED' && canEnterLabResult()) {
-                  <button 
-                    (click)="openResultForm(lab)" 
-                    class="w-full py-2.5 bg-slate-900 hover:bg-purple-600 text-white font-bold rounded-xl text-[11px] shadow-lg shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2">
-                    <span class="material-icons text-base">science</span>
-                    Record Result
-                  </button>
+                  @switch (lab.status) {
+                    @case ('ORDERED') {
+                      <button
+                        (click)="markInProgress(lab)"
+                        class="w-full py-2.5 bg-slate-900 hover:bg-purple-600 text-white font-bold rounded-xl text-[11px] shadow-lg shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <span class="material-icons text-base">play_circle</span>
+                        Start Request — Mark In Progress
+                      </button>
+                      <p class="mt-1.5 text-center text-[9px] font-bold uppercase tracking-widest text-slate-400">Step 1 of 3 · Begin processing this request</p>
+                    }
+                    @case ('IN_ANALYSIS') {
+                      <button
+                        (click)="markSampleCollected(lab)"
+                        class="w-full py-2.5 bg-white text-blue-700 font-bold rounded-xl text-[11px] border border-blue-200 shadow-sm hover:bg-blue-50 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <span class="material-icons text-base">biotech</span>
+                        Mark Sample Collected
+                      </button>
+                      <p class="mt-1.5 text-center text-[9px] font-bold uppercase tracking-widest text-slate-400">Step 2 of 3 · Confirm the specimen was taken</p>
+                    }
+                    @case ('SAMPLE_COLLECTED') {
+                      <button
+                        (click)="openResultForm(lab)"
+                        class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-[11px] shadow-lg shadow-purple-500/20 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <span class="material-icons text-base">science</span>
+                        Record Result
+                      </button>
+                      <p class="mt-1.5 text-center text-[9px] font-black uppercase tracking-widest text-emerald-600">Sample collected — result entry enabled</p>
+                    }
+                  }
                 } @else if (lab.status !== 'COMPLETED') {
                   <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-[10px] font-black uppercase tracking-widest text-emerald-700">
                     Paid — available to laboratory technician
@@ -618,6 +668,11 @@ export class LaboratoryComponent {
   openResultForm(lab: LabOrder) {
     if (lab.status === 'AWAITING_PAYMENT') {
       this.store.addToast('error', 'Payment Required', 'This request has not been fully paid and cannot be processed by the laboratory.');
+      return;
+    }
+    const sampleCollected = lab.status === 'SAMPLE_COLLECTED' || (lab.status === 'IN_ANALYSIS' && !!lab.collectedDate);
+    if (!sampleCollected) {
+      this.store.addToast('error', 'Sample Collection Required', 'Result entry is enabled only after the specimen has been successfully collected.');
       return;
     }
     if (!this.canEnterLabResult()) {
@@ -904,6 +959,51 @@ export class LaboratoryComponent {
       case 'COMPLETED': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
       default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
+  }
+
+  /** Technician workflow stages shown on each request card. */
+  readonly labWorkflowSteps = [
+    { index: 1, key: 'requested', label: 'Requested' },
+    { index: 2, key: 'progress', label: 'In Progress' },
+    { index: 3, key: 'sample', label: 'Sample Taken' },
+    { index: 4, key: 'result', label: 'Completed' },
+  ];
+
+  /** 0 = awaiting payment, 1-4 = workflow stage reached. */
+  labWorkflowStep(lab: LabOrder): number {
+    switch (lab.status) {
+      case 'AWAITING_PAYMENT': return 0;
+      case 'ORDERED': return 1;
+      case 'IN_ANALYSIS': return 2;
+      case 'SAMPLE_COLLECTED': return 3;
+      case 'COMPLETED': return 4;
+      default: return 1;
+    }
+  }
+
+  labStepClass(lab: LabOrder, step: { index: number }): string {
+    const current = this.labWorkflowStep(lab);
+    if (current >= step.index) return 'bg-purple-600 border-purple-600 text-white shadow-sm';
+    if (current + 1 === step.index) return 'bg-white border-purple-400 text-purple-700 ring-2 ring-purple-100';
+    return 'bg-slate-50 border-slate-200 text-slate-300';
+  }
+
+  /** Payment completed → the technician moves the request into processing. */
+  markInProgress(lab: LabOrder) {
+    if (!this.canEnterLabResult()) {
+      this.store.addToast('error', 'Laboratory Role Required', 'Only a laboratory technician can update the request status.');
+      return;
+    }
+    this.store.updateLabStatus(lab.id, 'IN_ANALYSIS');
+  }
+
+  /** Confirms the specimen was taken; this is what unlocks result entry. */
+  markSampleCollected(lab: LabOrder) {
+    if (!this.canEnterLabResult()) {
+      this.store.addToast('error', 'Laboratory Role Required', 'Only a laboratory technician can confirm sample collection.');
+      return;
+    }
+    this.store.updateLabStatus(lab.id, 'SAMPLE_COLLECTED', new Date().toISOString());
   }
 
   private escapeHtml(value: string): string {
