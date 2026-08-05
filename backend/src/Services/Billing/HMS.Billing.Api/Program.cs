@@ -218,21 +218,31 @@ app.MapPost("/api/billing/invoices", async (
     // charge is routed through the payer (claim) instead of collected as a cash sale.
     // An explicitly supplied payment type is always respected: only an absent type is
     // resolved here, and the payer name is only attached to insurance-routed invoices.
+    // The patient lookup happens only when it is actually needed: an absent payment
+    // type, an insurance invoice missing its payer name, or an insurance invoice
+    // without an explicit covered amount. Plain cash invoices skip the HTTP call.
     var paymentType = Clean(request.PaymentType, "");
     var insuranceProvider = CleanOrNull(request.InsuranceProvider);
+    var paymentTypeIsInsurance = paymentType.Equals("Insurance", StringComparison.OrdinalIgnoreCase);
+    var needsPatientLookup = string.IsNullOrWhiteSpace(paymentType)
+        || (paymentTypeIsInsurance && (insuranceProvider is null || request.InsuranceCoveredAmount is null or <= 0));
+
+    var coverage = needsPatientLookup
+        ? await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, request.PatientId)
+        : new PatientInsuranceSnapshot(false, null, null, null, "Lookup skipped.");
+
     if (string.IsNullOrWhiteSpace(paymentType))
     {
-        var coverage = await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, request.PatientId);
         paymentType = coverage.HasInsurance ? "Insurance" : "Cash";
         insuranceProvider = coverage.HasInsurance ? coverage.Provider : null;
+        paymentTypeIsInsurance = paymentType.Equals("Insurance", StringComparison.OrdinalIgnoreCase);
     }
-    else if (paymentType.Equals("Insurance", StringComparison.OrdinalIgnoreCase) && insuranceProvider is null)
+    else if (paymentTypeIsInsurance && insuranceProvider is null)
     {
-        var coverage = await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, request.PatientId);
         insuranceProvider = coverage.HasInsurance ? coverage.Provider : null;
     }
 
-    var isInsuranceRouted = paymentType.Equals("Insurance", StringComparison.OrdinalIgnoreCase);
+    var isInsuranceRouted = paymentTypeIsInsurance;
     if (isInsuranceRouted && string.IsNullOrWhiteSpace(insuranceProvider))
     {
         return Results.BadRequest(ApiResponse<object>.Fail(
@@ -243,6 +253,22 @@ app.MapPost("/api/billing/invoices", async (
     var discount = Math.Max(0, request.Discount);
     var tax = Math.Max(0, request.Tax);
     var total = Math.Max(0, subtotal - discount + tax);
+
+    // The insurance-covered amount is the authoritative patient liability split for
+    // clinical clearance: the patient is cleared once their own share (copay) is
+    // settled, even while the insurer's portion awaits claim settlement. The payer's
+    // coverage percentage comes from the patient's insurance record; an explicit
+    // covered amount supplied by the caller (e.g. negotiated rate) always wins.
+    var insuranceCoveredAmount = 0m;
+    if (isInsuranceRouted)
+    {
+        insuranceCoveredAmount = request.InsuranceCoveredAmount is > 0
+            ? Math.Min(total, request.InsuranceCoveredAmount.Value)
+            : coverage.CoveragePercent is > 0
+                ? Math.Round(total * (coverage.CoveragePercent.Value / 100m), 2, MidpointRounding.AwayFromZero)
+                : 0m;
+    }
+
     var invoice = new Invoice
     {
         Id = Guid.NewGuid(),
@@ -254,6 +280,7 @@ app.MapPost("/api/billing/invoices", async (
         Tax = tax,
         Total = total,
         Paid = 0,
+        InsuranceCoveredAmount = insuranceCoveredAmount,
         Status = "Unpaid",
         DueAtUtc = DateTime.UtcNow.AddDays(7),
         CreatedAtUtc = DateTime.UtcNow,
@@ -358,16 +385,23 @@ app.MapPost("/api/billing/payments", async (PaymentRequest request, BillingDbCon
     }
 
     // Insurance detection guard: a charge routed through a payer must never be fully
-    // settled with patient cash. Collect only the copay, then settle the insured
-    // portion by submitting a claim or recording the insurer's remittance.
+    // settled with patient cash. The insurer's portion is recorded through a claim or
+    // remittance; patient cash may only cover the patient's own share (copay). The
+    // covered amount is authoritative on the invoice, so once the copay is settled the
+    // patient is clinically cleared even while the insurer's portion awaits claim.
     var insuranceRouted = invoice.PaymentType?.Equals("Insurance", StringComparison.OrdinalIgnoreCase) == true
         || !string.IsNullOrWhiteSpace(invoice.InsuranceProvider);
-    if (insuranceRouted && balance > 0 && request.Amount >= balance && IsPatientPaymentMethod(request.Method))
+    if (insuranceRouted && IsPatientPaymentMethod(request.Method))
     {
-        var payer = invoice.InsuranceProvider ?? "the patient's insurance payer";
-        return Results.BadRequest(ApiResponse<object>.Fail(
-            $"This charge is covered by {payer}. Collect only the patient's copay here and settle the insured " +
-            "portion by submitting a claim, or record the insurer's remittance using an insurance payment method."));
+        var patientShareRemaining = Math.Max(0m, invoice.Total - invoice.InsuranceCoveredAmount - invoice.Paid);
+        if (request.Amount > patientShareRemaining)
+        {
+            var payer = invoice.InsuranceProvider ?? "the patient's insurance payer";
+            return Results.BadRequest(ApiResponse<object>.Fail(
+                $"This charge is covered by {payer}. Patient cash may only cover the patient's own share; " +
+                $"the remaining copay is {patientShareRemaining:0.00}. Settle the insured portion by submitting a claim " +
+                "or recording the insurer's remittance using an insurance payment method."));
+        }
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync();
@@ -456,13 +490,20 @@ static async Task<DoctorServicePriceQuoteDto> BuildDoctorServiceQuoteAsync(
             "Consultation payment is required before vitals and doctor review.");
     }
 
-    var paidInvoices = await db.Invoices
+    // A consultation is covered when the patient's own share is settled: cash invoices
+    // need full payment, while insured invoices are covered once the patient's copay
+    // has been collected (the insurer's portion settles later through the claim).
+    var coveredInvoices = await db.Invoices
         .AsNoTracking()
         .Include(invoice => invoice.Items)
-        .Where(invoice => invoice.PatientId == patientId.Value && invoice.Status == "Paid")
+        .Where(invoice =>
+            invoice.PatientId == patientId.Value &&
+            invoice.Status != "Cancelled" &&
+            invoice.Status != "Voided" &&
+            invoice.Total - invoice.InsuranceCoveredAmount - invoice.Paid <= 0)
         .ToListAsync();
 
-    var lastCoveredServiceDate = paidInvoices
+    var lastCoveredServiceDate = coveredInvoices
         .SelectMany(invoice => invoice.Items
             .Where(item =>
                 item.ServiceCode == price.ServiceCode &&
@@ -484,7 +525,7 @@ static async Task<DoctorServicePriceQuoteDto> BuildDoctorServiceQuoteAsync(
             price.IsActive,
             true,
             null,
-            "No paid consultation coverage exists for this patient and doctor.");
+            "No settled consultation coverage exists for this patient and doctor.");
     }
 
     var coveredUntil = lastCoveredServiceDate.AddDays(price.ValidityDays);
@@ -522,32 +563,34 @@ static async Task<PatientInsuranceSnapshot> GetPatientInsuranceAsync(
         using var response = await client.SendAsync(request);
         if (!response.IsSuccessStatusCode)
         {
-            return new PatientInsuranceSnapshot(false, null, null, "Patient service rejected the insurance lookup.");
+            return new PatientInsuranceSnapshot(false, null, null, null, "Patient service rejected the insurance lookup.");
         }
 
         var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<PatientDto>>();
         var patient = envelope?.Data;
         if (patient is null)
         {
-            return new PatientInsuranceSnapshot(false, null, null, "Patient record could not be loaded.");
+            return new PatientInsuranceSnapshot(false, null, null, null, "Patient record could not be loaded.");
         }
 
         var hasInsurance = patient.InsuranceCompanyId is not null
             || !string.IsNullOrWhiteSpace(patient.InsuranceProvider)
             || !string.IsNullOrWhiteSpace(patient.InsuranceCompanyName);
         var provider = patient.InsuranceCompanyName ?? patient.InsuranceProvider;
+        var coveragePercent = patient.InsuranceCoveragePercent is > 0 ? patient.InsuranceCoveragePercent : null;
 
         return new PatientInsuranceSnapshot(
             hasInsurance,
             hasInsurance ? provider : null,
             patient.InsurancePolicyNumber,
+            coveragePercent,
             hasInsurance
                 ? $"Patient is covered by {provider}."
                 : "No insurance coverage is recorded for this patient.");
     }
     catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
     {
-        return new PatientInsuranceSnapshot(false, null, null, $"Patient service is unavailable: {exception.Message}");
+        return new PatientInsuranceSnapshot(false, null, null, null, $"Patient service is unavailable: {exception.Message}");
     }
 }
 
@@ -593,6 +636,7 @@ static InvoiceDto ToInvoiceDto(Invoice invoice) =>
         invoice.Tax,
         invoice.Total,
         invoice.Paid,
+        invoice.InsuranceCoveredAmount,
         invoice.Total - invoice.Paid,
         invoice.Status,
         invoice.PaymentType,
@@ -732,4 +776,5 @@ sealed record PatientInsuranceSnapshot(
     bool HasInsurance,
     string? Provider,
     string? PolicyNumber,
+    decimal? CoveragePercent,
     string Message);

@@ -26,6 +26,7 @@ public sealed class BillingDbContext(DbContextOptions<BillingDbContext> options)
             entity.Property(invoice => invoice.Tax).HasColumnName("tax").HasPrecision(12, 2);
             entity.Property(invoice => invoice.Total).HasColumnName("total").HasPrecision(12, 2);
             entity.Property(invoice => invoice.Paid).HasColumnName("paid").HasPrecision(12, 2);
+            entity.Property(invoice => invoice.InsuranceCoveredAmount).HasColumnName("insurance_covered_amount").HasPrecision(12, 2).HasDefaultValue(0m);
             entity.Property(invoice => invoice.Status).HasColumnName("status").HasMaxLength(40);
             entity.Property(invoice => invoice.DueAtUtc).HasColumnName("due_at_utc");
             entity.Property(invoice => invoice.CreatedAtUtc).HasColumnName("created_at_utc").HasDefaultValueSql("now()");
@@ -123,6 +124,13 @@ public sealed class Invoice : Entity
     public decimal Tax { get; set; }
     public decimal Total { get; set; }
     public decimal Paid { get; set; }
+    /// <summary>
+    /// Portion of this invoice carried by the patient's insurer. The patient is
+    /// clinically cleared once <c>Total - InsuranceCoveredAmount - Paid &lt;= 0</c>,
+    /// i.e. the patient's own share (copay) is settled even when the insurer's
+    /// portion is still awaiting claim settlement.
+    /// </summary>
+    public decimal InsuranceCoveredAmount { get; set; }
     public string Status { get; set; } = "Unpaid";
     public DateTime DueAtUtc { get; set; }
     public string PaymentType { get; set; } = "Cash";
@@ -207,6 +215,7 @@ public static class BillingSeedData
             Tax = 0,
             Total = 1080,
             Paid = 500,
+            InsuranceCoveredAmount = 918,
             Status = "Partially Paid",
             DueAtUtc = DateTime.UtcNow.AddDays(7),
             CreatedAtUtc = DateTime.UtcNow.AddHours(-2),

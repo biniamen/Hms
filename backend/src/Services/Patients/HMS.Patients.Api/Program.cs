@@ -454,7 +454,8 @@ static PatientDto ToPatientDto(Patient patient)
         patient.InsurancePolicyNumber,
         patient.EmergencyContactName,
         patient.EmergencyContactPhone,
-        photoDataUrl);
+        photoDataUrl,
+        patient.InsuranceCompany?.CoveragePercent);
 }
 
 static BedDto ToBedDto(Bed bed) => new(bed.Id, bed.Ward, bed.Room, bed.BedNumber, bed.IsAvailable);

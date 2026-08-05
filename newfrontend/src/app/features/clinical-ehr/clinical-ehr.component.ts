@@ -87,7 +87,7 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
             <div>
               <div class="font-black text-amber-900">No clinically cleared patients</div>
               <p class="mt-1 text-xs font-semibold leading-relaxed text-amber-800">
-                Assigned patients appear here only after Billing records a full payment or covered settlement. Reception creates the appointment, Billing clears the invoice, then Nursing and Doctor worklists open automatically.
+                Assigned patients appear here after Billing settles the patient's payment share. Cash patients are cleared by full payment; insured patients are cleared as soon as the copay is collected, while the insurer's portion is settled by claim.
               </p>
             </div>
           </div>
@@ -1028,7 +1028,7 @@ export class ClinicalEhrComponent {
 
   openForm(tab: ClinicalTab) {
     if (this.clinicalPatients().length === 0) {
-      this.store.addToast('warning', 'Billing Clearance Required', 'The patient must be fully paid or covered before clinical documentation, vitals, prescription, or diagnostic order entry.');
+      this.store.addToast('warning', 'Billing Clearance Required', 'The patient\'s payment share must be settled before clinical documentation, vitals, prescription, or diagnostic order entry.');
       return;
     }
     this.activeTab.set(tab);
@@ -1454,7 +1454,7 @@ export class ClinicalEhrComponent {
   private requirePatient(patientId: string | null): Patient | undefined {
     const patient = this.clinicalPatients().find(item => item.id === patientId);
     if (!patient) {
-      this.store.addToast('error', 'Billing Clearance Required', 'Select a patient with a fully paid or covered appointment invoice before saving the clinical record.');
+      this.store.addToast('error', 'Billing Clearance Required', 'Select a patient whose payment share is settled before saving the clinical record.');
     }
     return patient;
   }

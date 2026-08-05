@@ -24,7 +24,8 @@ public sealed record PatientDto(
     string? InsurancePolicyNumber,
     string? EmergencyContactName,
     string? EmergencyContactPhone,
-    string? PhotoDataUrl);
+    string? PhotoDataUrl,
+    decimal? InsuranceCoveragePercent);
 
 public sealed record CreatePatientRequest(
     [Required(ErrorMessage = "First name is required")]

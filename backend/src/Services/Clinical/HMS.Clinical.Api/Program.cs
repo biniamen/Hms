@@ -423,7 +423,7 @@ app.MapPost("/api/clinical/lab-requests", async (
     }
 
     var releaseMessage = coverage.HasInsurance
-        ? $"Lab request sent to Billing. It will be cleared through {coverage.Provider} and released to the laboratory after claim settlement."
+        ? $"Lab request sent to Billing. It will be released to the laboratory as soon as the patient's copay is collected; the covered portion is settled through {coverage.Provider} by claim."
         : "Lab request sent to Billing. It will be released to the laboratory after full payment.";
 
     return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(
@@ -788,10 +788,15 @@ static async Task<LabPaymentSnapshot> GetLabPaymentSnapshotAsync(
         }
 
         var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<InvoiceDto[]>>();
+        // A laboratory request is released once the patient's own share is settled.
+        // Cash invoices need full payment; insured invoices are released as soon as
+        // the patient's copay is collected, even while the insurer's portion awaits
+        // claim settlement. The covered amount is authoritative on the invoice.
         var paidLabRequestIds = (envelope?.Data ?? [])
             .Where(invoice =>
-                invoice.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase) &&
-                invoice.Balance <= 0)
+                !invoice.Status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                !invoice.Status.Equals("Voided", StringComparison.OrdinalIgnoreCase) &&
+                invoice.Total - invoice.InsuranceCoveredAmount - invoice.Paid <= 0)
             .SelectMany(invoice => invoice.Items)
             .Where(item =>
                 item.ReferenceType?.Equals("LAB_REQUEST", StringComparison.OrdinalIgnoreCase) == true &&

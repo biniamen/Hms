@@ -61,6 +61,7 @@ public sealed record InvoiceDto(
     decimal Tax,
     decimal Total,
     decimal Paid,
+    decimal InsuranceCoveredAmount,
     decimal Balance,
     string Status,
     string PaymentType,
@@ -87,7 +88,8 @@ public sealed record CreateInvoiceRequest(
     [Range(0, double.MaxValue, ErrorMessage = "Tax cannot be negative")] decimal Tax,
     string PaymentType,
     string? InsuranceProvider,
-    InvoiceItemRequest[]? Items);
+    InvoiceItemRequest[]? Items,
+    decimal? InsuranceCoveredAmount = null);
 
 public sealed record UpdateInvoiceStatusRequest(
     [Required(ErrorMessage = "Status is required")] string Status);

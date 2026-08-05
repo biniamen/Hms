@@ -118,7 +118,7 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                   <span class="material-icons text-blue-600 text-base mt-0.5">verified_user</span>
                   <div>
                     <p class="text-[11px] font-black uppercase tracking-widest text-blue-800">Insurance detected — {{ orderPatientInsurance()?.provider }} ({{ orderPatientInsurance()?.coveragePercent }}% covered)</p>
-                    <p class="mt-0.5 text-[11px] font-semibold text-blue-700">This order will be invoiced through insurance and released to the laboratory after the copay is collected and the claim is settled.</p>
+                    <p class="mt-0.5 text-[11px] font-semibold text-blue-700">This order will be invoiced through insurance and released to the laboratory as soon as the patient's copay is collected; the covered portion is settled through the payer by claim.</p>
                   </div>
                 </div>
               } @else {

@@ -231,6 +231,7 @@ export interface BackendInvoice {
   tax: number;
   total: number;
   paid: number;
+  insuranceCoveredAmount?: number;
   balance: number;
   status: string;
   paymentType?: string;

@@ -321,7 +321,7 @@ import { BillingInvoice } from '../../core/models';
                 <h3 class="text-base font-bold text-slate-900 font-display">Record Patient Payment</h3>
                 <p class="text-xs text-slate-400">{{ selectedInvForPayment()?.invoiceNumber }} for {{ store.patientDisplayName(selectedInvForPayment()?.patientId || '') }}</p>
                 @if (isLabInvoice(selectedInvForPayment())) {
-                  <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-purple-700">Full payment releases this request to the laboratory technician.</p>
+                  <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-purple-700">Once the patient's share is settled, this request is released to the laboratory technician.</p>
                 }
               </div>
               <button (click)="selectedInvForPayment.set(null)" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">

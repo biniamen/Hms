@@ -598,7 +598,14 @@ export class StoreService {
         referenceId: item.referenceId,
       })),
       totalAmount: i.total,
-      insuranceCoveredAmount: this.invoiceInsuranceCovered(i.total, i.paymentType, i.insuranceProvider, i.patientId),
+      // Trust the authoritative covered amount computed and stored by the Billing
+      // service (based on the patient's real coverage). A stored zero is also
+      // authoritative — it means no covered portion was resolved — so frontend and
+      // backend clearance gates always agree. The client-side estimate is only a
+      // fallback when the backend field is entirely absent.
+      insuranceCoveredAmount: i.insuranceCoveredAmount != null
+        ? i.insuranceCoveredAmount
+        : this.invoiceInsuranceCovered(i.total, i.paymentType, i.insuranceProvider, i.patientId),
       patientPaidAmount: i.paid || 0,
       status: this.mapInvoiceStatus(i.status),
       paymentType,
@@ -705,11 +712,15 @@ export class StoreService {
       ...item,
       patientName: this.patientDisplayName(item.patientId),
       patientMrn: this.patientMrn(item.patientId),
-      insuranceCoveredAmount: this.invoiceInsuranceCovered(
-        item.totalAmount,
-        item.paymentType,
-        item.insuranceProvider,
-        item.patientId),
+      // Keep the backend-authoritative covered amount (a stored zero is respected
+      // too); only fall back to the client-side estimate when it is entirely absent.
+      insuranceCoveredAmount: item.insuranceCoveredAmount != null
+        ? item.insuranceCoveredAmount
+        : this.invoiceInsuranceCovered(
+            item.totalAmount,
+            item.paymentType,
+            item.insuranceProvider,
+            item.patientId),
     })));
     this.medicalRecords.update(items => items.map(item => ({
       ...item,
@@ -1297,8 +1308,15 @@ export class StoreService {
         current.map(inv => {
           if (inv.id === id) {
             const newPaid = inv.patientPaidAmount + amount;
-            const totalDue = inv.totalAmount - inv.insuranceCoveredAmount;
-            const status = newPaid >= totalDue ? 'PAID' : 'PARTIALLY_PAID';
+            // Insurance-aware status: the invoice is only fully PAID when everything
+            // (including the insured portion) is settled. Once the patient's own share
+            // is covered it is PARTIALLY_PAID for cash purposes, but that still clears
+            // clinical access because the patient share balance is zero.
+            const status = newPaid >= inv.totalAmount
+              ? 'PAID'
+              : newPaid > 0
+                ? 'PARTIALLY_PAID'
+                : 'UNPAID';
             return { ...inv, patientPaidAmount: newPaid, status, paymentMethod: paymentMethod as any };
           }
           return inv;
