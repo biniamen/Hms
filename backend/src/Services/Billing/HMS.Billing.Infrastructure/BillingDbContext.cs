@@ -215,7 +215,6 @@ public static class BillingSeedData
             Tax = 0,
             Total = 1080,
             Paid = 500,
-            InsuranceCoveredAmount = 918,
             Status = "Partially Paid",
             DueAtUtc = DateTime.UtcNow.AddDays(7),
             CreatedAtUtc = DateTime.UtcNow.AddHours(-2),

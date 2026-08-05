@@ -197,6 +197,61 @@ http://localhost:5200
 
 Wait about 60-90 seconds for Angular to compile after starting the script.
 
+## Seed Local Database
+
+Use this after cloning the project on a new developer machine, or when a teammate needs the default HMS test data in PostgreSQL.
+
+1. Create local runtime config:
+
+```powershell
+cd "D:\Mine Only\Private\hms-platform"
+Copy-Item .\hms.local.example.ps1 .\hms.local.ps1
+notepad .\hms.local.ps1
+```
+
+2. Set these values in `hms.local.ps1`:
+
+```powershell
+$env:HMS_POSTGRES_HOST = "localhost"
+$env:HMS_POSTGRES_PORT = "5432"
+$env:HMS_POSTGRES_USER = "postgres"
+$env:HMS_POSTGRES_PASSWORD = "your-postgres-password"
+$env:Security__Jwt__SigningKey = "at-least-32-random-characters"
+$env:Seed__DefaultPassword = "your-local-login-password"
+```
+
+3. Run the seed script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\seed-hms.ps1
+```
+
+The script creates/migrates and seeds:
+
+```text
+hms_identity_db
+hms_patient_management_db
+hms_clinical_db
+hms_billing_db
+```
+
+Seed coverage:
+
+| Database | Tables seeded |
+|---|---|
+| `hms_identity_db` | `employees`, `roles`, `permissions`, `role_permissions`, `departments`, `password_setup_tokens`, `email_outbox` |
+| `hms_patient_management_db` | `patients`, `insurance_companies`, `appointments`, `beds` |
+| `hms_clinical_db` | `clinical_encounters`, `vital_signs`, `diagnoses`, `prescriptions`, `lab_requests`, `diagnostic_tests`, `enterprise_records` |
+| `hms_billing_db` | `invoices`, `invoice_items`, `payments`, `doctor_service_prices` |
+
+The sample data links the main workflow together: seeded doctors, patients, appointments, clinical records, lab requests, prescriptions, invoices, payments, insurance providers, and enterprise operation records use consistent IDs across services.
+
+After seeding, start the system:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-hms.ps1
+```
+
 ## Run With Docker
 
 ```powershell
@@ -335,6 +390,7 @@ Included:
 ```text
 README.md
 start-hms.ps1
+seed-hms.ps1
 hms.local.example.ps1
 smtp.local.example.ps1
 backend/
