@@ -210,14 +210,39 @@ public static class PatientsSeedData
         var patients = new[]
         {
             new Patient { Id = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a"), Mrn = "MRN-0001", FirstName = "Sara", LastName = "Bekele", Email = "sara.bekele@example.com", Phone = "0920000001", Gender = "Female", DateOfBirth = new DateOnly(1995, 5, 10), NationalId = "ET-10001", MaritalStatus = "Single", Occupation = "Teacher", Address = "Bole, Addis Ababa", BloodType = "O+", InsuranceCompanyId = Guid.Parse("6fa694f8-f82c-4e58-96e5-3026077d4116"), EmployerName = "Bole Primary School", InsurancePlan = "CBHI Standard", InsuranceProvider = "Community Based Health Insurance", InsurancePolicyNumber = "CBHI-0001", EmergencyContactName = "Meron Bekele", EmergencyContactPhone = "0921000001" },
-            new Patient { Id = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80"), Mrn = "MRN-0002", FirstName = "Dawit", LastName = "Alemu", Email = "dawit.alemu@example.com", Phone = "0920000002", Gender = "Male", DateOfBirth = new DateOnly(1988, 2, 20), NationalId = "ET-10002", MaritalStatus = "Married", Occupation = "Driver", Address = "CMC, Addis Ababa", BloodType = "A+", InsuranceCompanyId = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), EmployerName = "Ethio Logistics PLC", InsurancePlan = "Corporate Gold", InsuranceProvider = "EthioLife Corporate Insurance", InsurancePolicyNumber = "INS-0002", EmergencyContactName = "Alem Alemu", EmergencyContactPhone = "0921000002" }
+            new Patient { Id = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80"), Mrn = "MRN-0002", FirstName = "Dawit", LastName = "Alemu", Email = "dawit.alemu@example.com", Phone = "0920000002", Gender = "Male", DateOfBirth = new DateOnly(1988, 2, 20), NationalId = "ET-10002", MaritalStatus = "Married", Occupation = "Driver", Address = "CMC, Addis Ababa", BloodType = "A+", InsuranceCompanyId = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), EmployerName = "Ethio Logistics PLC", InsurancePlan = "Corporate Gold", InsuranceProvider = "EthioLife Corporate Insurance", InsurancePolicyNumber = "INS-0002", EmergencyContactName = "Alem Alemu", EmergencyContactPhone = "0921000002" },
+            new Patient { Id = Guid.Parse("55d16cd5-e42f-4bb0-b1ef-02f4e6284a03"), Mrn = "MRN-0003", FirstName = "Amen", LastName = "Biniyam", Email = "amen.biniyam@example.com", Phone = "0920000003", Gender = "Male", DateOfBirth = new DateOnly(1979, 9, 14), NationalId = "ET-10003", MaritalStatus = "Married", Occupation = "Bank Officer", Address = "Kazanchis, Addis Ababa", BloodType = "B+", InsuranceCompanyId = Guid.Parse("9c864a76-f3f1-4b1c-98ce-14034e7f8e67"), EmployerName = "Unity Bank", InsurancePlan = "Employer Fund", InsuranceProvider = "Unity Staff Medical Fund", InsurancePolicyNumber = "UNITY-0003", EmergencyContactName = "Tigist Hailu", EmergencyContactPhone = "0921000003" },
+            new Patient { Id = Guid.Parse("f857a7b1-9689-480d-a110-111226b77104"), Mrn = "MRN-0004", FirstName = "Meron", LastName = "Kassa", Email = "meron.kassa@example.com", Phone = "0920000004", Gender = "Female", DateOfBirth = new DateOnly(2001, 12, 3), NationalId = "ET-10004", MaritalStatus = "Single", Occupation = "Student", Address = "Piassa, Addis Ababa", BloodType = "AB+", EmployerName = "Self", InsurancePlan = "Self Pay", InsuranceProvider = "", InsurancePolicyNumber = "", EmergencyContactName = "Kassa Gemechu", EmergencyContactPhone = "0921000004" },
+            new Patient { Id = Guid.Parse("0ef7e12a-1017-4039-83c4-d90301515f05"), Mrn = "MRN-0005", FirstName = "Hirut", LastName = "Tola", Email = "hirut.tola@example.com", Phone = "0920000005", Gender = "Female", DateOfBirth = new DateOnly(1991, 7, 27), NationalId = "ET-10005", MaritalStatus = "Married", Occupation = "Merchant", Address = "Megenagna, Addis Ababa", BloodType = "O-", InsuranceCompanyId = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), EmployerName = "Hirut Trading", InsurancePlan = "Corporate Gold", InsuranceProvider = "EthioLife Corporate Insurance", InsurancePolicyNumber = "INS-0005", EmergencyContactName = "Tola Bekele", EmergencyContactPhone = "0921000005" }
         };
 
         foreach (var patient in patients)
         {
-            if (!await db.Patients.AnyAsync(item => item.Mrn == patient.Mrn))
+            var existing = await db.Patients.FirstOrDefaultAsync(item => item.Mrn == patient.Mrn);
+            if (existing is null)
             {
                 db.Patients.Add(patient);
+            }
+            else
+            {
+                existing.FirstName = patient.FirstName;
+                existing.LastName = patient.LastName;
+                existing.Email = patient.Email;
+                existing.Phone = patient.Phone;
+                existing.Gender = patient.Gender;
+                existing.DateOfBirth = patient.DateOfBirth;
+                existing.NationalId = patient.NationalId;
+                existing.MaritalStatus = patient.MaritalStatus;
+                existing.Occupation = patient.Occupation;
+                existing.Address = patient.Address;
+                existing.BloodType = patient.BloodType;
+                existing.InsuranceCompanyId = patient.InsuranceCompanyId;
+                existing.EmployerName = patient.EmployerName;
+                existing.InsurancePlan = patient.InsurancePlan;
+                existing.InsuranceProvider = patient.InsuranceProvider;
+                existing.InsurancePolicyNumber = patient.InsurancePolicyNumber;
+                existing.EmergencyContactName = patient.EmergencyContactName;
+                existing.EmergencyContactPhone = patient.EmergencyContactPhone;
             }
         }
     }
@@ -228,36 +253,58 @@ public static class PatientsSeedData
         {
             new Bed { Id = Guid.Parse("c7e6c2bc-972f-47c1-a206-5f4e27f50cf7"), Ward = "General Ward A", Room = "101", BedNumber = "A1", IsAvailable = true },
             new Bed { Id = Guid.Parse("e33cfb8d-6d4a-4785-ac08-f436dc63a476"), Ward = "General Ward A", Room = "102", BedNumber = "A2", IsAvailable = true },
-            new Bed { Id = Guid.Parse("c0b45ba1-93ea-4071-8397-c96214872c5b"), Ward = "Emergency", Room = "201", BedNumber = "E1", IsAvailable = false }
+            new Bed { Id = Guid.Parse("c0b45ba1-93ea-4071-8397-c96214872c5b"), Ward = "Emergency", Room = "201", BedNumber = "E1", IsAvailable = false },
+            new Bed { Id = Guid.Parse("79b0da28-9451-4d45-982e-b273fbdde901"), Ward = "Maternity", Room = "301", BedNumber = "M1", IsAvailable = true },
+            new Bed { Id = Guid.Parse("4cc4850e-5f83-4591-83de-bf4f0c75bb02"), Ward = "Pediatrics", Room = "401", BedNumber = "P1", IsAvailable = false },
+            new Bed { Id = Guid.Parse("b1207213-92a8-4a73-8dd1-c6372de8fc03"), Ward = "Surgical Ward", Room = "501", BedNumber = "S1", IsAvailable = true }
         };
 
         foreach (var bed in beds)
         {
-            if (!await db.Beds.AnyAsync(item => item.BedNumber == bed.BedNumber))
+            var existing = await db.Beds.FirstOrDefaultAsync(item => item.BedNumber == bed.BedNumber);
+            if (existing is null)
             {
                 db.Beds.Add(bed);
+            }
+            else
+            {
+                existing.Ward = bed.Ward;
+                existing.Room = bed.Room;
+                existing.IsAvailable = bed.IsAvailable;
             }
         }
     }
 
     private static async Task UpsertAppointmentsAsync(PatientsDbContext db)
     {
-        var id = Guid.Parse("29cb54e6-b268-4f62-ac89-41ca434658c7");
-        if (!await db.Appointments.AnyAsync(item => item.Id == id))
+        var appointments = new[]
         {
-            db.Appointments.Add(new Appointment
+            new Appointment { Id = Guid.Parse("29cb54e6-b268-4f62-ac89-41ca434658c7"), PatientId = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a"), DoctorId = Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201"), StartsAtUtc = DateTime.UtcNow.AddDays(1), Status = "Scheduled", Reason = "General consultation", Department = "Outpatient", AppointmentType = "Consultation", Priority = "Normal", Notes = "Initial appointment" },
+            new Appointment { Id = Guid.Parse("d50bb3c9-9507-4cb0-b5a5-940c4f595602"), PatientId = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80"), DoctorId = Guid.Parse("47c3095d-adcc-4e1d-bfc0-b16d70c15201"), StartsAtUtc = DateTime.UtcNow.AddHours(2), Status = "Waiting", Reason = "Shortness of breath", Department = "Emergency", AppointmentType = "Emergency", Priority = "Urgent", Notes = "Triage completed, waiting for doctor review." },
+            new Appointment { Id = Guid.Parse("aac7edfa-e8d7-4646-a223-8ad0d20c3103"), PatientId = Guid.Parse("55d16cd5-e42f-4bb0-b1ef-02f4e6284a03"), DoctorId = Guid.Parse("d7f768c4-e28c-4b46-94d8-68ed9a325404"), StartsAtUtc = DateTime.UtcNow.AddHours(4), Status = "In Service", Reason = "Hypertension follow-up", Department = "Cardiology", AppointmentType = "Follow-up", Priority = "Normal", Notes = "Bring previous ECG result." },
+            new Appointment { Id = Guid.Parse("d19846d8-e394-4a91-ae2f-d2d7ea535804"), PatientId = Guid.Parse("f857a7b1-9689-480d-a110-111226b77104"), DoctorId = Guid.Parse("cd8bfaf4-1afa-43e0-a2c4-a813da015202"), StartsAtUtc = DateTime.UtcNow.AddDays(1).AddHours(3), Status = "Scheduled", Reason = "Child fever review", Department = "Pediatrics", AppointmentType = "Consultation", Priority = "Normal", Notes = "First pediatric visit." },
+            new Appointment { Id = Guid.Parse("4798ef98-7514-430f-a49a-48c7a2b26d05"), PatientId = Guid.Parse("0ef7e12a-1017-4039-83c4-d90301515f05"), DoctorId = Guid.Parse("a6303a4a-e409-409f-a21c-8abb44ea5303"), StartsAtUtc = DateTime.UtcNow.AddDays(-1), Status = "Completed", Reason = "Antenatal check", Department = "Maternity", AppointmentType = "Follow-up", Priority = "Normal", Notes = "Vitals stable, follow-up booked." }
+        };
+
+        foreach (var appointment in appointments)
+        {
+            var existing = await db.Appointments.FirstOrDefaultAsync(item => item.Id == appointment.Id);
+            if (existing is null)
             {
-                Id = id,
-                PatientId = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a"),
-                DoctorId = Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201"),
-                StartsAtUtc = DateTime.UtcNow.AddDays(1),
-                Status = "Scheduled",
-                Reason = "General consultation",
-                Department = "Outpatient",
-                AppointmentType = "Consultation",
-                Priority = "Normal",
-                Notes = "Initial appointment"
-            });
+                db.Appointments.Add(appointment);
+            }
+            else
+            {
+                existing.PatientId = appointment.PatientId;
+                existing.DoctorId = appointment.DoctorId;
+                existing.StartsAtUtc = appointment.StartsAtUtc;
+                existing.Status = appointment.Status;
+                existing.Reason = appointment.Reason;
+                existing.Department = appointment.Department;
+                existing.AppointmentType = appointment.AppointmentType;
+                existing.Priority = appointment.Priority;
+                existing.Notes = appointment.Notes;
+            }
         }
     }
 }

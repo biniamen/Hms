@@ -235,7 +235,16 @@ hms_clinical_db
 hms_billing_db
 ```
 
-It seeds default users, roles, permissions, departments, doctors, patients, insurance companies, appointments, beds, vitals, encounters, prescriptions, lab requests, diagnostic tests, invoices, payments, and enterprise operation records.
+Seed coverage:
+
+| Database | Tables seeded |
+|---|---|
+| `hms_identity_db` | `employees`, `roles`, `permissions`, `role_permissions`, `departments`, `password_setup_tokens`, `email_outbox` |
+| `hms_patient_management_db` | `patients`, `insurance_companies`, `appointments`, `beds` |
+| `hms_clinical_db` | `clinical_encounters`, `vital_signs`, `diagnoses`, `prescriptions`, `lab_requests`, `diagnostic_tests`, `enterprise_records` |
+| `hms_billing_db` | `invoices`, `invoice_items`, `payments`, `doctor_service_prices` |
+
+The sample data links the main workflow together: seeded doctors, patients, appointments, clinical records, lab requests, prescriptions, invoices, payments, insurance providers, and enterprise operation records use consistent IDs across services.
 
 After seeding, start the system:
 

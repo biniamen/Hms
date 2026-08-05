@@ -245,34 +245,86 @@ public static class ClinicalSeedData
         var saraId = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a");
         var dawitId = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80");
 
-        if (!await db.Encounters.AnyAsync())
+        var amenId = Guid.Parse("55d16cd5-e42f-4bb0-b1ef-02f4e6284a03");
+        var meronId = Guid.Parse("f857a7b1-9689-480d-a110-111226b77104");
+        var hirutId = Guid.Parse("0ef7e12a-1017-4039-83c4-d90301515f05");
+        var emergencyDoctorId = Guid.Parse("47c3095d-adcc-4e1d-bfc0-b16d70c15201");
+        var cardiologyDoctorId = Guid.Parse("d7f768c4-e28c-4b46-94d8-68ed9a325404");
+        var maternityDoctorId = Guid.Parse("a6303a4a-e409-409f-a21c-8abb44ea5303");
+
+        var encounters = new[]
         {
-            db.Encounters.Add(new ClinicalEncounter { Id = Guid.Parse("7a58c9f1-4412-48dd-9165-7f08de63f863"), PatientId = saraId, DoctorId = doctorId, VisitType = "Outpatient", ChiefComplaint = "Fever and sore throat", Assessment = "Likely bacterial pharyngitis", Plan = "Antibiotics, hydration, follow-up in 5 days", EncounterAtUtc = DateTime.UtcNow.AddHours(-4) });
+            new ClinicalEncounter { Id = Guid.Parse("7a58c9f1-4412-48dd-9165-7f08de63f863"), PatientId = saraId, DoctorId = doctorId, VisitType = "Outpatient", ChiefComplaint = "Fever and sore throat", Assessment = "Likely bacterial pharyngitis", Plan = "Antibiotics, hydration, follow-up in 5 days", EncounterAtUtc = DateTime.UtcNow.AddHours(-4) },
+            new ClinicalEncounter { Id = Guid.Parse("12c72cf1-3217-41e2-8f74-72efa8ad3c01"), PatientId = dawitId, DoctorId = emergencyDoctorId, VisitType = "Emergency", ChiefComplaint = "Shortness of breath", Assessment = "Asthma exacerbation with mild wheeze", Plan = "Nebulization, oxygen as needed, chest X-ray, reassess in 30 minutes", EncounterAtUtc = DateTime.UtcNow.AddHours(-2) },
+            new ClinicalEncounter { Id = Guid.Parse("81429586-1dd0-40a8-a77d-b32f513a5b02"), PatientId = amenId, DoctorId = cardiologyDoctorId, VisitType = "Follow-up", ChiefComplaint = "Hypertension follow-up", Assessment = "Blood pressure above target, no acute symptoms", Plan = "Adjust medication, ECG review, follow-up in two weeks", EncounterAtUtc = DateTime.UtcNow.AddHours(-1) },
+            new ClinicalEncounter { Id = Guid.Parse("c316f642-3b66-442d-b59e-661ba2046f03"), PatientId = hirutId, DoctorId = maternityDoctorId, VisitType = "Antenatal Review", ChiefComplaint = "Routine antenatal care", Assessment = "Stable pregnancy review", Plan = "Routine ANC labs, ultrasound scheduling, nutrition counselling", EncounterAtUtc = DateTime.UtcNow.AddDays(-1) }
+        };
+
+        foreach (var encounter in encounters)
+        {
+            if (!await db.Encounters.AnyAsync(item => item.Id == encounter.Id))
+            {
+                db.Encounters.Add(encounter);
+            }
         }
 
-        if (!await db.VitalSigns.AnyAsync())
+        var vitals = new[]
         {
-            db.VitalSigns.Add(new VitalSign { Id = Guid.Parse("a4d6c3ef-6d9f-4d35-9e92-40f980022f6a"), PatientId = saraId, TemperatureC = 37.8m, Pulse = 92, RespiratoryRate = 18, BloodPressure = "118/76", WeightKg = 62.5m, HeightCm = 164m, RecordedAtUtc = DateTime.UtcNow.AddHours(-4) });
+            new VitalSign { Id = Guid.Parse("a4d6c3ef-6d9f-4d35-9e92-40f980022f6a"), PatientId = saraId, TemperatureC = 37.8m, Pulse = 92, RespiratoryRate = 18, BloodPressure = "118/76", WeightKg = 62.5m, HeightCm = 164m, RecordedAtUtc = DateTime.UtcNow.AddHours(-4) },
+            new VitalSign { Id = Guid.Parse("441b7a02-d188-43bf-b9a2-9426c81be304"), PatientId = dawitId, TemperatureC = 36.9m, Pulse = 105, RespiratoryRate = 24, BloodPressure = "130/82", WeightKg = 74.2m, HeightCm = 171m, RecordedAtUtc = DateTime.UtcNow.AddHours(-2) },
+            new VitalSign { Id = Guid.Parse("cc94feb2-7682-4df8-8182-d59f011da505"), PatientId = amenId, TemperatureC = 36.7m, Pulse = 84, RespiratoryRate = 18, BloodPressure = "148/92", WeightKg = 82.6m, HeightCm = 176m, RecordedAtUtc = DateTime.UtcNow.AddHours(-1) },
+            new VitalSign { Id = Guid.Parse("70985167-3f38-4444-84e1-45018fd71306"), PatientId = hirutId, TemperatureC = 36.8m, Pulse = 88, RespiratoryRate = 18, BloodPressure = "116/74", WeightKg = 68.4m, HeightCm = 160m, RecordedAtUtc = DateTime.UtcNow.AddDays(-1) }
+        };
+
+        foreach (var vital in vitals)
+        {
+            if (!await db.VitalSigns.AnyAsync(item => item.Id == vital.Id))
+            {
+                db.VitalSigns.Add(vital);
+            }
         }
 
-        if (!await db.Diagnoses.AnyAsync())
+        var diagnoses = new[]
         {
-            db.Diagnoses.Add(new Diagnosis { Id = Guid.Parse("f4231a15-8a45-48cd-824a-28f454ccdfc1"), PatientId = saraId, DoctorId = doctorId, Code = "J02.9", Description = "Acute pharyngitis", Severity = "Moderate", DiagnosedAtUtc = DateTime.UtcNow.AddHours(-3) });
+            new Diagnosis { Id = Guid.Parse("f4231a15-8a45-48cd-824a-28f454ccdfc1"), PatientId = saraId, DoctorId = doctorId, Code = "J02.9", Description = "Acute pharyngitis", Severity = "Moderate", DiagnosedAtUtc = DateTime.UtcNow.AddHours(-3) },
+            new Diagnosis { Id = Guid.Parse("3f49d486-7d2c-4514-b435-c4491d6d0507"), PatientId = dawitId, DoctorId = emergencyDoctorId, Code = "J45.901", Description = "Asthma exacerbation", Severity = "Moderate", DiagnosedAtUtc = DateTime.UtcNow.AddHours(-2) },
+            new Diagnosis { Id = Guid.Parse("48b46849-c96a-4c44-aee7-c64c3da03e08"), PatientId = amenId, DoctorId = cardiologyDoctorId, Code = "I10", Description = "Essential hypertension", Severity = "Mild", DiagnosedAtUtc = DateTime.UtcNow.AddHours(-1) },
+            new Diagnosis { Id = Guid.Parse("23cde1c3-c0ce-4fb5-b970-008db0a7be09"), PatientId = hirutId, DoctorId = maternityDoctorId, Code = "Z34.9", Description = "Routine antenatal supervision", Severity = "Normal", DiagnosedAtUtc = DateTime.UtcNow.AddDays(-1) }
+        };
+
+        foreach (var diagnosis in diagnoses)
+        {
+            if (!await db.Diagnoses.AnyAsync(item => item.Id == diagnosis.Id))
+            {
+                db.Diagnoses.Add(diagnosis);
+            }
         }
 
-        if (!await db.Prescriptions.AnyAsync())
+        var prescriptions = new[]
         {
-            db.Prescriptions.Add(new Prescription { Id = Guid.Parse("325cf3a1-2af1-4b69-8a17-6fac5c547915"), PatientId = saraId, DoctorId = doctorId, Medication = "Amoxicillin 500mg", Instructions = "Take one capsule every 8 hours for 5 days", OrderedAtUtc = DateTime.UtcNow.AddHours(-3) });
+            new Prescription { Id = Guid.Parse("325cf3a1-2af1-4b69-8a17-6fac5c547915"), PatientId = saraId, DoctorId = doctorId, Medication = "Amoxicillin 500mg", Instructions = "Take one capsule every 8 hours for 5 days", OrderedAtUtc = DateTime.UtcNow.AddHours(-3) },
+            new Prescription { Id = Guid.Parse("7d60cfcc-a2e2-4ac3-a507-f3bc376dcc0a"), PatientId = dawitId, DoctorId = emergencyDoctorId, Medication = "Salbutamol nebulization", Instructions = "Nebulize every 20 minutes for three doses, then reassess", OrderedAtUtc = DateTime.UtcNow.AddHours(-2) },
+            new Prescription { Id = Guid.Parse("e4d32fb1-f2b1-4a26-bc2b-2bec246e200b"), PatientId = amenId, DoctorId = cardiologyDoctorId, Medication = "Amlodipine 5mg", Instructions = "Take one tablet once daily for 30 days", OrderedAtUtc = DateTime.UtcNow.AddHours(-1) },
+            new Prescription { Id = Guid.Parse("2f89af22-7173-4940-b810-d34a545e520c"), PatientId = hirutId, DoctorId = maternityDoctorId, Medication = "Folic Acid 5mg", Instructions = "Take one tablet once daily for 30 days", OrderedAtUtc = DateTime.UtcNow.AddDays(-1) }
+        };
+
+        foreach (var prescription in prescriptions)
+        {
+            if (!await db.Prescriptions.AnyAsync(item => item.Id == prescription.Id))
+            {
+                db.Prescriptions.Add(prescription);
+            }
         }
 
-        if (!await db.LabRequests.AnyAsync())
+        var labRequests = new[]
         {
-            db.LabRequests.Add(new LabRequest
+            new LabRequest
             {
                 Id = Guid.Parse("3cb3eb61-03a4-4fec-8517-9d2778f6e40d"),
                 PatientId = dawitId,
                 DoctorId = doctorId,
                 TestName = "Complete Blood Count",
+                TestCatalogIds = "8d33f419-79f4-4a3e-a87e-9c0f3b662801;6e858c1c-ffea-4a49-af60-b108f29ee5c5;f92dc89c-d240-41e4-b97a-e1848e92456e",
                 Category = "Hematology",
                 Priority = "Routine",
                 SpecimenType = "Whole blood",
@@ -280,7 +332,40 @@ public static class ClinicalSeedData
                 Status = "Requested",
                 OrderedAtUtc = DateTime.UtcNow.AddHours(-2),
                 UpdatedAtUtc = DateTime.UtcNow.AddHours(-2)
-            });
+            },
+            new LabRequest { Id = Guid.Parse("7ee46f81-693f-4dc8-9f42-f26ea4f6dd01"), PatientId = saraId, DoctorId = doctorId, TestName = "Malaria RDT; Complete Blood Count", TestCatalogIds = "8d33f419-79f4-4a3e-a87e-9c0f3b662801;6e858c1c-ffea-4a49-af60-b108f29ee5c5", Category = "Hematology", Priority = "Routine", SpecimenType = "Whole blood", ClinicalNote = "Fever workup.", Status = "Completed", ResultSummary = "CBC within acceptable range; malaria screen non-reactive.", ResultValue = "WBC 7.6, Hgb 13.2, Malaria RDT negative", ReferenceRange = "See individual test ranges", ResultFlag = "Normal", ResultNotes = "Released to clinician.", PerformedBy = "Yonatan Alemayehu", VerifiedBy = "Senior Lab Reviewer", CollectedAtUtc = DateTime.UtcNow.AddHours(-3), ResultedAtUtc = DateTime.UtcNow.AddHours(-2), OrderedAtUtc = DateTime.UtcNow.AddHours(-4), UpdatedAtUtc = DateTime.UtcNow.AddHours(-2), ResultItemsJson = "[{\"test\":\"WBC\",\"value\":\"7.6\",\"unit\":\"x10^9/L\",\"flag\":\"Normal\"},{\"test\":\"Hgb\",\"value\":\"13.2\",\"unit\":\"gm/dL\",\"flag\":\"Normal\"}]" },
+            new LabRequest { Id = Guid.Parse("e640c416-d999-422f-a4c7-63e5b1640d02"), PatientId = amenId, DoctorId = cardiologyDoctorId, TestName = "ECG; Lipid Profile; Creatinine", TestCatalogIds = "92945363-d19b-49cb-bdc5-44cfc79a58d5", Category = "Cardio Diagnostics", Priority = "Urgent", SpecimenType = "Serum / ECG", ClinicalNote = "Hypertension review with baseline cardiac workup.", Status = "In Progress", OrderedAtUtc = DateTime.UtcNow.AddHours(-1), CollectedAtUtc = DateTime.UtcNow.AddMinutes(-40), PerformedBy = "Yonatan Alemayehu", UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-35) },
+            new LabRequest { Id = Guid.Parse("9707a9de-7a37-40b7-a10b-c92e47b2ba03"), PatientId = hirutId, DoctorId = maternityDoctorId, TestName = "Obstetric Ultrasound; Blood Group and Rh; Urinalysis", Category = "Antenatal", Priority = "Routine", SpecimenType = "Imaging / Urine / Whole blood", ClinicalNote = "Routine ANC investigations.", Status = "Verified", ResultSummary = "Urinalysis normal; blood group O positive; ultrasound report attached.", ResultValue = "O+, urine normal, viable pregnancy", ReferenceRange = "Clinical report", ResultFlag = "Normal", ResultNotes = "Reviewed and verified.", PerformedBy = "Yonatan Alemayehu", VerifiedBy = "Sofia Kassa", OrderedAtUtc = DateTime.UtcNow.AddDays(-1), CollectedAtUtc = DateTime.UtcNow.AddDays(-1).AddHours(1), ResultedAtUtc = DateTime.UtcNow.AddDays(-1).AddHours(2), UpdatedAtUtc = DateTime.UtcNow.AddDays(-1).AddHours(2) }
+        };
+
+        foreach (var request in labRequests)
+        {
+            var existing = await db.LabRequests.FirstOrDefaultAsync(item => item.Id == request.Id);
+            if (existing is null)
+            {
+                db.LabRequests.Add(request);
+            }
+            else
+            {
+                existing.TestName = request.TestName;
+                existing.TestCatalogIds = request.TestCatalogIds;
+                existing.Category = request.Category;
+                existing.Priority = request.Priority;
+                existing.SpecimenType = request.SpecimenType;
+                existing.ClinicalNote = request.ClinicalNote;
+                existing.Status = request.Status;
+                existing.ResultSummary = request.ResultSummary;
+                existing.ResultValue = request.ResultValue;
+                existing.ReferenceRange = request.ReferenceRange;
+                existing.ResultFlag = request.ResultFlag;
+                existing.ResultNotes = request.ResultNotes;
+                existing.PerformedBy = request.PerformedBy;
+                existing.VerifiedBy = request.VerifiedBy;
+                existing.CollectedAtUtc = request.CollectedAtUtc;
+                existing.ResultedAtUtc = request.ResultedAtUtc;
+                existing.ResultItemsJson = request.ResultItemsJson;
+                existing.UpdatedAtUtc = request.UpdatedAtUtc;
+            }
         }
 
         await UpsertDiagnosticTestsAsync(db);
