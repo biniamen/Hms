@@ -4,6 +4,7 @@ using HMS.SharedKernel;
 using HMS.SharedKernel.Constants;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -14,6 +15,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Services.AddOpenApi();
 builder.Services.AddHmsCors(builder.Configuration);
+builder.Services.AddHttpClient();
 
 var connectionString = builder.Configuration.RequireConnectionString("PatientManagementDb", "PatientsDb");
 
@@ -261,7 +263,11 @@ app.MapGet("/api/appointments", async (PatientsDbContext db, HttpContext httpCon
     return Results.Ok(ApiResponse<IEnumerable<AppointmentDto>>.Ok(ToAppointmentDtos(appointments)));
 });
 
-app.MapGet("/api/appointments/queue", async (PatientsDbContext db, HttpContext httpContext) =>
+app.MapGet("/api/appointments/queue", async (
+    PatientsDbContext db,
+    HttpContext httpContext,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration) =>
 {
     var today = DateTime.UtcNow.Date;
     var tomorrow = today.AddDays(1);
@@ -276,12 +282,19 @@ app.MapGet("/api/appointments/queue", async (PatientsDbContext db, HttpContext h
 
     var appointments = await query.ToListAsync();
 
+    // Employee names live in the Identity service database, so resolve them from the
+    // Identity API when possible. The summary falls back to the doctor ID when Identity
+    // is unreachable so the queue view stays available.
+    var doctorNames = appointments.Count == 0
+        ? new Dictionary<Guid, string>()
+        : await GetDoctorNameMapAsync(httpClientFactory, configuration, httpContext);
+
     var summaries = appointments
         .GroupBy(appointment => new { appointment.DoctorId, appointment.Department })
         .OrderBy(group => group.Key.Department)
         .Select(group => new QueueSummaryDto(
             group.Key.DoctorId,
-            group.Key.DoctorId.ToString(),
+            doctorNames.GetValueOrDefault(group.Key.DoctorId, group.Key.DoctorId.ToString()),
             group.Key.Department,
             group.Count(item => item.Status == "Scheduled"),
             group.Count(item => item.Status == "Waiting"),
@@ -621,6 +634,49 @@ static string? CleanOrNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 static string NormalizeCode(string value) => value.Trim().ToUpperInvariant().Replace(' ', '_');
+
+static async Task<Dictionary<Guid, string>> GetDoctorNameMapAsync(
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{IdentityBaseUrl(configuration)}/api/doctors");
+        ForwardAuthorization(httpContext, request);
+
+        using var response = await client.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<DoctorProfileDto[]>>();
+        return (envelope?.Data ?? [])
+            .Where(doctor => doctor.Id != Guid.Empty)
+            .ToDictionary(doctor => doctor.Id, doctor => $"{doctor.FirstName} {doctor.LastName}".Trim());
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+    {
+        // Queue summary must remain available while the Identity service starts or recovers.
+        return new Dictionary<Guid, string>();
+    }
+}
+
+static string IdentityBaseUrl(IConfiguration configuration) =>
+    Clean(configuration["Services:IdentityBaseUrl"], "http://localhost:5101").TrimEnd('/');
+
+static void ForwardAuthorization(HttpContext httpContext, HttpRequestMessage request)
+{
+    var authorization = httpContext.Request.Headers.Authorization.ToString();
+    if (!string.IsNullOrWhiteSpace(authorization))
+    {
+        request.Headers.TryAddWithoutValidation("Authorization", authorization);
+    }
+}
 
 sealed record RabbitMqSettings(
     string HostName,

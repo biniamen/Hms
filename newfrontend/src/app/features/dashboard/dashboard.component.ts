@@ -192,6 +192,23 @@ import { StoreService } from '../../core/services/store.service';
                 <div class="flex-1 bg-emerald-500 h-[70%] rounded-sm opacity-90"></div>
               </div>
             </div>
+
+            <!-- Today's per-doctor queues (resolved names from the Patients API) -->
+            @if (store.queueSummaryWithNames().length > 0) {
+              <div class="mt-4 space-y-2.5 border-t border-slate-700/60 pt-3">
+                @for (row of store.queueSummaryWithNames(); track row.doctorId) {
+                  <div>
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="truncate text-[10px] font-bold text-slate-200" [title]="row.doctorName">{{ row.doctorName }}</span>
+                      <span class="shrink-0 rounded-full bg-teal-500/20 px-2 py-0.5 text-[9px] font-black text-teal-300">{{ row.waiting + row.inService }} active</span>
+                    </div>
+                    <div class="mt-0.5 text-[9px] font-semibold text-slate-400">
+                      {{ row.waiting }} waiting · {{ row.inService }} in service · {{ row.completed }} done
+                    </div>
+                  </div>
+                }
+              </div>
+            }
           </div>
 
         </div>

@@ -9,7 +9,7 @@ import type {
   BackendPatient, BackendAppointment, BackendLabRequest,
   BackendPrescription, BackendDepartment, BackendBed, BackendDiagnosticTest, BackendVitalSign, BackendDiagnosis,
   BackendInvoice, BackendInvoiceItem, BackendEnterpriseRecord,
-  BackendClinicalEncounter, BackendInsuranceCompany,
+  BackendClinicalEncounter, BackendInsuranceCompany, BackendQueueSummary,
 } from '../models';
 import { AVATARS } from '../models';
 
@@ -50,6 +50,7 @@ export class StoreService {
   readonly insuranceClaims = signal<InsuranceClaim[]>([]);
   readonly insuranceCompanies = signal<BackendInsuranceCompany[]>([]);
   readonly enterpriseRecords = signal<BackendEnterpriseRecord[]>([]);
+  readonly queueSummary = signal<BackendQueueSummary[]>([]);
 
   // ── Employees as Users (for staff directory) ──
   readonly employeesAsUsers = computed<User[]>(() =>
@@ -86,6 +87,17 @@ export class StoreService {
     const occupied = this.beds().filter(b => b.isOccupied).length;
     return total > 0 ? Math.round((occupied / total) * 100) : 0;
   });
+
+  // ── Queue Summary (with resolved doctor names) ──
+  // The Patients API resolves doctor names from the Identity service. When Identity
+  // is unreachable the API falls back to the doctor ID; detect that and resolve the
+  // name from the locally-loaded employee/doctor data instead.
+  readonly queueSummaryWithNames = computed(() =>
+    this.queueSummary().map(row => ({
+      ...row,
+      doctorName: this.queueDoctorName(row),
+    }))
+  );
 
   readonly clinicalWorklistPatients = computed(() => {
     const user = this.currentUser();
@@ -196,6 +208,7 @@ export class StoreService {
     this.enterpriseRecords.set([]);
     this.medicalRecords.set([]);
     this.insuranceClaims.set([]);
+    this.queueSummary.set([]);
   }
 
   private setCurrentUserFromSession() {
@@ -329,6 +342,9 @@ export class StoreService {
       case 'enterpriseRecords':
         this.api.getEnterpriseRecords().subscribe({ next: (r) => { if (r.data) this.enterpriseRecords.set(r.data); dec(); }, error: dec });
         break;
+      case 'queue':
+        this.api.getQueueSummary().subscribe({ next: (r) => { if (r.data) this.queueSummary.set(r.data); dec(); }, error: dec });
+        break;
       default:
         dec();
     }
@@ -336,10 +352,10 @@ export class StoreService {
 
   private getEndpointsForRole(role: string): string[] {
     const roleEndpoints: Record<string, string[]> = {
-      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters'],
-      DOCTOR: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters'],
-      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'diagnosticTests', 'prescriptions', 'vitals', 'diagnoses', 'clinicalEncounters'],
-      RECEPTIONIST: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'invoices'],
+      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters', 'queue'],
+      DOCTOR: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters', 'queue'],
+      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'diagnosticTests', 'prescriptions', 'vitals', 'diagnoses', 'clinicalEncounters', 'queue'],
+      RECEPTIONIST: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'invoices', 'queue'],
       PHARMACIST: ['doctors', 'patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
       LAB_TECHNICIAN: ['doctors', 'patients', 'appointments', 'diagnosticTests', 'labRequests', 'enterpriseRecords'],
       ACCOUNTANT: ['patients', 'insuranceCompanies', 'invoices', 'enterpriseRecords'],
@@ -676,6 +692,18 @@ export class StoreService {
     }
 
     return 'Doctor record unavailable';
+  }
+
+  /**
+   * Resolves the queue summary doctor name. The backend returns a real name resolved
+   * from the Identity service; when that lookup failed it falls back to the raw doctor
+   * ID, which is detected here and replaced with the locally-resolved name.
+   */
+  private queueDoctorName(row: BackendQueueSummary): string {
+    const raw = (row.doctorName || '').trim();
+    const isFallbackId = raw === row.doctorId || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+    if (isFallbackId) return this.doctorDisplayName(row.doctorId);
+    return raw.startsWith('Dr.') ? raw : `Dr. ${raw}`;
   }
 
   private refreshResolvedDisplayValues() {

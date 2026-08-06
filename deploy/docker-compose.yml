@@ -132,6 +132,7 @@ services:
       <<: *api-base
       <<: *jwt-env
       ConnectionStrings__PatientManagementDb: Host=postgres;Port=5432;Database=hms_patient_management_db;Username=${HMS_POSTGRES_USER:-postgres};Password=${HMS_POSTGRES_PASSWORD:?Set HMS_POSTGRES_PASSWORD in deploy/.env}
+      Services__IdentityBaseUrl: http://identity-api:8080
       RabbitMq__HostName: rabbitmq
       RabbitMq__Username: ${HMS_RABBITMQ_USERNAME:?Set HMS_RABBITMQ_USERNAME in deploy/.env}
       RabbitMq__Password: ${HMS_RABBITMQ_PASSWORD:?Set HMS_RABBITMQ_PASSWORD in deploy/.env}
@@ -141,6 +142,8 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_started
+      identity-api:
         condition: service_started
     healthcheck:
       <<: *healthcheck
