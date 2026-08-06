@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { StoreService } from '../../core/services/store.service';
 import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
 
@@ -29,7 +30,7 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
               <span>Refresh Paid Queue</span>
             </button>
           }
-          @if (!isFormVisible() && !selectedLabForResult() && canOrderLab()) {
+          @if (!isFormVisible() && canOrderLab()) {
             <button
               (click)="openOrderForm()"
               class="px-5 py-2.5 bg-slate-900 text-white font-semibold rounded-2xl text-xs shadow-xl shadow-slate-200 flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95">
@@ -40,24 +41,20 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
         </div>
       </div>
 
-      <!-- INLINE FORM AREA (Order Entry or Result Entry) -->
-      @if (isFormVisible() || selectedLabForResult()) {
+      <!-- INLINE ORDER ENTRY FORM (result entry lives on its own dedicated page) -->
+      @if (isFormVisible()) {
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm animate-fade-in">
         <div class="w-full max-w-5xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl shadow-slate-950/25 animate-scale-up">
           
-          <!-- Shared Form Header -->
+          <!-- Form Header -->
           <div class="bg-purple-50/50 px-6 py-4 border-b border-purple-100 flex items-center justify-between">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center">
-                <span class="material-icons text-base">{{ selectedLabForResult() ? 'edit_note' : 'add_circle' }}</span>
+                <span class="material-icons text-base">add_circle</span>
               </div>
               <div>
-                <h3 class="text-sm font-bold text-slate-900">
-                  {{ selectedLabForResult() ? 'Enter Lab Result' : 'Diagnostic Order Request' }}
-                </h3>
-                <p class="text-[10px] text-purple-600 font-bold uppercase tracking-widest">
-                  {{ selectedLabForResult() ? 'Test: ' + selectedLabForResult()?.testName : 'Pathology & Biochemistry' }}
-                </p>
+                <h3 class="text-sm font-bold text-slate-900">Diagnostic Order Request</h3>
+                <p class="text-[10px] text-purple-600 font-bold uppercase tracking-widest">Pathology & Biochemistry</p>
               </div>
             </div>
             <button (click)="closeForm()" class="p-2 hover:bg-white rounded-full text-slate-400 hover:text-slate-600 transition-colors">
@@ -65,9 +62,7 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
             </button>
           </div>
 
-          <!-- SUB-FORM 1: New Lab Order -->
           <div class="max-h-[calc(92vh-86px)] overflow-y-auto">
-          @if (!selectedLabForResult()) {
             <form [formGroup]="orderForm" (ngSubmit)="submitOrder()" class="p-6 sm:p-8 space-y-6">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <div class="space-y-1">
@@ -189,156 +184,6 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
                 </button>
               </div>
             </form>
-          }
-
-          <!-- SUB-FORM 2: Record Test Result -->
-          @if (selectedLabForResult()) {
-            <form [formGroup]="resultForm" (ngSubmit)="submitResult()" class="p-6 sm:p-8 space-y-6">
-              <div class="grid grid-cols-1 gap-4 rounded-2xl border border-purple-100 bg-purple-50/50 p-4 md:grid-cols-4">
-                <div>
-                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Patient</div>
-                  <div class="mt-1 text-sm font-black text-slate-900">{{ store.patientDisplayName(selectedLabForResult()?.patientId || '') }}</div>
-                  <div class="text-[10px] font-mono text-slate-500">{{ store.patientMrn(selectedLabForResult()?.patientId || '') }}</div>
-                </div>
-                <div>
-                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Order</div>
-                  <div class="mt-1 text-sm font-bold text-slate-900">{{ selectedLabForResult()?.testName }}</div>
-                </div>
-                <div>
-                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Category</div>
-                  <div class="mt-1 text-sm font-bold text-slate-900">{{ selectedLabForResult()?.category }}</div>
-                </div>
-                <div>
-                  <div class="text-[10px] font-black uppercase tracking-widest text-purple-600">Doctor</div>
-                  <div class="mt-1 text-sm font-bold text-slate-900">{{ store.doctorDisplayName(selectedLabForResult()?.doctorId || '') }}</div>
-                </div>
-              </div>
-              <div class="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_320px]">
-                <div class="space-y-6">
-                  <section class="rounded-2xl border border-slate-200 bg-white p-5">
-                    <div class="mb-4 flex items-center justify-between">
-                      <h4 class="text-sm font-black text-slate-900">Result worksheet</h4>
-                      <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">{{ resultRows().length }} line items</span>
-                    </div>
-                    <div class="overflow-x-auto">
-                      <table class="w-full min-w-[760px] text-left text-xs">
-                        <thead class="border-b border-slate-200 bg-slate-50 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                          <tr>
-                            <th class="px-3 py-3">Test Name</th>
-                            <th class="px-3 py-3">Result *</th>
-                            <th class="px-3 py-3">Unit</th>
-                            <th class="px-3 py-3">Reference Range</th>
-                            <th class="px-3 py-3">Flag</th>
-                          </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                          @for (row of resultRows(); track row.catalogId || row.testName; let i = $index) {
-                            <tr>
-                              <td class="px-3 py-3">
-                                <div class="font-black text-slate-900">{{ row.testName }}</div>
-                                <div class="mt-1 text-[10px] font-semibold text-slate-400">{{ row.groupName }} / {{ row.subGroup }}</div>
-                              </td>
-                              <td class="px-3 py-3">
-                                <input [value]="row.result" (input)="updateResultRow(i, 'result', $event)" placeholder="Enter value" [class]="inputClasses + ' font-mono font-bold'" />
-                              </td>
-                              <td class="px-3 py-3">
-                                <input [value]="row.unit" (input)="updateResultRow(i, 'unit', $event)" [class]="inputClasses" />
-                              </td>
-                              <td class="px-3 py-3">
-                                <input [value]="row.referenceRange" (input)="updateResultRow(i, 'referenceRange', $event)" [class]="inputClasses" />
-                              </td>
-                              <td class="px-3 py-3">
-                                <select [value]="row.flag" (change)="updateResultRow(i, 'flag', $event)" [class]="inputClasses">
-                                  <option>Normal</option>
-                                  <option>Low</option>
-                                  <option>High</option>
-                                  <option>Abnormal</option>
-                                  <option>Critical</option>
-                                </select>
-                              </td>
-                            </tr>
-                          }
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-
-                  <section class="rounded-2xl border border-slate-200 bg-white p-5">
-                    <div class="mb-4 flex items-center justify-between">
-                      <h4 class="text-sm font-black text-slate-900">Result summary</h4>
-                      <span class="rounded-full bg-purple-50 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-purple-700">Bench verification</span>
-                    </div>
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
-                      <div class="space-y-1 md:col-span-2">
-                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Result Value / Summary *</label>
-                        <textarea rows="4" formControlName="result" placeholder="Enter numeric value, narrative result, or imaging impression" [class]="inputClasses + ' font-mono text-sm font-bold'"></textarea>
-                      </div>
-                      <div class="space-y-1">
-                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Unit</label>
-                        <input type="text" formControlName="unit" placeholder="g/dL" [class]="inputClasses" />
-                      </div>
-                      <div class="space-y-1">
-                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Reference Range</label>
-                        <input type="text" formControlName="normalRange" placeholder="13.5 - 17.5" [class]="inputClasses" />
-                      </div>
-                      <div class="space-y-1">
-                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Result Flag *</label>
-                        <select formControlName="resultFlag" [class]="inputClasses">
-                          <option>Normal</option>
-                          <option>Abnormal</option>
-                          <option>Critical</option>
-                        </select>
-                      </div>
-                      <div class="space-y-1">
-                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Performed By</label>
-                        <input type="text" formControlName="performedBy" placeholder="Lab technologist" [class]="inputClasses" />
-                      </div>
-                      <div class="space-y-1">
-                        <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase tracking-widest">Verified By</label>
-                        <input type="text" formControlName="verifiedBy" placeholder="Verifier" [class]="inputClasses" />
-                      </div>
-                      <div class="flex items-center gap-3 rounded-2xl border border-rose-100 bg-rose-50 p-4">
-                        <input type="checkbox" formControlName="isAbnormal" id="ab-check-inline" class="w-5 h-5 rounded border-rose-300 text-rose-600 focus:ring-rose-500" />
-                        <label for="ab-check-inline" class="cursor-pointer text-[11px] font-black uppercase tracking-wider text-rose-700">
-                          Clinically abnormal
-                        </label>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section class="rounded-2xl border border-slate-200 bg-white p-5">
-                    <h4 class="mb-3 text-sm font-black text-slate-900">2. Interpretation and release note</h4>
-                    <textarea formControlName="resultNotes" rows="4" [class]="inputClasses" placeholder="Interpretation, sample quality, critical call note, or radiology finding"></textarea>
-                  </section>
-                </div>
-
-                <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="mb-3 flex items-center justify-between">
-                    <h4 class="text-sm font-black text-slate-900">Result preview</h4>
-                    <span [class]="resultForm.value.resultFlag === 'Critical' ? 'bg-rose-100 text-rose-700' : resultForm.value.resultFlag === 'Abnormal' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'" class="rounded-full px-2 py-1 text-[10px] font-black">
-                      {{ resultForm.value.resultFlag || 'Normal' }}
-                    </span>
-                  </div>
-                  <div class="rounded-xl border-l-4 border-purple-500 bg-white p-4 shadow-sm">
-                    <div class="text-[10px] font-black uppercase tracking-widest text-slate-400">Released result</div>
-                    <div class="mt-2 whitespace-pre-line text-sm font-black text-slate-900">{{ resultForm.value.result || 'Result not entered yet' }}</div>
-                    <div class="mt-3 text-[11px] font-semibold text-slate-500">
-                      Ref: {{ resultForm.value.normalRange || 'N/A' }} {{ resultForm.value.unit || '' }}
-                    </div>
-                    <div class="mt-3 rounded-lg bg-purple-50 p-3 text-[11px] font-semibold text-purple-800">
-                      {{ resultForm.value.resultNotes || 'Interpretation will appear here.' }}
-                    </div>
-                  </div>
-                </aside>
-              </div>
-              <div class="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
-                <button type="button" (click)="closeForm()" class="px-6 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-xl">Cancel</button>
-                <button type="submit" class="px-8 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all hover:-translate-y-0.5">
-                  Authorize & Post Results
-                </button>
-              </div>
-            </form>
-          }
           </div>
         </div>
         </div>
@@ -487,11 +332,10 @@ import { DiagnosticTest, LabOrder, LabResultItem } from '../../core/models';
 })
 export class LaboratoryComponent {
   store = inject(StoreService);
+  private router = inject(Router);
 
   isFormVisible = signal(false);
-  selectedLabForResult = signal<LabOrder | null>(null);
   selectedOrderTestIds = signal<string[]>([]);
-  resultRows = signal<LabResultItem[]>([]);
   orderPatientInsurance = signal<{ isInsured: boolean; provider: string; coveragePercent: number } | null>(null);
 
   diagnosticOrderGroups = computed(() => {
@@ -543,22 +387,9 @@ export class LaboratoryComponent {
     specimenType: new FormControl('Whole blood', [Validators.required])
   });
 
-  resultForm = new FormGroup({
-    result: new FormControl(''),
-    unit: new FormControl('mg/dL'),
-    normalRange: new FormControl('70 - 110'),
-    resultFlag: new FormControl<'Normal' | 'Abnormal' | 'Critical'>('Normal', [Validators.required]),
-    resultNotes: new FormControl(''),
-    performedBy: new FormControl(''),
-    verifiedBy: new FormControl(''),
-    isAbnormal: new FormControl(false)
-  });
-
   closeForm() {
     this.isFormVisible.set(false);
-    this.selectedLabForResult.set(null);
     this.selectedOrderTestIds.set([]);
-    this.resultRows.set([]);
     this.orderForm.reset({
       patientId: this.store.patients()[0]?.id || '',
       doctorId: this.orderDoctors()[0]?.id || '',
@@ -567,11 +398,9 @@ export class LaboratoryComponent {
       specimenType: 'Whole blood',
     });
     this.orderPatientInsurance.set(null);
-    this.resultForm.reset();
   }
 
   openOrderForm() {
-    this.selectedLabForResult.set(null);
     this.selectedOrderTestIds.set([]);
     this.orderForm.reset({
       patientId: this.store.patients()[0]?.id || '',
@@ -679,91 +508,10 @@ export class LaboratoryComponent {
       this.store.addToast('error', 'Laboratory Role Required', 'Only a laboratory technician can enter diagnostic results.');
       return;
     }
-    this.selectedLabForResult.set(lab);
-    this.isFormVisible.set(false); // Close order form if open
-    this.resultRows.set(this.buildResultRows(lab));
-    this.resultForm.reset({
-      result: '',
-      unit: 'ng/mL',
-      normalRange: '0.0 - 0.04',
-      resultFlag: 'Normal',
-      resultNotes: '',
-      performedBy: this.store.currentUser()?.name || '',
-      verifiedBy: this.store.currentUser()?.name || '',
-      isAbnormal: false
-    });
-    // Scroll to top for focus
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    this.isFormVisible.set(false); // Close the order form if it is open
+    this.router.navigate(['/laboratory/record-result'], { queryParams: { lab: lab.id } });
   }
 
-  updateResultRow(index: number, field: keyof LabResultItem, event: Event) {
-    const value = (event.target as HTMLInputElement | HTMLSelectElement).value;
-    this.resultRows.update(rows => {
-      const next = rows.map((row, rowIndex) => {
-        if (rowIndex !== index) return row;
-        const updated = { ...row, [field]: value } as LabResultItem;
-        if (field === 'result' || field === 'referenceRange') {
-          updated.flag = this.autoResultFlag(updated.result, updated.referenceRange);
-        }
-        return updated;
-      });
-      const overall = this.overallResultFlag(next);
-      this.resultForm.patchValue({
-        resultFlag: overall,
-        isAbnormal: overall !== 'Normal',
-      }, { emitEvent: false });
-      return next;
-    });
-  }
-
-  private autoResultFlag(result: string, referenceRange: string): LabResultItem['flag'] {
-    const value = this.firstNumber(result);
-    if (value === null) {
-      const text = (result || '').toLowerCase();
-      if (text.includes('critical')) return 'Critical';
-      if (text.includes('positive') || text.includes('detected') || text.includes('abnormal')) return 'Abnormal';
-      return 'Normal';
-    }
-
-    const range = (referenceRange || '').replace(/,/g, '').trim();
-    const between = range.match(/(-?\d+(?:\.\d+)?)\s*(?:-|to|–|—)\s*(-?\d+(?:\.\d+)?)/i);
-    if (between) {
-      const low = Number(between[1]);
-      const high = Number(between[2]);
-      if (Number.isFinite(low) && Number.isFinite(high)) {
-        if (value < low) return value < low * 0.5 ? 'Critical' : 'Low';
-        if (value > high) return value > high * 1.8 ? 'Critical' : 'High';
-        return 'Normal';
-      }
-    }
-
-    const lessThan = range.match(/<\s*(-?\d+(?:\.\d+)?)/);
-    if (lessThan) {
-      const upper = Number(lessThan[1]);
-      return value < upper ? 'Normal' : (value > upper * 1.8 ? 'Critical' : 'High');
-    }
-
-    const greaterThan = range.match(/>\s*(-?\d+(?:\.\d+)?)/);
-    if (greaterThan) {
-      const lower = Number(greaterThan[1]);
-      return value > lower ? 'Normal' : (value < lower * 0.5 ? 'Critical' : 'Low');
-    }
-
-    return 'Normal';
-  }
-
-  private firstNumber(value: string): number | null {
-    const match = String(value || '').replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
-    if (!match) return null;
-    const parsed = Number(match[0]);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  private overallResultFlag(rows: LabResultItem[]): 'Normal' | 'Abnormal' | 'Critical' {
-    if (rows.some(row => row.flag === 'Critical')) return 'Critical';
-    if (rows.some(row => row.flag !== 'Normal')) return 'Abnormal';
-    return 'Normal';
-  }
 
   private buildResultRows(lab: LabOrder): LabResultItem[] {
     if (lab.resultItems?.length) {
@@ -800,40 +548,6 @@ export class LaboratoryComponent {
         referenceRange: lab.normalRange || '',
         flag: 'Normal' as const,
       }));
-  }
-
-  submitResult() {
-    const lab = this.selectedLabForResult();
-    if (!lab || this.resultForm.invalid) return;
-
-    const val = this.resultForm.value;
-    const rows = this.resultRows();
-    if (!rows.length || rows.some(row => !row.result?.trim())) {
-      this.store.addToast('error', 'Incomplete Results', 'Enter a result value for every requested test before posting.');
-      return;
-    }
-
-    const hasCritical = rows.some(row => row.flag === 'Critical');
-    const hasAbnormal = rows.some(row => row.flag !== 'Normal');
-    const flag = hasCritical ? 'Critical' : (val.isAbnormal || hasAbnormal ? 'Abnormal' : (val.resultFlag || 'Normal'));
-    const releaseText = [
-      val.result || rows.map(row => `${row.testName}: ${row.result} ${row.unit}`.trim()).join('\n'),
-      val.resultNotes ? `Interpretation: ${val.resultNotes}` : '',
-    ].filter(Boolean).join('\n');
-
-    this.store.updateLabResult(
-      lab.id,
-      releaseText,
-      rows.length === 1 ? rows[0].referenceRange || 'N/A' : 'See result table',
-      rows.length === 1 ? rows[0].unit || '' : '',
-      flag !== 'Normal',
-      flag,
-      val.resultNotes || '',
-      val.performedBy || this.store.currentUser()?.name || '',
-      val.verifiedBy || this.store.currentUser()?.name || '',
-      rows
-    );
-    this.closeForm();
   }
 
   printLabResult(lab: LabOrder) {
