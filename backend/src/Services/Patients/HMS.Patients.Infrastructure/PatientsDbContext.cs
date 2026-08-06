@@ -169,6 +169,10 @@ public static class PatientsSeedData
     {
         await UpsertInsuranceCompaniesAsync(db);
         await UpsertPatientsAsync(db);
+        // Persist patients (and companies) before seeding appointments: the
+        // appointment seed resolves patient IDs by MRN from the database, so newly
+        // inserted patients must be queryable first.
+        await db.SaveChangesAsync();
         await UpsertBedsAsync(db);
         await UpsertAppointmentsAsync(db);
         await db.SaveChangesAsync();
@@ -218,10 +222,17 @@ public static class PatientsSeedData
 
         foreach (var patient in patients)
         {
-            var existing = await db.Patients.FirstOrDefaultAsync(item => item.Mrn == patient.Mrn);
+            var existing = await db.Patients.FirstOrDefaultAsync(item => item.Id == patient.Id);
             if (existing is null)
             {
-                db.Patients.Add(patient);
+                // Never hijack an MRN that a real (API-registered) patient already owns:
+                // that would silently overwrite live records on every restart. Seed
+                // patients whose MRN is taken are simply skipped.
+                var mrnTaken = await db.Patients.AnyAsync(item => item.Mrn == patient.Mrn);
+                if (!mrnTaken)
+                {
+                    db.Patients.Add(patient);
+                }
             }
             else
             {
@@ -277,25 +288,51 @@ public static class PatientsSeedData
 
     private static async Task UpsertAppointmentsAsync(PatientsDbContext db)
     {
+        // Resolve patient IDs by MRN from the actual registry. Seed patients are
+        // upserted by ID and may be skipped when their MRN is already owned by an
+        // API-registered patient, so hardcoded patient GUIDs would reference rows
+        // that may not exist and crash seeding with an FK violation. Appointments
+        // whose MRN has no patient row are skipped safely.
+        var patientsByMrn = (await db.Patients.AsNoTracking().ToListAsync())
+            .ToDictionary(patient => patient.Mrn, patient => patient.Id);
+
         var appointments = new[]
         {
-            new Appointment { Id = Guid.Parse("29cb54e6-b268-4f62-ac89-41ca434658c7"), PatientId = Guid.Parse("f64d3368-a4da-4d44-9612-5c302b0ec29a"), DoctorId = Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201"), StartsAtUtc = DateTime.UtcNow.AddDays(1), Status = "Scheduled", Reason = "General consultation", Department = "Outpatient", AppointmentType = "Consultation", Priority = "Normal", Notes = "Initial appointment" },
-            new Appointment { Id = Guid.Parse("d50bb3c9-9507-4cb0-b5a5-940c4f595602"), PatientId = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80"), DoctorId = Guid.Parse("47c3095d-adcc-4e1d-bfc0-b16d70c15201"), StartsAtUtc = DateTime.UtcNow.AddHours(2), Status = "Waiting", Reason = "Shortness of breath", Department = "Emergency", AppointmentType = "Emergency", Priority = "Urgent", Notes = "Triage completed, waiting for doctor review." },
-            new Appointment { Id = Guid.Parse("aac7edfa-e8d7-4646-a223-8ad0d20c3103"), PatientId = Guid.Parse("55d16cd5-e42f-4bb0-b1ef-02f4e6284a03"), DoctorId = Guid.Parse("d7f768c4-e28c-4b46-94d8-68ed9a325404"), StartsAtUtc = DateTime.UtcNow.AddHours(4), Status = "In Service", Reason = "Hypertension follow-up", Department = "Cardiology", AppointmentType = "Follow-up", Priority = "Normal", Notes = "Bring previous ECG result." },
-            new Appointment { Id = Guid.Parse("d19846d8-e394-4a91-ae2f-d2d7ea535804"), PatientId = Guid.Parse("f857a7b1-9689-480d-a110-111226b77104"), DoctorId = Guid.Parse("cd8bfaf4-1afa-43e0-a2c4-a813da015202"), StartsAtUtc = DateTime.UtcNow.AddDays(1).AddHours(3), Status = "Scheduled", Reason = "Child fever review", Department = "Pediatrics", AppointmentType = "Consultation", Priority = "Normal", Notes = "First pediatric visit." },
-            new Appointment { Id = Guid.Parse("4798ef98-7514-430f-a49a-48c7a2b26d05"), PatientId = Guid.Parse("0ef7e12a-1017-4039-83c4-d90301515f05"), DoctorId = Guid.Parse("a6303a4a-e409-409f-a21c-8abb44ea5303"), StartsAtUtc = DateTime.UtcNow.AddDays(-1), Status = "Completed", Reason = "Antenatal check", Department = "Maternity", AppointmentType = "Follow-up", Priority = "Normal", Notes = "Vitals stable, follow-up booked." }
+            new AppointmentSeed("29cb54e6-b268-4f62-ac89-41ca434658c7", "MRN-0001", Guid.Parse("8f334882-8d97-4d54-a011-97d7c8c2a201"), DateTime.UtcNow.AddDays(1), "Scheduled", "General consultation", "Outpatient", "Consultation", "Normal", "Initial appointment"),
+            new AppointmentSeed("d50bb3c9-9507-4cb0-b5a5-940c4f595602", "MRN-0002", Guid.Parse("47c3095d-adcc-4e1d-bfc0-b16d70c15201"), DateTime.UtcNow.AddHours(2), "Waiting", "Shortness of breath", "Emergency", "Emergency", "Urgent", "Triage completed, waiting for doctor review."),
+            new AppointmentSeed("aac7edfa-e8d7-4646-a223-8ad0d20c3103", "MRN-0003", Guid.Parse("d7f768c4-e28c-4b46-94d8-68ed9a325404"), DateTime.UtcNow.AddHours(4), "In Service", "Hypertension follow-up", "Cardiology", "Follow-up", "Normal", "Bring previous ECG result."),
+            new AppointmentSeed("d19846d8-e394-4a91-ae2f-d2d7ea535804", "MRN-0004", Guid.Parse("cd8bfaf4-1afa-43e0-a2c4-a813da015202"), DateTime.UtcNow.AddDays(1).AddHours(3), "Scheduled", "Child fever review", "Pediatrics", "Consultation", "Normal", "First pediatric visit."),
+            new AppointmentSeed("4798ef98-7514-430f-a49a-48c7a2b26d05", "MRN-0005", Guid.Parse("a6303a4a-e409-409f-a21c-8abb44ea5303"), DateTime.UtcNow.AddDays(-1), "Completed", "Antenatal check", "Maternity", "Follow-up", "Normal", "Vitals stable, follow-up booked."),
         };
 
         foreach (var appointment in appointments)
         {
-            var existing = await db.Appointments.FirstOrDefaultAsync(item => item.Id == appointment.Id);
+            if (!patientsByMrn.TryGetValue(appointment.PatientMrn, out var patientId))
+            {
+                continue; // no patient owns this MRN — skip rather than crash
+            }
+
+            var appointmentId = Guid.Parse(appointment.Id);
+            var existing = await db.Appointments.FirstOrDefaultAsync(item => item.Id == appointmentId);
             if (existing is null)
             {
-                db.Appointments.Add(appointment);
+                db.Appointments.Add(new Appointment
+                {
+                    Id = appointmentId,
+                    PatientId = patientId,
+                    DoctorId = appointment.DoctorId,
+                    StartsAtUtc = appointment.StartsAtUtc,
+                    Status = appointment.Status,
+                    Reason = appointment.Reason,
+                    Department = appointment.Department,
+                    AppointmentType = appointment.AppointmentType,
+                    Priority = appointment.Priority,
+                    Notes = appointment.Notes,
+                });
             }
             else
             {
-                existing.PatientId = appointment.PatientId;
+                existing.PatientId = patientId;
                 existing.DoctorId = appointment.DoctorId;
                 existing.StartsAtUtc = appointment.StartsAtUtc;
                 existing.Status = appointment.Status;
@@ -307,6 +344,18 @@ public static class PatientsSeedData
             }
         }
     }
+
+    private sealed record AppointmentSeed(
+        string Id,
+        string PatientMrn,
+        Guid DoctorId,
+        DateTime StartsAtUtc,
+        string Status,
+        string Reason,
+        string Department,
+        string AppointmentType,
+        string Priority,
+        string Notes);
 }
 
 public static class PatientsDatabaseBootstrapper

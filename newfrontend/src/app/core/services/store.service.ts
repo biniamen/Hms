@@ -26,6 +26,10 @@ export class StoreService {
   readonly isLoading = signal(false);
   readonly isSaving = signal(false);
   readonly pending = signal(0);
+  // Tracks whether the data endpoints for the current session have been fetched.
+  // Used to re-hydrate the store when a session is restored (page refresh / reopen)
+  // without double-fetching right after a fresh login.
+  readonly dataLoaded = signal(false);
 
   // ── Global Search ──
   readonly globalSearchQuery = signal('');
@@ -209,6 +213,7 @@ export class StoreService {
     this.medicalRecords.set([]);
     this.insuranceClaims.set([]);
     this.queueSummary.set([]);
+    this.dataLoaded.set(false);
   }
 
   private setCurrentUserFromSession() {
@@ -241,6 +246,9 @@ export class StoreService {
   loadAll() {
     const session = this.api.session();
     if (!session) return;
+    // Already loaded for this session (e.g. the layout remounts right after login)
+    // or a load is already in flight — never double-fetch.
+    if (this.dataLoaded() || this.isLoading()) return;
     this.setCurrentUserFromSession();
     this.isLoading.set(true);
     this.pending.set(0);
@@ -254,7 +262,10 @@ export class StoreService {
       this.callEndpoint(ep);
     }
 
-    if (endpoints.length === 0) this.isLoading.set(false);
+    if (endpoints.length === 0) {
+      this.isLoading.set(false);
+      this.dataLoaded.set(true);
+    }
   }
 
   loadDepartments() {
@@ -293,6 +304,13 @@ export class StoreService {
       if (this.pending() <= 0) {
         this.pending.set(0);
         this.isLoading.set(false);
+        // Only treat the session as loaded when at least one endpoint returned
+        // data. A fully-failed boot (backend briefly down, expired token) stays
+        // unloaded so the next mount/refresh retries instead of locking in an
+        // empty store.
+        if (this.hasAnyLoadedData()) {
+          this.dataLoaded.set(true);
+        }
       }
     };
 
@@ -304,7 +322,10 @@ export class StoreService {
         this.api.getDoctors().subscribe({ next: (r) => { if (r.data) { this.doctors.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
         break;
       case 'patients':
-        this.api.getPatients().subscribe({ next: (r) => { if (r.data) { this.patients.set(r.data.map(p => this.mapBackendPatient(p))); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
+        this.api.getPatients().subscribe({
+          next: (r) => { if (r.data) { this.patients.set(r.data.map(p => this.mapBackendPatient(p))); this.refreshResolvedDisplayValues(); } dec(); },
+          error: () => { this.addToast('error', 'Patient Registry Unavailable', 'The patient list could not be loaded. Sign out and back in to retry.'); dec(); },
+        });
         break;
       case 'appointments':
         this.api.getAppointments().subscribe({ next: (r) => { if (r.data) this.appointments.set(r.data.map(a => this.mapBackendAppointment(a))); dec(); }, error: dec });
@@ -348,6 +369,26 @@ export class StoreService {
       default:
         dec();
     }
+  }
+
+  /** True when any data endpoint has actually populated its signal. */
+  private hasAnyLoadedData(): boolean {
+    return this.employees().length > 0
+      || this.doctors().length > 0
+      || this.patients().length > 0
+      || this.appointments().length > 0
+      || this.departments().length > 0
+      || this.insuranceCompanies().length > 0
+      || this.beds().length > 0
+      || this.prescriptions().length > 0
+      || this.labOrders().length > 0
+      || this.diagnosticTests().length > 0
+      || this.clinicalVitals().length > 0
+      || this.clinicalDiagnoses().length > 0
+      || this.billingInvoices().length > 0
+      || this.medicalRecords().length > 0
+      || this.enterpriseRecords().length > 0
+      || this.queueSummary().length > 0;
   }
 
   private getEndpointsForRole(role: string): string[] {

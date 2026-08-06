@@ -1,768 +1,282 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs/operators';
 import { StoreService } from '../../core/services/store.service';
-import type { ClinicalDiagnosis, ClinicalVitalEntry, DiagnosticTest, LabOrder, MedicalRecord, Medication, Patient, Prescription, UserRole } from '../../core/models';
+import type { ClinicalDiagnosis, ClinicalVitalEntry, LabOrder, MedicalRecord, Prescription, UserRole } from '../../core/models';
 
 type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'labs';
 
 @Component({
   selector: 'app-clinical-ehr',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="space-y-6 animate-fade-in pb-20">
-      <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <p class="text-[10px] font-black uppercase tracking-[0.24em] text-teal-600">Clinical Workspace</p>
-          <h1 class="mt-1 text-xl sm:text-2xl font-bold text-slate-900 font-display">Clinical EHR & Care Orders</h1>
-          <p class="mt-1 max-w-3xl text-xs text-slate-500">
-            Patient history, SOAP encounters, vitals, diagnoses, prescriptions, and diagnostic orders in one doctor workspace.
-          </p>
-        </div>
+    <!-- Always mounted so child form pages can render into it reliably; it renders nothing when no child route is active. -->
+    <router-outlet></router-outlet>
 
-        <div class="flex flex-wrap gap-2">
-          @if (canCreate('encounters')) {
-            <button (click)="openForm('encounters')" class="clinical-action bg-slate-900 text-white shadow-slate-200 hover:bg-slate-800">
-              <span class="material-icons text-base">note_add</span>
-              Encounter
-            </button>
-          }
-          @if (canCreate('vitals')) {
-            <button (click)="openForm('vitals')" class="clinical-action bg-sky-600 text-white shadow-sky-100 hover:bg-sky-700">
-              <span class="material-icons text-base">monitor_heart</span>
-              Vitals
-            </button>
-          }
-          @if (canCreate('diagnoses')) {
-            <button (click)="openForm('diagnoses')" class="clinical-action bg-violet-600 text-white shadow-violet-100 hover:bg-violet-700">
-              <span class="material-icons text-base">diagnosis</span>
-              Diagnosis
-            </button>
-          }
-          @if (canCreate('prescriptions')) {
-            <button (click)="openForm('prescriptions')" class="clinical-action bg-emerald-600 text-white shadow-emerald-100 hover:bg-emerald-700">
-              <span class="material-icons text-base">medication</span>
-              Prescription
-            </button>
-          }
-          @if (canCreate('labs')) {
-            <button (click)="openForm('labs')" class="clinical-action bg-purple-600 text-white shadow-purple-100 hover:bg-purple-700">
-              <span class="material-icons text-base">biotech</span>
-              Diagnostic Order
-            </button>
-          }
-          @if (canCreate('encounters')) {
-            <button (click)="printMedicalCertificate()" class="clinical-action bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
-              <span class="material-icons text-base">assignment</span>
-              Medical Certificate
-            </button>
-          }
-        </div>
-      </div>
+    @if (!isFormRoute()) {
+      <div class="space-y-6 animate-fade-in pb-20">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <p class="text-[10px] font-black uppercase tracking-[0.24em] text-teal-600">Clinical Workspace</p>
+            <h1 class="mt-1 text-xl sm:text-2xl font-bold text-slate-900 font-display">Clinical EHR & Care Orders</h1>
+            <p class="mt-1 max-w-3xl text-xs text-slate-500">
+              Patient history, SOAP encounters, vitals, diagnoses, prescriptions, and diagnostic orders in one doctor workspace.
+            </p>
+          </div>
 
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-        @for (metric of clinicalMetrics(); track metric.label) {
-          <button
-            type="button"
-            (click)="activeTab.set(metric.tab)"
-            [class]="activeTab() === metric.tab ? metric.activeClass : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
-            class="rounded-3xl border p-4 text-left shadow-sm transition-all hover:-translate-y-0.5">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-[10px] font-black uppercase tracking-widest">{{ metric.label }}</span>
-              <span class="material-icons text-base">{{ metric.icon }}</span>
-            </div>
-            <strong class="mt-3 block text-3xl font-black">{{ metric.value }}</strong>
-            <span class="mt-1 block text-[10px] font-semibold opacity-70">{{ metric.hint }}</span>
-          </button>
-        }
-      </div>
-
-      @if (clinicalPatients().length === 0) {
-        <div class="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm shadow-sm">
-          <div class="flex items-start gap-3">
-            <span class="material-icons text-amber-600">lock_clock</span>
-            <div>
-              <div class="font-black text-amber-900">No clinically cleared patients</div>
-              <p class="mt-1 text-xs font-semibold leading-relaxed text-amber-800">
-                Assigned patients appear here after Billing settles the patient's payment share. Cash patients are cleared by full payment; insured patients are cleared as soon as the copay is collected, while the insurer's portion is settled by claim.
-              </p>
-            </div>
+          <div class="flex flex-wrap gap-2">
+            @if (canCreate('encounters')) {
+              <button (click)="openFormPage('encounters')" class="clinical-action bg-slate-900 text-white shadow-slate-200 hover:bg-slate-800">
+                <span class="material-icons text-base">note_add</span>
+                Encounter
+              </button>
+            }
+            @if (canCreate('vitals')) {
+              <button (click)="openFormPage('vitals')" class="clinical-action bg-sky-600 text-white shadow-sky-100 hover:bg-sky-700">
+                <span class="material-icons text-base">monitor_heart</span>
+                Vitals
+              </button>
+            }
+            @if (canCreate('diagnoses')) {
+              <button (click)="openFormPage('diagnoses')" class="clinical-action bg-violet-600 text-white shadow-violet-100 hover:bg-violet-700">
+                <span class="material-icons text-base">diagnosis</span>
+                Diagnosis
+              </button>
+            }
+            @if (canCreate('prescriptions')) {
+              <button (click)="openFormPage('prescriptions')" class="clinical-action bg-emerald-600 text-white shadow-emerald-100 hover:bg-emerald-700">
+                <span class="material-icons text-base">medication</span>
+                Prescription
+              </button>
+            }
+            @if (canCreate('labs')) {
+              <button (click)="openFormPage('labs')" class="clinical-action bg-purple-600 text-white shadow-purple-100 hover:bg-purple-700">
+                <span class="material-icons text-base">biotech</span>
+                Diagnostic Order
+              </button>
+            }
+            @if (canCreate('encounters')) {
+              <button (click)="printMedicalCertificate()" class="clinical-action bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+                <span class="material-icons text-base">assignment</span>
+                Medical Certificate
+              </button>
+            }
           </div>
         </div>
-      }
 
-      @if (activeForm()) {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm animate-fade-in">
-        <div class="w-full max-w-6xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl shadow-slate-950/25 animate-scale-up">
-          <div class="flex items-center justify-between gap-4 border-b border-teal-100 bg-teal-50/50 px-6 py-4">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+          @for (metric of clinicalMetrics(); track metric.label) {
+            <button
+              type="button"
+              (click)="activeTab.set(metric.tab)"
+              [class]="activeTab() === metric.tab ? metric.activeClass : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'"
+              class="rounded-3xl border p-4 text-left shadow-sm transition-all hover:-translate-y-0.5">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-[10px] font-black uppercase tracking-widest">{{ metric.label }}</span>
+                <span class="material-icons text-base">{{ metric.icon }}</span>
+              </div>
+              <strong class="mt-3 block text-3xl font-black">{{ metric.value }}</strong>
+              <span class="mt-1 block text-[10px] font-semibold opacity-70">{{ metric.hint }}</span>
+            </button>
+          }
+        </div>
+
+        @if (clinicalPatients().length === 0) {
+          <div class="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-sm shadow-sm">
+            <div class="flex items-start gap-3">
+              <span class="material-icons text-amber-600">lock_clock</span>
+              <div>
+                <div class="font-black text-amber-900">No clinically cleared patients</div>
+                <p class="mt-1 text-xs font-semibold leading-relaxed text-amber-800">
+                  Assigned patients appear here after Billing settles the patient's payment share. Cash patients are cleared by full payment; insured patients are cleared as soon as the copay is collected, while the insurer's portion is settled by claim.
+                </p>
+              </div>
+            </div>
+          </div>
+        }
+
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,340px)_1fr]">
+          <div class="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600 text-white">
-                <span class="material-icons text-base">{{ activeFormIcon() }}</span>
+              <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-600">
+                <span class="material-icons">folder_shared</span>
               </div>
               <div>
-                <h3 class="text-sm font-bold text-slate-900">{{ activeFormTitle() }}</h3>
-                <p class="text-[10px] font-bold uppercase tracking-widest text-teal-600">{{ activeFormSubtitle() }}</p>
+                <div class="text-[11px] font-black uppercase tracking-wider text-slate-900">Active Patient Chart</div>
+                <div class="text-[10px] text-slate-400">History and orders filter by selected MRN</div>
               </div>
             </div>
-            <button (click)="closeForm()" class="rounded-full p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-600">
-              <span class="material-icons">close</span>
-            </button>
-          </div>
+            <select
+              [value]="selectedPatientId()"
+              (change)="onPatientSelect($event)"
+              class="mt-4 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-800 transition-all focus:border-teal-500 focus:outline-none">
+              @for (p of clinicalPatients(); track p.id) {
+                <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
+              }
+            </select>
 
-          <div class="max-h-[calc(92vh-86px)] overflow-y-auto">
-          @switch (activeForm()) {
-            @case ('encounters') {
-              <form [formGroup]="encounterForm" (ngSubmit)="submitEncounter()" class="space-y-6 p-6 sm:p-8">
-                @if (encounterSubmitAttempted()) {
-                  <div class="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <span class="material-icons text-rose-500">error_outline</span>
-                    <div class="text-[11px] font-semibold leading-relaxed text-rose-700">
-                      <strong class="block font-black">Encounter details incomplete</strong>
-                      Chief complaint, assessment, and plan are required before saving the encounter.
-                    </div>
-                  </div>
-                }
-                <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Patient Chart <span class="text-rose-500">*</span></span>
-                    <select formControlName="patientId" [class]="fieldClasses(encounterForm.controls.patientId)">
-                      @for (p of clinicalPatients(); track p.id) {
-                        <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
-                      }
-                    </select>
-                    @if (encounterForm.controls.patientId.touched && encounterForm.controls.patientId.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Select the patient chart.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Visit Type <span class="text-rose-500">*</span></span>
-                    <select formControlName="visitType" [class]="fieldClasses(encounterForm.controls.visitType)">
-                      @for (type of visitTypes; track type) {
-                        <option [value]="type">{{ type }}</option>
-                      }
-                    </select>
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Chief Complaint <span class="text-rose-500">*</span></span>
-                    <input formControlName="chiefComplaint" [class]="fieldClasses(encounterForm.controls.chiefComplaint)" placeholder="Main reason for visit" />
-                    @if (encounterForm.controls.chiefComplaint.touched && encounterForm.controls.chiefComplaint.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Chief complaint is required.</span>
-                    }
-                  </label>
-                  <label class="clinical-field lg:col-span-3">
-                    <span class="flex items-center gap-1">Assessment <span class="text-rose-500">*</span></span>
-                    <textarea formControlName="assessment" rows="4" [class]="fieldClasses(encounterForm.controls.assessment)" placeholder="Clinical findings, working impression, and diagnosis"></textarea>
-                    @if (encounterForm.controls.assessment.touched && encounterForm.controls.assessment.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Assessment is required.</span>
-                    }
-                  </label>
-                  <label class="clinical-field lg:col-span-3">
-                    <span class="flex items-center gap-1">Plan <span class="text-rose-500">*</span></span>
-                    <textarea formControlName="plan" rows="4" [class]="fieldClasses(encounterForm.controls.plan)" placeholder="Treatment plan, orders, follow-up, and care instructions"></textarea>
-                    @if (encounterForm.controls.plan.touched && encounterForm.controls.plan.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Plan is required.</span>
-                    }
-                  </label>
+            @if (activePatient(); as patient) {
+              <div class="mt-5 space-y-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                <div class="text-sm font-black text-slate-900">{{ patient.name }}</div>
+                <div class="grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-500">
+                  <span>Blood: {{ patient.bloodType }}</span>
+                  <span>{{ patient.gender }}</span>
+                  <span>{{ patient.phone }}</span>
+                  <span>{{ patient.status }}</span>
                 </div>
-                <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
-                  <button type="button" (click)="closeForm()" class="clinical-secondary">Discard</button>
-                  <button type="submit" class="clinical-submit bg-teal-600 hover:bg-teal-700">Save Encounter</button>
+                <div class="rounded-xl bg-white p-3 text-[10px] text-slate-500">
+                  <strong class="block text-slate-700">Current vitals</strong>
+                  @if (latestVitals(); as vitals) {
+                    BP {{ vitals.bloodPressure }} / HR {{ vitals.pulse }} / Temp {{ vitals.temperatureC }} C
+                  } @else {
+                    <span class="italic text-slate-400">No vitals recorded yet.</span>
+                  }
                 </div>
-              </form>
-            }
-
-            @case ('vitals') {
-              <form [formGroup]="vitalsForm" (ngSubmit)="submitVitals()" class="space-y-6 p-6 sm:p-8">
-                <div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-                  <label class="clinical-field md:col-span-2">
-                    <span class="flex items-center gap-1">Patient Chart <span class="text-rose-500">*</span></span>
-                    <select formControlName="patientId" [class]="fieldClasses(vitalsForm.controls.patientId)">
-                      @for (p of clinicalPatients(); track p.id) {
-                        <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
-                      }
-                    </select>
-                    @if (vitalsForm.controls.patientId.touched && vitalsForm.controls.patientId.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Select the patient chart.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Temperature C <span class="text-rose-500">*</span></span>
-                    <input type="number" step="0.1" formControlName="temperatureC" [class]="fieldClasses(vitalsForm.controls.temperatureC)" placeholder="e.g. 37.0" />
-                    @if (vitalsForm.controls.temperatureC.touched && vitalsForm.controls.temperatureC.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a temperature between 30°C and 45°C.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Pulse <span class="text-rose-500">*</span></span>
-                    <input type="number" formControlName="pulse" [class]="fieldClasses(vitalsForm.controls.pulse)" placeholder="bpm" />
-                    @if (vitalsForm.controls.pulse.touched && vitalsForm.controls.pulse.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a pulse between 20 and 240 bpm.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Resp. Rate <span class="text-rose-500">*</span></span>
-                    <input type="number" formControlName="respiratoryRate" [class]="fieldClasses(vitalsForm.controls.respiratoryRate)" placeholder="breaths/min" />
-                    @if (vitalsForm.controls.respiratoryRate.touched && vitalsForm.controls.respiratoryRate.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a rate between 5 and 80 breaths/min.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Blood Pressure <span class="text-rose-500">*</span></span>
-                    <input formControlName="bloodPressure" [class]="fieldClasses(vitalsForm.controls.bloodPressure)" placeholder="e.g. 120/80" />
-                    @if (vitalsForm.controls.bloodPressure.touched && vitalsForm.controls.bloodPressure.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter blood pressure, e.g. 120/80.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Weight Kg <span class="text-rose-500">*</span></span>
-                    <input type="number" step="0.1" formControlName="weightKg" [class]="fieldClasses(vitalsForm.controls.weightKg)" placeholder="e.g. 64" />
-                    @if (vitalsForm.controls.weightKg.touched && vitalsForm.controls.weightKg.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a weight between 1 and 350 kg.</span>
-                    }
-                  </label>
-                  <label class="clinical-field">
-                    <span class="flex items-center gap-1">Height Cm <span class="text-rose-500">*</span></span>
-                    <input type="number" step="0.1" formControlName="heightCm" [class]="fieldClasses(vitalsForm.controls.heightCm)" placeholder="e.g. 170" />
-                    @if (vitalsForm.controls.heightCm.touched && vitalsForm.controls.heightCm.invalid) {
-                      <span class="mt-1 text-[10px] font-medium text-rose-600">Enter a height between 30 and 250 cm.</span>
-                    }
-                  </label>
-                </div>
-                <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
-                  <button type="button" (click)="closeForm()" class="clinical-secondary">Discard</button>
-                  <button type="submit" class="clinical-submit bg-sky-600 hover:bg-sky-700">Record Vitals</button>
-                </div>
-              </form>
-            }
-
-            @case ('diagnoses') {
-              <form [formGroup]="diagnosisForm" (ngSubmit)="submitDiagnosis()" class="space-y-6 p-6 sm:p-8">
-                <div class="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_340px]">
-                  <div class="space-y-6">
-                    <section class="clinical-order-section">
-                      <h4>1. Diagnosis classification</h4>
-                      <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
-                        <label class="clinical-field md:col-span-2">Patient Chart
-                          <select formControlName="patientId" [class]="inputClasses">
-                            @for (p of clinicalPatients(); track p.id) {
-                              <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label class="clinical-field">Code System
-                          <select formControlName="codeSystem" [class]="inputClasses">
-                            <option>ICD-10</option>
-                            <option>SNOMED CT</option>
-                            <option>Local</option>
-                          </select>
-                        </label>
-                        <label class="clinical-field">Code
-                          <input formControlName="code" [class]="inputClasses" placeholder="e.g. J02.9" />
-                        </label>
-                        <label class="clinical-field">Diagnosis Type
-                          <select formControlName="diagnosisType" [class]="inputClasses">
-                            <option>Primary</option>
-                            <option>Secondary</option>
-                            <option>Differential</option>
-                            <option>Rule out</option>
-                          </select>
-                        </label>
-                        <label class="clinical-field">Certainty
-                          <select formControlName="certainty" [class]="inputClasses">
-                            <option>Confirmed</option>
-                            <option>Presumed</option>
-                            <option>Suspected</option>
-                          </select>
-                        </label>
-                        <label class="clinical-field">Severity
-                          <select formControlName="severity" [class]="inputClasses">
-                            <option>Low</option>
-                            <option>Moderate</option>
-                            <option>High</option>
-                            <option>Critical</option>
-                          </select>
-                        </label>
-                        <label class="clinical-field">Onset Date
-                          <input type="date" formControlName="onsetDate" [class]="inputClasses" />
-                        </label>
-                      </div>
-                    </section>
-
-                    <section class="clinical-order-section">
-                      <h4>2. Clinical impression</h4>
-                      <div class="grid grid-cols-1 gap-4">
-                        <label class="clinical-field">Diagnosis Description
-                          <textarea formControlName="description" rows="3" [class]="inputClasses" placeholder="Write the working or confirmed diagnosis"></textarea>
-                        </label>
-                        <label class="clinical-field">Supporting Notes
-                          <textarea formControlName="notes" rows="3" [class]="inputClasses" placeholder="Key symptoms, exam findings, investigation basis, exclusions"></textarea>
-                        </label>
-                        <label class="clinical-field">Follow-up Plan
-                          <textarea formControlName="followUpPlan" rows="3" [class]="inputClasses" placeholder="Review date, referral, monitoring, escalation instruction"></textarea>
-                        </label>
-                      </div>
-                    </section>
-                  </div>
-
-                  <aside class="rounded-2xl border border-violet-100 bg-violet-50/50 p-4">
-                    <div class="mb-3 flex items-center justify-between">
-                      <h4 class="text-sm font-black text-slate-900">Problem list preview</h4>
-                      <span class="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-black text-violet-700">{{ visibleDiagnoses().length }} active</span>
-                    </div>
-                    <div class="rounded-xl border-l-4 border-violet-500 bg-white p-4 shadow-sm">
-                      <div class="text-xs font-black text-slate-900">{{ diagnosisForm.value.description || 'Diagnosis not entered yet' }}</div>
-                      <div class="mt-2 text-[11px] font-semibold text-slate-500">
-                        {{ diagnosisForm.value.codeSystem }} {{ diagnosisForm.value.code || 'No code' }} - {{ diagnosisForm.value.diagnosisType }} - {{ diagnosisForm.value.certainty }}
-                      </div>
-                      <div class="mt-3 rounded-lg bg-violet-50 p-3 text-[11px] font-semibold text-violet-800">
-                        {{ diagnosisForm.value.followUpPlan || 'Follow-up plan will appear here.' }}
-                      </div>
-                    </div>
-                    <div class="mt-4 space-y-2">
-                      @for (dx of visibleDiagnoses().slice(0, 3); track dx.id) {
-                        <div class="rounded-xl bg-white p-3 text-[11px] font-semibold text-slate-600 ring-1 ring-violet-100">
-                          <span class="font-black text-slate-900">{{ dx.code }}</span> - {{ dx.description }}
-                        </div>
-                      }
-                    </div>
-                  </aside>
-                </div>
-                <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
-                  <button type="button" (click)="closeForm()" class="clinical-secondary">Discard</button>
-                  <button type="submit" class="clinical-submit bg-violet-600 hover:bg-violet-700">Add Diagnosis</button>
-                </div>
-              </form>
-            }
-
-            @case ('prescriptions') {
-              <form [formGroup]="prescriptionForm" (ngSubmit)="submitPrescription()" class="space-y-6 p-6 sm:p-8">
-                <div class="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_340px]">
-                  <div class="space-y-6">
-                    <div class="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
-                      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <label class="clinical-field md:col-span-2">Patient Chart
-                          <select formControlName="patientId" [class]="inputClasses">
-                            @for (p of clinicalPatients(); track p.id) {
-                              <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label class="clinical-field">Start Date
-                          <input type="date" formControlName="startDate" [class]="inputClasses" />
-                        </label>
-                      </div>
-                    </div>
-
-                    <section class="clinical-order-section">
-                      <h4>1. Dosage instructions</h4>
-                      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <label class="clinical-field md:col-span-3">Medication
-                          <input formControlName="medName" list="medication-catalog" [class]="inputClasses" placeholder="Type medication name" />
-                          <datalist id="medication-catalog">
-                            @for (item of medicationCatalog; track item) {
-                              <option [value]="item"></option>
-                            }
-                          </datalist>
-                        </label>
-                        <label class="clinical-field">Dose
-                          <input formControlName="dosage" [class]="inputClasses" placeholder="500" />
-                        </label>
-                        <label class="clinical-field">Dose Unit
-                          <select formControlName="doseUnit" [class]="inputClasses">
-                            @for (unit of doseUnits; track unit) {
-                              <option [value]="unit">{{ unit }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label class="clinical-field">Route
-                          <select formControlName="route" [class]="inputClasses">
-                            @for (route of medicationRoutes; track route) {
-                              <option [value]="route">{{ route }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label class="clinical-field md:col-span-3">Frequency
-                          <select formControlName="frequency" [class]="inputClasses">
-                            @for (item of frequencies; track item) {
-                              <option [value]="item">{{ item }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label class="clinical-field md:col-span-3">Patient Instructions
-                          <textarea formControlName="instructions" rows="3" [class]="inputClasses" placeholder="Additional dosing instructions, timing, food relation, safety advice"></textarea>
-                        </label>
-                        <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs font-bold text-slate-600">
-                          <input type="checkbox" formControlName="prn" class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-                          Take as needed
-                        </label>
-                        <label class="clinical-field md:col-span-2">PRN Reason
-                          <input formControlName="prnReason" [class]="inputClasses" placeholder="e.g. Fever, pain, nausea" />
-                        </label>
-                      </div>
-                    </section>
-
-                    <section class="clinical-order-section">
-                      <h4>2. Prescription duration</h4>
-                      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <label class="clinical-field">Duration
-                          <input type="number" formControlName="duration" [class]="inputClasses" placeholder="5" />
-                        </label>
-                        <label class="clinical-field">Duration Unit
-                          <select formControlName="durationUnit" [class]="inputClasses">
-                            <option>Days</option>
-                            <option>Weeks</option>
-                            <option>Months</option>
-                          </select>
-                        </label>
-                        <label class="clinical-field">Indication
-                          <input formControlName="indication" [class]="inputClasses" placeholder="Reason for treatment" />
-                        </label>
-                      </div>
-                    </section>
-
-                    <section class="clinical-order-section">
-                      <h4>3. Dispensing information</h4>
-                      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <label class="clinical-field">Quantity
-                          <input type="number" formControlName="quantity" [class]="inputClasses" />
-                        </label>
-                        <label class="clinical-field">Refills
-                          <input type="number" formControlName="refills" [class]="inputClasses" />
-                        </label>
-                        <label class="clinical-field">Urgency
-                          <select formControlName="urgency" [class]="inputClasses">
-                            <option>Routine</option>
-                            <option>Urgent</option>
-                            <option>Emergency</option>
-                          </select>
-                        </label>
-                      </div>
-                    </section>
-
-                    <div class="flex justify-end">
-                      <button type="button" (click)="addMedicationToPrescriptionBasket()" class="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black uppercase tracking-wider text-emerald-700 hover:bg-emerald-100">
-                        <span class="material-icons text-sm">add_circle</span>
-                        Add Medication
-                      </button>
-                    </div>
-                  </div>
-
-                  <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div class="mb-3 flex items-center justify-between">
-                      <h4 class="text-sm font-black text-slate-900">Order basket</h4>
-                      <span class="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">{{ prescriptionBasket().length || 1 }} Rx</span>
-                    </div>
-                    <div class="space-y-3">
-                      @for (med of prescriptionBasket(); track med.name + med.dosage; let i = $index) {
-                        <div class="rounded-xl border-l-4 border-emerald-500 bg-white p-4 shadow-sm">
-                          <div class="flex items-start justify-between gap-3">
-                            <div>
-                              <div class="text-xs font-black text-slate-900">{{ med.name }}</div>
-                              <div class="mt-2 text-[11px] font-semibold text-slate-500">{{ med.dosage }} - {{ med.frequency }} - {{ med.duration }}</div>
-                            </div>
-                            <button type="button" (click)="removeMedicationFromPrescriptionBasket(i)" class="rounded-lg p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600">
-                              <span class="material-icons text-sm">delete</span>
-                            </button>
-                          </div>
-                          <div class="mt-3 rounded-lg bg-emerald-50 p-3 text-[11px] font-semibold text-emerald-800">{{ med.instructions || 'No patient instruction entered.' }}</div>
-                        </div>
-                      } @empty {
-                        <div class="rounded-xl border-l-4 border-emerald-500 bg-white p-4 shadow-sm">
-                          <div class="text-xs font-black text-slate-900">{{ prescriptionForm.value.medName || 'Medication draft' }}</div>
-                          <div class="mt-2 text-[11px] font-semibold text-slate-500">
-                            Dose {{ prescriptionForm.value.dosage }} {{ prescriptionForm.value.doseUnit }} - {{ prescriptionForm.value.route }} - {{ prescriptionForm.value.frequency }}
-                          </div>
-                          <div class="mt-2 text-[11px] text-slate-500">
-                            Duration {{ prescriptionForm.value.duration }} {{ prescriptionForm.value.durationUnit }} - Qty {{ prescriptionForm.value.quantity }} - Refills {{ prescriptionForm.value.refills }}
-                          </div>
-                          <div class="mt-3 rounded-lg bg-emerald-50 p-3 text-[11px] font-semibold text-emerald-800">
-                            {{ prescriptionForm.value.instructions || 'No patient instruction entered yet.' }}
-                          </div>
-                        </div>
-                      }
-                    </div>
-                  </aside>
-                </div>
-                <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
-                  <button type="button" (click)="closeForm()" class="clinical-secondary">Discard</button>
-                  <button type="submit" class="clinical-submit bg-emerald-600 hover:bg-emerald-700">Issue Prescription</button>
-                </div>
-              </form>
-            }
-
-            @case ('labs') {
-              <form [formGroup]="labForm" (ngSubmit)="submitLabOrder()" class="space-y-6 p-6 sm:p-8">
-                <div class="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_320px]">
-                  <div class="space-y-6">
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
-                      <label class="clinical-field md:col-span-2">Patient Chart
-                        <select formControlName="patientId" [class]="inputClasses">
-                          @for (p of clinicalPatients(); track p.id) {
-                            <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
-                          }
-                        </select>
-                      </label>
-                      <label class="clinical-field">Priority
-                        <select formControlName="priority" [class]="inputClasses">
-                          <option>Routine</option>
-                          <option>Urgent</option>
-                          <option>STAT</option>
-                        </select>
-                      </label>
-                      <label class="clinical-field">Specimen
-                        <select formControlName="specimenType" [class]="inputClasses">
-                          <option>Whole blood</option>
-                          <option>Serum</option>
-                          <option>Plasma</option>
-                          <option>Urine</option>
-                          <option>Stool</option>
-                          <option>Sputum</option>
-                          <option>Imaging only</option>
-                        </select>
-                      </label>
-                    </div>
-
-                    @for (group of diagnosticOrderGroups(); track group.category) {
-                      <section class="clinical-order-section">
-                        <div class="mb-3 flex items-center justify-between">
-                          <h4>{{ group.category }}</h4>
-                          <span class="text-[10px] font-bold uppercase text-slate-400">{{ group.items.length }} options</span>
-                        </div>
-                        <div class="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                          @for (item of group.items; track item.id) {
-                            <button
-                              type="button"
-                              (click)="toggleDiagnostic(item)"
-                              [class]="isDiagnosticSelected(item.id) ? 'border-purple-500 bg-purple-50 text-purple-800 ring-2 ring-purple-100' : 'border-slate-200 bg-white text-slate-600 hover:border-purple-200 hover:bg-purple-50/40'"
-                              class="flex min-h-14 items-start gap-3 rounded-xl border p-3 text-left transition-all">
-                              <span class="material-icons mt-0.5 text-base">{{ group.category === 'Radiology' ? 'radiology' : 'check_box' }}</span>
-                              <span>
-                                <strong class="block text-xs">{{ item.testName }}</strong>
-                                <span class="text-[10px] font-semibold opacity-70">{{ item.subGroup }} - {{ item.specimenType || 'Specimen as applicable' }}</span>
-                                <span class="mt-1 block text-[10px] font-bold text-slate-400">Ref: {{ item.referenceRange || 'Report based' }} {{ item.unit }}</span>
-                              </span>
-                            </button>
-                          }
-                        </div>
-                      </section>
-                    }
-
-                    <label class="clinical-field">Clinical Note / Reason
-                      <textarea formControlName="clinicalNote" rows="3" [class]="inputClasses" placeholder="Clinical indication, symptoms, provisional diagnosis, sample note"></textarea>
-                    </label>
-                  </div>
-
-                  <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div class="mb-3 flex items-center justify-between">
-                      <h4 class="text-sm font-black text-slate-900">Diagnostic basket</h4>
-                      <span class="rounded-full bg-purple-100 px-2 py-1 text-[10px] font-black text-purple-700">{{ selectedDiagnostics().length }} selected</span>
-                    </div>
-                    <div class="space-y-2">
-                      @for (item of selectedDiagnostics(); track item.id) {
-                        <div class="rounded-xl border-l-4 border-purple-500 bg-white p-3 text-xs font-bold text-slate-700 shadow-sm">
-                          <div>{{ item.testName }}</div>
-                          <div class="mt-1 text-[10px] font-semibold text-slate-400">{{ item.groupName }} / {{ item.subGroup }} - Ref: {{ item.referenceRange || 'Report based' }}</div>
-                        </div>
-                      } @empty {
-                        <div class="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-[11px] font-bold text-slate-400">
-                          Select at least one laboratory or imaging order.
-                        </div>
-                      }
-                    </div>
-                  </aside>
-                </div>
-                <div class="flex justify-end gap-3 border-t border-slate-100 pt-6">
-                  <button type="button" (click)="closeForm()" class="clinical-secondary">Discard</button>
-                  <button type="submit" class="clinical-submit bg-purple-600 hover:bg-purple-700">Submit Diagnostic Order</button>
-                </div>
-              </form>
-            }
-          }
-          </div>
-        </div>
-        </div>
-      }
-
-      <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,340px)_1fr]">
-        <div class="rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm">
-          <div class="flex items-center gap-3">
-            <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-600">
-              <span class="material-icons">folder_shared</span>
-            </div>
-            <div>
-              <div class="text-[11px] font-black uppercase tracking-wider text-slate-900">Active Patient Chart</div>
-              <div class="text-[10px] text-slate-400">History and orders filter by selected MRN</div>
-            </div>
-          </div>
-          <select
-            [value]="selectedPatientId()"
-            (change)="onPatientSelect($event)"
-            class="mt-4 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-800 transition-all focus:border-teal-500 focus:outline-none">
-            @for (p of clinicalPatients(); track p.id) {
-              <option [value]="p.id">{{ p.name }} - {{ p.mrn }}</option>
-            }
-          </select>
-
-          @if (activePatient(); as patient) {
-            <div class="mt-5 space-y-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-              <div class="text-sm font-black text-slate-900">{{ patient.name }}</div>
-              <div class="grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-500">
-                <span>Blood: {{ patient.bloodType }}</span>
-                <span>{{ patient.gender }}</span>
-                <span>{{ patient.phone }}</span>
-                <span>{{ patient.status }}</span>
               </div>
-              <div class="rounded-xl bg-white p-3 text-[10px] text-slate-500">
-                <strong class="block text-slate-700">Current vitals</strong>
-                @if (latestVitals(); as vitals) {
-                  BP {{ vitals.bloodPressure }} / HR {{ vitals.pulse }} / Temp {{ vitals.temperatureC }} C
-                } @else {
-                  <span class="italic text-slate-400">No vitals recorded yet.</span>
+            }
+          </div>
+
+          <div class="rounded-3xl border border-slate-200/80 bg-white shadow-sm">
+            <div class="flex flex-col gap-4 border-b border-slate-100 p-4 xl:flex-row xl:items-center xl:justify-between">
+              <div class="flex flex-wrap gap-2">
+                @for (tab of tabs; track tab.id) {
+                  <button
+                    type="button"
+                    (click)="activeTab.set(tab.id)"
+                    [class]="activeTab() === tab.id ? tab.activeClass : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'"
+                    class="rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all">
+                    {{ tab.label }}
+                  </button>
                 }
               </div>
+              <div class="flex flex-wrap gap-2">
+                <button (click)="exportCurrentTab()" class="clinical-secondary">Excel</button>
+                <button (click)="printCurrentTab(true)" class="clinical-secondary">PDF</button>
+                <button (click)="printCurrentTab(false)" class="clinical-secondary">Print</button>
+              </div>
             </div>
-          }
-        </div>
 
-        <div class="rounded-3xl border border-slate-200/80 bg-white shadow-sm">
-          <div class="flex flex-col gap-4 border-b border-slate-100 p-4 xl:flex-row xl:items-center xl:justify-between">
-            <div class="flex flex-wrap gap-2">
-              @for (tab of tabs; track tab.id) {
-                <button
-                  type="button"
-                  (click)="activeTab.set(tab.id)"
-                  [class]="activeTab() === tab.id ? tab.activeClass : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'"
-                  class="rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all">
-                  {{ tab.label }}
-                </button>
+            <div class="overflow-x-auto p-4">
+              @switch (activeTab()) {
+                @case ('encounters') {
+                  <table class="clinical-table">
+                    <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Diagnosis</th><th>Clinical Note</th><th>Action</th></tr></thead>
+                    <tbody>
+                      @for (rec of visibleEncounters(); track rec.id) {
+                        <tr>
+                          <td>{{ rec.date }}</td>
+                          <td>{{ store.patientDisplayName(rec.patientId) }}</td>
+                          <td>{{ store.doctorDisplayName(rec.doctorId) }}</td>
+                          <td>{{ rec.diagnosis }}</td>
+                          <td class="max-w-md whitespace-pre-wrap">{{ rec.clinicalNotes }}</td>
+                          <td><button (click)="focusPatient(rec.patientId)" class="clinical-row-btn">Detail</button></td>
+                        </tr>
+                      } @empty {
+                        <tr><td colspan="6" class="empty-cell">No encounters found for this patient.</td></tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+
+                @case ('vitals') {
+                  <table class="clinical-table">
+                    <thead><tr><th>Recorded</th><th>Patient</th><th>Temp</th><th>Pulse</th><th>RR</th><th>BP</th><th>Weight</th><th>Height</th><th>Action</th></tr></thead>
+                    <tbody>
+                      @for (row of visibleVitals(); track row.id) {
+                        <tr>
+                          <td>{{ row.recordedAtUtc | date: 'short' }}</td>
+                          <td>{{ store.patientDisplayName(row.patientId) }}</td>
+                          <td>{{ row.temperatureC }} C</td>
+                          <td>{{ row.pulse }}</td>
+                          <td>{{ row.respiratoryRate }}</td>
+                          <td>{{ row.bloodPressure }}</td>
+                          <td>{{ row.weightKg }} kg</td>
+                          <td>{{ row.heightCm }} cm</td>
+                          <td><button (click)="focusPatient(row.patientId)" class="clinical-row-btn">Detail</button></td>
+                        </tr>
+                      } @empty {
+                        <tr><td colspan="9" class="empty-cell">No vitals found for this patient.</td></tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+
+                @case ('diagnoses') {
+                  <table class="clinical-table">
+                    <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Code</th><th>Description</th><th>Severity</th><th>Action</th></tr></thead>
+                    <tbody>
+                      @for (row of visibleDiagnoses(); track row.id) {
+                        <tr>
+                          <td>{{ row.diagnosedAtUtc | date: 'short' }}</td>
+                          <td>{{ store.patientDisplayName(row.patientId) }}</td>
+                          <td>{{ store.doctorDisplayName(row.doctorId) }}</td>
+                          <td class="font-mono font-bold">{{ row.code }}</td>
+                          <td>{{ row.description }}</td>
+                          <td><span class="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-black uppercase text-violet-700">{{ row.severity }}</span></td>
+                          <td><button (click)="focusPatient(row.patientId)" class="clinical-row-btn">Detail</button></td>
+                        </tr>
+                      } @empty {
+                        <tr><td colspan="7" class="empty-cell">No diagnoses found for this patient.</td></tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+
+                @case ('prescriptions') {
+                  <table class="clinical-table">
+                    <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Medication</th><th>Instructions</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody>
+                      @for (rx of visiblePrescriptions(); track rx.id) {
+                        <tr>
+                          <td>{{ rx.date }}</td>
+                          <td>{{ store.patientDisplayName(rx.patientId) }}</td>
+                          <td>{{ store.doctorDisplayName(rx.doctorId) }}</td>
+                          <td>{{ medicationSummary(rx) }}</td>
+                          <td>{{ instructionSummary(rx) }}</td>
+                          <td><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-700">{{ rx.status }}</span></td>
+                          <td><button (click)="printPrescription(rx)" class="clinical-row-btn">Rx</button></td>
+                        </tr>
+                      } @empty {
+                        <tr><td colspan="7" class="empty-cell">No prescriptions found for this patient.</td></tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+
+                @case ('labs') {
+                  <table class="clinical-table">
+                    <thead><tr><th>Ordered</th><th>Patient</th><th>Doctor</th><th>Category</th><th>Order</th><th>Status</th><th>Result</th><th>Action</th></tr></thead>
+                    <tbody>
+                      @for (lab of visibleLabs(); track lab.id) {
+                        <tr>
+                          <td>{{ lab.orderedDate }}</td>
+                          <td>{{ store.patientDisplayName(lab.patientId) }}</td>
+                          <td>{{ store.doctorDisplayName(lab.doctorId) }}</td>
+                          <td>{{ lab.category }}</td>
+                          <td>{{ lab.testName }}</td>
+                          <td><span class="rounded-full bg-purple-50 px-2.5 py-1 text-[10px] font-black uppercase text-purple-700">{{ lab.status }}</span></td>
+                          <td>{{ lab.result || 'Pending result' }}</td>
+                          <td class="space-x-1">
+                            <button (click)="printLabOrder(lab)" class="clinical-row-btn">Print</button>
+                            <button (click)="openLabDesk()" class="clinical-row-btn">Result</button>
+                          </td>
+                        </tr>
+                      } @empty {
+                        <tr><td colspan="8" class="empty-cell">No diagnostic orders found for this patient.</td></tr>
+                      }
+                    </tbody>
+                  </table>
+                }
               }
             </div>
-            <div class="flex flex-wrap gap-2">
-              <button (click)="exportCurrentTab()" class="clinical-secondary">Excel</button>
-              <button (click)="printCurrentTab(true)" class="clinical-secondary">PDF</button>
-              <button (click)="printCurrentTab(false)" class="clinical-secondary">Print</button>
-            </div>
-          </div>
-
-          <div class="overflow-x-auto p-4">
-            @switch (activeTab()) {
-              @case ('encounters') {
-                <table class="clinical-table">
-                  <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Diagnosis</th><th>Clinical Note</th><th>Action</th></tr></thead>
-                  <tbody>
-                    @for (rec of visibleEncounters(); track rec.id) {
-                      <tr>
-                        <td>{{ rec.date }}</td>
-                        <td>{{ store.patientDisplayName(rec.patientId) }}</td>
-                        <td>{{ store.doctorDisplayName(rec.doctorId) }}</td>
-                        <td>{{ rec.diagnosis }}</td>
-                        <td class="max-w-md whitespace-pre-wrap">{{ rec.clinicalNotes }}</td>
-                        <td><button (click)="focusPatient(rec.patientId)" class="clinical-row-btn">Detail</button></td>
-                      </tr>
-                    } @empty {
-                      <tr><td colspan="6" class="empty-cell">No encounters found for this patient.</td></tr>
-                    }
-                  </tbody>
-                </table>
-              }
-
-              @case ('vitals') {
-                <table class="clinical-table">
-                  <thead><tr><th>Recorded</th><th>Patient</th><th>Temp</th><th>Pulse</th><th>RR</th><th>BP</th><th>Weight</th><th>Height</th><th>Action</th></tr></thead>
-                  <tbody>
-                    @for (row of visibleVitals(); track row.id) {
-                      <tr>
-                        <td>{{ row.recordedAtUtc | date: 'short' }}</td>
-                        <td>{{ store.patientDisplayName(row.patientId) }}</td>
-                        <td>{{ row.temperatureC }} C</td>
-                        <td>{{ row.pulse }}</td>
-                        <td>{{ row.respiratoryRate }}</td>
-                        <td>{{ row.bloodPressure }}</td>
-                        <td>{{ row.weightKg }} kg</td>
-                        <td>{{ row.heightCm }} cm</td>
-                        <td><button (click)="focusPatient(row.patientId)" class="clinical-row-btn">Detail</button></td>
-                      </tr>
-                    } @empty {
-                      <tr><td colspan="9" class="empty-cell">No vitals found for this patient.</td></tr>
-                    }
-                  </tbody>
-                </table>
-              }
-
-              @case ('diagnoses') {
-                <table class="clinical-table">
-                  <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Code</th><th>Description</th><th>Severity</th><th>Action</th></tr></thead>
-                  <tbody>
-                    @for (row of visibleDiagnoses(); track row.id) {
-                      <tr>
-                        <td>{{ row.diagnosedAtUtc | date: 'short' }}</td>
-                        <td>{{ store.patientDisplayName(row.patientId) }}</td>
-                        <td>{{ store.doctorDisplayName(row.doctorId) }}</td>
-                        <td class="font-mono font-bold">{{ row.code }}</td>
-                        <td>{{ row.description }}</td>
-                        <td><span class="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-black uppercase text-violet-700">{{ row.severity }}</span></td>
-                        <td><button (click)="focusPatient(row.patientId)" class="clinical-row-btn">Detail</button></td>
-                      </tr>
-                    } @empty {
-                      <tr><td colspan="7" class="empty-cell">No diagnoses found for this patient.</td></tr>
-                    }
-                  </tbody>
-                </table>
-              }
-
-              @case ('prescriptions') {
-                <table class="clinical-table">
-                  <thead><tr><th>Date</th><th>Patient</th><th>Doctor</th><th>Medication</th><th>Instructions</th><th>Status</th><th>Action</th></tr></thead>
-                  <tbody>
-                    @for (rx of visiblePrescriptions(); track rx.id) {
-                      <tr>
-                        <td>{{ rx.date }}</td>
-                        <td>{{ store.patientDisplayName(rx.patientId) }}</td>
-                        <td>{{ store.doctorDisplayName(rx.doctorId) }}</td>
-                        <td>{{ medicationSummary(rx) }}</td>
-                        <td>{{ instructionSummary(rx) }}</td>
-                        <td><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-700">{{ rx.status }}</span></td>
-                        <td><button (click)="printPrescription(rx)" class="clinical-row-btn">Rx</button></td>
-                      </tr>
-                    } @empty {
-                      <tr><td colspan="7" class="empty-cell">No prescriptions found for this patient.</td></tr>
-                    }
-                  </tbody>
-                </table>
-              }
-
-              @case ('labs') {
-                <table class="clinical-table">
-                  <thead><tr><th>Ordered</th><th>Patient</th><th>Doctor</th><th>Category</th><th>Order</th><th>Status</th><th>Result</th><th>Action</th></tr></thead>
-                  <tbody>
-                    @for (lab of visibleLabs(); track lab.id) {
-                      <tr>
-                        <td>{{ lab.orderedDate }}</td>
-                        <td>{{ store.patientDisplayName(lab.patientId) }}</td>
-                        <td>{{ store.doctorDisplayName(lab.doctorId) }}</td>
-                        <td>{{ lab.category }}</td>
-                        <td>{{ lab.testName }}</td>
-                        <td><span class="rounded-full bg-purple-50 px-2.5 py-1 text-[10px] font-black uppercase text-purple-700">{{ lab.status }}</span></td>
-                        <td>{{ lab.result || 'Pending result' }}</td>
-                        <td class="space-x-1">
-                          <button (click)="printLabOrder(lab)" class="clinical-row-btn">Print</button>
-                          <button (click)="openLabDesk()" class="clinical-row-btn">Result</button>
-                        </td>
-                      </tr>
-                    } @empty {
-                      <tr><td colspan="8" class="empty-cell">No diagnostic orders found for this patient.</td></tr>
-                    }
-                  </tbody>
-                </table>
-              }
-            }
           </div>
         </div>
       </div>
-    </div>
+    }
   `,
   styles: [`
     .clinical-action {
@@ -778,17 +292,6 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
       box-shadow: 0 12px 28px rgba(15, 23, 42, .08);
     }
 
-    .clinical-field {
-      display: grid;
-      gap: .375rem;
-      margin-left: .25rem;
-      font-size: .625rem;
-      font-weight: 800;
-      color: rgb(100 116 139);
-      text-transform: uppercase;
-      letter-spacing: .08em;
-    }
-
     .clinical-secondary {
       border-radius: .75rem;
       border: 1px solid rgb(226 232 240);
@@ -802,30 +305,6 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
 
     .clinical-secondary:hover {
       background: rgb(248 250 252);
-    }
-
-    .clinical-submit {
-      border-radius: .75rem;
-      padding: .625rem 1.5rem;
-      font-size: .75rem;
-      font-weight: 900;
-      color: white;
-      box-shadow: 0 14px 30px rgba(20, 184, 166, .14);
-      transition: all .18s ease;
-    }
-
-    .clinical-order-section {
-      border-radius: 1rem;
-      border: 1px solid rgb(226 232 240);
-      background: rgb(248 250 252 / .65);
-      padding: 1rem;
-    }
-
-    .clinical-order-section h4 {
-      margin-bottom: .85rem;
-      font-size: .85rem;
-      font-weight: 900;
-      color: rgb(15 23 42);
     }
 
     .clinical-table {
@@ -873,45 +352,12 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
 export class ClinicalEhrComponent {
   store = inject(StoreService);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
 
   activeTab = signal<ClinicalTab>('encounters');
-  activeForm = signal<ClinicalTab | null>(null);
   selectedPatientId = signal('');
-  prescriptionBasket = signal<Medication[]>([]);
-  encounterSubmitAttempted = signal(false);
+  isFormRoute = signal(false);
 
-  readonly inputClasses = 'w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/5 transition-all';
-  readonly inputClassesError = 'w-full px-4 py-2.5 bg-rose-50/40 border border-rose-300 rounded-xl text-xs outline-none focus:bg-white focus:border-rose-500 focus:ring-4 focus:ring-rose-500/10 transition-all';
-
-  fieldClasses(control: AbstractControl | null): string {
-    return control?.touched && control?.invalid ? this.inputClassesError : this.inputClasses;
-  }
-
-  readonly visitTypes = ['Outpatient', 'Follow-up', 'Emergency', 'Inpatient Review', 'Procedure Review', 'Teleconsultation'];
-  readonly medicationCatalog = ['Paracetamol', 'Amoxicillin', 'Azithromycin', 'Ceftriaxone', 'Metformin', 'Amlodipine', 'Omeprazole', 'Salbutamol', 'Losartan', 'Hydrochlorothiazide', 'ORS Sachet'];
-  readonly doseUnits = ['mg', 'g', 'mcg', 'mL', 'tablet', 'capsule', 'puff', 'drop', 'sachet'];
-  readonly medicationRoutes = ['Oral', 'IV', 'IM', 'SC', 'Topical', 'Inhalation', 'Ophthalmic', 'Otic'];
-  readonly frequencies = ['Once daily', 'Twice daily', 'Three times daily', 'Four times daily', 'Every 4 hours', 'Every 6 hours', 'Every 8 hours', 'As needed', 'Stat'];
-  diagnosticOrderGroups = computed(() => {
-    const groups = new Map<string, DiagnosticTest[]>();
-    for (const test of this.store.diagnosticTests().filter(item => item.isActive)) {
-      const key = test.groupName || 'Laboratory';
-      groups.set(key, [...(groups.get(key) || []), test]);
-    }
-
-    return Array.from(groups.entries()).map(([category, items]) => ({
-      category,
-      items: items.sort((a, b) =>
-        a.subGroup.localeCompare(b.subGroup) ||
-        a.sortOrder - b.sortOrder ||
-        a.testName.localeCompare(b.testName)),
-    }));
-  });
-  selectedDiagnosticIds = signal<string[]>([]);
-  selectedDiagnostics = computed(() =>
-    this.selectedDiagnosticIds()
-      .map(id => this.store.diagnosticTests().find(test => test.id === id))
-      .filter((test): test is DiagnosticTest => !!test));
   clinicalPatients = computed(() => this.store.clinicalWorklistPatients());
   private clinicalPatientIds = computed(() => new Set(this.clinicalPatients().map(patient => patient.id)));
 
@@ -922,64 +368,6 @@ export class ClinicalEhrComponent {
     { id: 'prescriptions', label: 'Prescriptions', activeClass: 'bg-emerald-600 text-white font-black' },
     { id: 'labs', label: 'Lab Requests', activeClass: 'bg-purple-600 text-white font-black' },
   ];
-
-  encounterForm = new FormGroup({
-    patientId: new FormControl('', [Validators.required]),
-    visitType: new FormControl('Outpatient', [Validators.required]),
-    chiefComplaint: new FormControl('', [Validators.required]),
-    assessment: new FormControl('', [Validators.required]),
-    plan: new FormControl('', [Validators.required]),
-  });
-
-  vitalsForm = new FormGroup({
-    patientId: new FormControl('', [Validators.required]),
-    temperatureC: new FormControl<number | null>(null, [Validators.required, Validators.min(30), Validators.max(45)]),
-    pulse: new FormControl<number | null>(null, [Validators.required, Validators.min(20), Validators.max(240)]),
-    respiratoryRate: new FormControl<number | null>(null, [Validators.required, Validators.min(5), Validators.max(80)]),
-    bloodPressure: new FormControl('', [Validators.required]),
-    weightKg: new FormControl<number | null>(null, [Validators.required, Validators.min(1), Validators.max(350)]),
-    heightCm: new FormControl<number | null>(null, [Validators.required, Validators.min(30), Validators.max(250)]),
-  });
-
-  diagnosisForm = new FormGroup({
-    patientId: new FormControl('', [Validators.required]),
-    code: new FormControl('', [Validators.required]),
-    codeSystem: new FormControl('ICD-10', [Validators.required]),
-    diagnosisType: new FormControl('Primary', [Validators.required]),
-    certainty: new FormControl('Confirmed', [Validators.required]),
-    description: new FormControl('', [Validators.required]),
-    severity: new FormControl('Moderate', [Validators.required]),
-    onsetDate: new FormControl(new Date().toISOString().split('T')[0]),
-    notes: new FormControl(''),
-    followUpPlan: new FormControl(''),
-  });
-
-  prescriptionForm = new FormGroup({
-    patientId: new FormControl('', [Validators.required]),
-    medName: new FormControl('Paracetamol', [Validators.required]),
-    dosage: new FormControl('500', [Validators.required]),
-    doseUnit: new FormControl('mg', [Validators.required]),
-    route: new FormControl('Oral', [Validators.required]),
-    frequency: new FormControl('Twice daily', [Validators.required]),
-    duration: new FormControl(5, [Validators.required, Validators.min(1)]),
-    durationUnit: new FormControl('Days', [Validators.required]),
-    startDate: new FormControl(new Date().toISOString().split('T')[0], [Validators.required]),
-    quantity: new FormControl(10, [Validators.required, Validators.min(1)]),
-    refills: new FormControl(0, [Validators.required, Validators.min(0)]),
-    indication: new FormControl(''),
-    urgency: new FormControl('Routine', [Validators.required]),
-    prn: new FormControl(false),
-    prnReason: new FormControl(''),
-    instructions: new FormControl('Take after meals'),
-  });
-
-  labForm = new FormGroup({
-    patientId: new FormControl('', [Validators.required]),
-    category: new FormControl('Hematology', [Validators.required]),
-    priority: new FormControl('Routine', [Validators.required]),
-    specimenType: new FormControl('Whole blood', [Validators.required]),
-    clinicalNote: new FormControl(''),
-  });
 
   activePatient = computed(() => this.clinicalPatients().find(p => p.id === this.selectedPatientId()));
   latestVitals = computed(() => {
@@ -1007,59 +395,49 @@ export class ClinicalEhrComponent {
   });
 
   constructor() {
+    // Set from the current URL synchronously so a deep link straight into a form
+    // page never flashes the workspace before NavigationEnd fires.
+    this.isFormRoute.set(this.isClinicalFormUrl(this.router.url));
+
     effect(() => {
       const patients = this.clinicalPatients();
       if (patients.length > 0 && (!this.selectedPatientId() || !patients.some(patient => patient.id === this.selectedPatientId()))) {
-        this.setPatientEverywhere(patients[0].id);
+        this.selectedPatientId.set(patients[0].id);
       } else if (patients.length === 0 && this.selectedPatientId()) {
         this.selectedPatientId.set('');
+      }
+    });
+
+    // Track when a child form page is open (hide the workspace behind the page) and
+    // restore the tab + patient chart when the clinician returns from a form page.
+    this.router.events.pipe(
+      filter(event => event instanceof NavigationEnd),
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(() => {
+      const url = this.router.url;
+      this.isFormRoute.set(this.isClinicalFormUrl(url));
+
+      if (!this.isClinicalFormUrl(url)) {
+        const params = this.router.parseUrl(url).queryParamMap;
+        const tab = params.get('tab');
+        const patient = params.get('patient');
+        if (tab && this.tabs.some(item => item.id === tab)) {
+          this.activeTab.set(tab as ClinicalTab);
+        }
+        if (patient && this.clinicalPatients().some(item => item.id === patient)) {
+          this.selectedPatientId.set(patient);
+        }
       }
     });
   }
 
   onPatientSelect(event: Event) {
-    this.setPatientEverywhere((event.target as HTMLSelectElement).value);
+    this.selectedPatientId.set((event.target as HTMLSelectElement).value);
   }
 
   focusPatient(patientId: string) {
-    this.setPatientEverywhere(patientId);
+    this.selectedPatientId.set(patientId);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  openForm(tab: ClinicalTab) {
-    if (this.clinicalPatients().length === 0) {
-      this.store.addToast('warning', 'Billing Clearance Required', 'The patient\'s payment share must be settled before clinical documentation, vitals, prescription, or diagnostic order entry.');
-      return;
-    }
-    this.activeTab.set(tab);
-    this.activeForm.set(tab);
-    // Open every form fresh: a previous failed submit may have marked fields as
-    // touched, which would otherwise show stale error styling on an untouched form.
-    this.encounterForm.markAsUntouched();
-    this.encounterForm.markAsPristine();
-    this.vitalsForm.markAsUntouched();
-    this.vitalsForm.markAsPristine();
-    this.setPatientEverywhere(this.selectedPatientId() || this.clinicalPatients()[0]?.id || '');
-  }
-
-  closeForm() {
-    this.activeForm.set(null);
-    this.prescriptionBasket.set([]);
-    this.encounterSubmitAttempted.set(false);
-  }
-
-  toggleDiagnostic(test: DiagnosticTest) {
-    this.labForm.patchValue({
-      category: test.groupName,
-      specimenType: test.specimenType || this.labForm.value.specimenType || 'Whole blood',
-    });
-    this.selectedDiagnosticIds.update(current =>
-      current.includes(test.id) ? current.filter(item => item !== test.id) : [...current, test.id]
-    );
-  }
-
-  isDiagnosticSelected(id: string): boolean {
-    return this.selectedDiagnosticIds().includes(id);
   }
 
   canCreate(tab: ClinicalTab): boolean {
@@ -1070,262 +448,30 @@ export class ClinicalEhrComponent {
     return role === 'DOCTOR';
   }
 
-  activeFormTitle(): string {
-    const titles: Record<ClinicalTab, string> = {
-      encounters: 'New Clinical Encounter',
-      vitals: 'Record Patient Vitals',
-      diagnoses: 'Add Clinical Diagnosis',
-      prescriptions: 'Issue Prescription Order',
-      labs: 'Submit Diagnostic Order',
+  openFormPage(tab: ClinicalTab) {
+    if (this.clinicalPatients().length === 0) {
+      this.store.addToast('warning', 'Billing Clearance Required', 'The patient\'s payment share must be settled before clinical documentation, vitals, prescription, or diagnostic order entry.');
+      return;
+    }
+    const patientId = this.selectedPatientId() || this.clinicalPatients()[0]?.id || '';
+    const routes: Record<ClinicalTab, string> = {
+      encounters: '/clinical-ehr/encounter',
+      vitals: '/clinical-ehr/vitals',
+      diagnoses: '/clinical-ehr/diagnosis',
+      prescriptions: '/clinical-ehr/prescription',
+      labs: '/clinical-ehr/lab-order',
     };
-    return titles[this.activeForm() || 'encounters'];
+    this.router.navigate([routes[tab]], { queryParams: { patient: patientId } });
   }
 
-  activeFormSubtitle(): string {
-    const subtitles: Record<ClinicalTab, string> = {
-      encounters: 'SOAP documentation',
-      vitals: 'Nursing and clinical observations',
-      diagnoses: 'ICD and local diagnosis coding',
-      prescriptions: 'Medication order entry',
-      labs: 'Laboratory and imaging request',
-    };
-    return subtitles[this.activeForm() || 'encounters'];
+  private isClinicalFormUrl(url: string): boolean {
+    const path = url.split('?')[0];
+    return ['/clinical-ehr/encounter', '/clinical-ehr/vitals', '/clinical-ehr/diagnosis', '/clinical-ehr/prescription', '/clinical-ehr/lab-order']
+      .some(prefix => path === prefix || path.startsWith(prefix + '/'));
   }
 
-  activeFormIcon(): string {
-    const icons: Record<ClinicalTab, string> = {
-      encounters: 'history_edu',
-      vitals: 'monitor_heart',
-      diagnoses: 'diagnosis',
-      prescriptions: 'medication',
-      labs: 'biotech',
-    };
-    return icons[this.activeForm() || 'encounters'];
-  }
-
-  submitEncounter() {
-    if (this.encounterForm.invalid) {
-      this.encounterSubmitAttempted.set(true);
-      this.encounterForm.markAllAsTouched();
-      this.store.addToast('error', 'Encounter Validation', 'Chief complaint, assessment, and plan are required to save the encounter.');
-      return;
-    }
-    const value = this.encounterForm.getRawValue();
-    const patient = this.requirePatient(value.patientId);
-    if (!patient) return;
-    this.store.addClinicalEncounter({
-      patientId: patient.id,
-      patientName: patient.name,
-      doctorId: this.currentDoctorId(),
-      doctorName: this.currentDoctorName(),
-      visitType: value.visitType || 'Outpatient',
-      chiefComplaint: value.chiefComplaint || '',
-      assessment: value.assessment || '',
-      plan: value.plan || '',
-    });
-    this.closeForm();
-    this.encounterForm.patchValue({ chiefComplaint: '', assessment: '', plan: '' });
-    this.encounterForm.markAsPristine();
-    this.encounterForm.markAsUntouched();
-  }
-
-  submitVitals() {
-    if (this.vitalsForm.invalid) {
-      this.vitalsForm.markAllAsTouched();
-      this.store.addToast('error', 'Vitals Validation', 'All vital sign fields are required — temperature, pulse, respiratory rate, blood pressure, weight, and height.');
-      return;
-    }
-    const value = this.vitalsForm.getRawValue();
-    const patient = this.requirePatient(value.patientId);
-    if (!patient) return;
-    this.store.addVitals({
-      patientId: patient.id,
-      patientName: patient.name,
-      patientMrn: patient.mrn,
-      temperatureC: Number(value.temperatureC),
-      pulse: Number(value.pulse),
-      respiratoryRate: Number(value.respiratoryRate),
-      bloodPressure: value.bloodPressure || '',
-      weightKg: Number(value.weightKg),
-      heightCm: Number(value.heightCm),
-    });
-    this.closeForm();
-    this.resetVitalsForm();
-  }
-
-  private resetVitalsForm() {
-    this.vitalsForm.patchValue({
-      patientId: this.selectedPatientId() || '',
-      temperatureC: null,
-      pulse: null,
-      respiratoryRate: null,
-      bloodPressure: '',
-      weightKg: null,
-      heightCm: null,
-    });
-    this.vitalsForm.markAsPristine();
-    this.vitalsForm.markAsUntouched();
-  }
-
-  submitDiagnosis() {
-    if (this.diagnosisForm.invalid) {
-      this.diagnosisForm.markAllAsTouched();
-      return;
-    }
-    const value = this.diagnosisForm.getRawValue();
-    const patient = this.requirePatient(value.patientId);
-    if (!patient) return;
-    this.store.addDiagnosis({
-      patientId: patient.id,
-      patientName: patient.name,
-      patientMrn: patient.mrn,
-      doctorId: this.currentDoctorId(),
-      doctorName: this.currentDoctorName(),
-      code: `${value.codeSystem || 'ICD-10'} ${value.code || ''}`.trim(),
-      description: [
-        value.description || '',
-        `Type: ${value.diagnosisType || 'Primary'}`,
-        `Certainty: ${value.certainty || 'Confirmed'}`,
-        value.onsetDate ? `Onset: ${value.onsetDate}` : '',
-        value.notes ? `Clinical basis: ${value.notes}` : '',
-        value.followUpPlan ? `Follow-up: ${value.followUpPlan}` : '',
-      ].filter(Boolean).join('\n'),
-      severity: value.severity || 'Moderate',
-    });
-    this.closeForm();
-    this.diagnosisForm.patchValue({
-      code: '',
-      codeSystem: 'ICD-10',
-      diagnosisType: 'Primary',
-      certainty: 'Confirmed',
-      description: '',
-      severity: 'Moderate',
-      onsetDate: new Date().toISOString().split('T')[0],
-      notes: '',
-      followUpPlan: '',
-    });
-  }
-
-  submitPrescription() {
-    const medications = this.prescriptionBasket().length > 0
-      ? this.prescriptionBasket()
-      : [this.medicationFromPrescriptionForm()];
-
-    if (this.prescriptionForm.invalid || medications.some(item => !item.name.trim())) {
-      this.prescriptionForm.markAllAsTouched();
-      this.store.addToast('error', 'Prescription Validation', 'Patient, medication name, dose, frequency, duration, and quantity are required.');
-      return;
-    }
-    const value = this.prescriptionForm.getRawValue();
-    const patient = this.requirePatient(value.patientId);
-    if (!patient) return;
-    this.store.addPrescription({
-      patientId: patient.id,
-      patientName: patient.name,
-      patientMrn: patient.mrn,
-      doctorId: this.currentDoctorId(),
-      doctorName: this.currentDoctorName(),
-      medications,
-    });
-    this.closeForm();
-    this.resetPrescriptionDraft();
-  }
-
-  addMedicationToPrescriptionBasket() {
-    if (this.prescriptionForm.controls.medName.invalid ||
-        this.prescriptionForm.controls.dosage.invalid ||
-        this.prescriptionForm.controls.frequency.invalid ||
-        this.prescriptionForm.controls.duration.invalid ||
-        this.prescriptionForm.controls.quantity.invalid) {
-      this.prescriptionForm.markAllAsTouched();
-      this.store.addToast('error', 'Medication Validation', 'Medication name, dose, frequency, duration, and quantity are required before adding to the basket.');
-      return;
-    }
-
-    const medication = this.medicationFromPrescriptionForm();
-    if (!medication.name.trim()) {
-      this.store.addToast('error', 'Medication Required', 'Type the medication name before adding it to the basket.');
-      return;
-    }
-
-    this.prescriptionBasket.update(current => [...current, medication]);
-    this.resetPrescriptionDraft(false);
-  }
-
-  removeMedicationFromPrescriptionBasket(index: number) {
-    this.prescriptionBasket.update(current => current.filter((_, itemIndex) => itemIndex !== index));
-  }
-
-  private medicationFromPrescriptionForm(): Medication {
-    const value = this.prescriptionForm.getRawValue();
-    return {
-      name: value.medName || '',
-      dosage: `${value.dosage || ''} ${value.doseUnit || ''}`.trim(),
-      frequency: value.frequency || '',
-      duration: `${value.duration || ''} ${value.durationUnit || ''}`.trim(),
-      instructions: [
-        `${value.route || 'Oral'} route`,
-        value.instructions || 'As directed',
-        value.indication ? `Indication: ${value.indication}` : '',
-        value.prn ? `PRN: ${value.prnReason || 'As needed'}` : '',
-        `Qty ${value.quantity || 0}, Refills ${value.refills || 0}, ${value.urgency || 'Routine'}`,
-      ].filter(Boolean).join('. '),
-    };
-  }
-
-  private resetPrescriptionDraft(clearPatient = true) {
-    const patientId = clearPatient ? this.selectedPatientId() : this.prescriptionForm.value.patientId;
-    this.prescriptionForm.patchValue({
-      patientId: patientId || '',
-      medName: '',
-      dosage: '',
-      doseUnit: 'mg',
-      route: 'Oral',
-      frequency: 'Twice daily',
-      duration: 5,
-      durationUnit: 'Days',
-      startDate: new Date().toISOString().split('T')[0],
-      quantity: 10,
-      refills: 0,
-      indication: '',
-      urgency: 'Routine',
-      prn: false,
-      prnReason: '',
-      instructions: '',
-    });
-  }
-
-  submitLabOrder() {
-    if (this.labForm.invalid) {
-      this.labForm.markAllAsTouched();
-      return;
-    }
-    const selectedTests = this.selectedDiagnostics();
-    if (selectedTests.length === 0) {
-      this.store.addToast('error', 'Diagnostic Order Required', 'Select at least one laboratory or imaging order.');
-      return;
-    }
-    const value = this.labForm.getRawValue();
-    const patient = this.requirePatient(value.patientId);
-    if (!patient) return;
-    this.store.addLabOrder({
-      patientId: patient.id,
-      patientName: patient.name,
-      patientMrn: patient.mrn,
-      doctorId: this.currentDoctorId(),
-      doctorName: this.currentDoctorName(),
-      testName: selectedTests.map(test => test.testName).join(', '),
-      testCatalogIds: selectedTests.map(test => test.id),
-      category: selectedTests[0]?.groupName || value.category || 'Biochemistry',
-      priority: value.priority || 'Routine',
-      specimenType: value.specimenType || selectedTests[0]?.specimenType || 'Whole blood',
-      clinicalNote: [
-        value.clinicalNote || '',
-        `Requested panels: ${selectedTests.map(test => `${test.groupName}/${test.subGroup}/${test.testName}`).join('; ')}`
-      ].filter(Boolean).join('\n'),
-    });
-    this.closeForm();
-    this.selectedDiagnosticIds.set([]);
+  openLabDesk() {
+    this.router.navigate(['/laboratory']);
   }
 
   medicationSummary(rx: Prescription): string {
@@ -1334,10 +480,6 @@ export class ClinicalEhrComponent {
 
   instructionSummary(rx: Prescription): string {
     return rx.medications.map(item => `${item.frequency}, ${item.duration}. ${item.instructions}`.trim()).join(' | ');
-  }
-
-  openLabDesk() {
-    this.router.navigate(['/laboratory']);
   }
 
   printPrescription(rx: Prescription) {
@@ -1439,32 +581,6 @@ export class ClinicalEhrComponent {
     `;
     const patient = this.activePatient();
     this.openPrintableHtml(html, `Clinical ${this.activeTab()}`, patient?.name, patient?.mrn);
-  }
-
-  private setPatientEverywhere(patientId: string) {
-    if (!patientId) return;
-    this.selectedPatientId.set(patientId);
-    this.encounterForm.patchValue({ patientId });
-    this.vitalsForm.patchValue({ patientId });
-    this.diagnosisForm.patchValue({ patientId });
-    this.prescriptionForm.patchValue({ patientId });
-    this.labForm.patchValue({ patientId });
-  }
-
-  private requirePatient(patientId: string | null): Patient | undefined {
-    const patient = this.clinicalPatients().find(item => item.id === patientId);
-    if (!patient) {
-      this.store.addToast('error', 'Billing Clearance Required', 'Select a patient whose payment share is settled before saving the clinical record.');
-    }
-    return patient;
-  }
-
-  private currentDoctorId(): string {
-    return this.store.currentUser()?.id || 'current-doctor';
-  }
-
-  private currentDoctorName(): string {
-    return this.store.currentUser()?.name || 'Current Clinician';
   }
 
   private currentRows(): Array<Record<string, unknown>> {
@@ -1606,5 +722,9 @@ export class ClinicalEhrComponent {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  private currentDoctorName(): string {
+    return this.store.currentUser()?.name || 'Current Clinician';
   }
 }

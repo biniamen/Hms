@@ -221,6 +221,13 @@ export class MainLayoutComponent {
   currentRouteTitle = signal('Dashboard');
 
   constructor() {
+    // A session restored from localStorage (page refresh / reopening the browser)
+    // skips the login screen, so the store never ran loadAll(). Rehydrate the data
+    // here — loadAll() is guarded against double-fetching right after a fresh login.
+    if (this.store.isAuthenticated() && !this.store.dataLoaded()) {
+      this.store.loadAll();
+    }
+
     this.router.events.pipe(
       filter(e => e instanceof NavigationEnd)
     ).subscribe(() => {

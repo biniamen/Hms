@@ -67,6 +67,8 @@ type AppointmentDoctor = {
                   <select formControlName="patientId" (change)="onBookingPatientChange($event)" [class]="inputClasses">
                     @for (p of store.patients(); track p.id) {
                       <option [value]="p.id">{{ p.name }} ({{ p.mrn }})</option>
+                    } @empty {
+                      <option value="" disabled>{{ store.isLoading() ? 'Loading patients…' : (store.currentUser()?.role === 'DOCTOR' ? 'No patients assigned to you yet' : 'No patients registered yet') }}</option>
                     }
                   </select>
                 </div>

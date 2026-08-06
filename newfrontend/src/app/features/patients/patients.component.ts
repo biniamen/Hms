@@ -166,34 +166,63 @@ import { Patient, PatientStatus } from '../../core/models';
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-              @for (p of filteredPatients(); track p.id) {
-                <tr class="hover:bg-slate-50/50 transition-colors">
-                  <td class="py-4 px-4">
-                    <div class="flex items-center gap-3">
-                      <div class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-xs border border-slate-200 uppercase">
-                        {{ p.name.charAt(0) }}
-                      </div>
-                      <div>
-                        <div class="font-bold text-slate-900">{{ p.name }}</div>
-                        <div class="text-[10px] text-slate-400 font-mono">ID: {{ p.mrn }}</div>
-                      </div>
+              @if (store.isLoading() && filteredPatients().length === 0) {
+                <tr>
+                  <td colspan="5" class="py-14 text-center">
+                    <div class="inline-flex items-center gap-3 text-slate-400">
+                      <div class="w-5 h-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+                      <span class="text-xs font-bold uppercase tracking-widest">Loading patient registry…</span>
                     </div>
                   </td>
-                  <td class="py-4 px-4 text-slate-700">{{ p.gender }}, {{ p.dob }}</td>
-                  <td class="py-4 px-4 text-center">
-                    <span class="px-2 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 font-mono text-[10px] font-bold uppercase">{{ p.bloodType }}</span>
-                  </td>
-                  <td class="py-4 px-4">
-                    <span [class]="getStatusBadgeClass(p.status)" class="px-2.5 py-1 rounded-full text-[9px] font-bold uppercase border">
-                      {{ p.status }}
-                    </span>
-                  </td>
-                  <td class="py-4 px-4 text-right">
-                    <button (click)="openPatientEhr(p)" class="px-3 py-1.5 bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-700 font-bold rounded-xl text-[10px] transition-all">
-                      View EHR
-                    </button>
-                  </td>
                 </tr>
+              } @else {
+                @for (p of filteredPatients(); track p.id) {
+                  <tr class="hover:bg-slate-50/50 transition-colors">
+                    <td class="py-4 px-4">
+                      <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-xs border border-slate-200 uppercase">
+                          {{ p.name.charAt(0) }}
+                        </div>
+                        <div>
+                          <div class="font-bold text-slate-900">{{ p.name }}</div>
+                          <div class="text-[10px] text-slate-400 font-mono">ID: {{ p.mrn }}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="py-4 px-4 text-slate-700">{{ p.gender }}, {{ p.dob }}</td>
+                    <td class="py-4 px-4 text-center">
+                      <span class="px-2 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 font-mono text-[10px] font-bold uppercase">{{ p.bloodType }}</span>
+                    </td>
+                    <td class="py-4 px-4">
+                      <span [class]="getStatusBadgeClass(p.status)" class="px-2.5 py-1 rounded-full text-[9px] font-bold uppercase border">
+                        {{ p.status }}
+                      </span>
+                    </td>
+                    <td class="py-4 px-4 text-right">
+                      <button (click)="openPatientEhr(p)" class="px-3 py-1.5 bg-slate-100 hover:bg-teal-600 hover:text-white text-slate-700 font-bold rounded-xl text-[10px] transition-all">
+                        View EHR
+                      </button>
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="5" class="py-14 text-center">
+                      <div class="text-xs text-slate-400">
+                        <div class="material-icons text-3xl text-slate-300 mb-2">{{ patientSearchQuery() ? 'search_off' : 'person_search' }}</div>
+                        @if (patientSearchQuery()) {
+                          <p class="font-semibold text-slate-500">No patients match “{{ patientSearchQuery() }}”</p>
+                          <p class="mt-1">Try a different name or MRN.</p>
+                        } @else if (store.currentUser()?.role === 'DOCTOR') {
+                          <p class="font-semibold text-slate-500">No patients assigned to you yet</p>
+                          <p class="mt-1">Patients you have an appointment with will appear here.</p>
+                        } @else {
+                          <p class="font-semibold text-slate-500">No patients in the registry yet</p>
+                          <p class="mt-1">Use “Register New Patient” to add the first record.</p>
+                        }
+                      </div>
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>

@@ -52,10 +52,16 @@ app.MapGet("/api/patients", async (PatientsDbContext db, HttpContext httpContext
         .AsNoTracking()
         .Include(patient => patient.InsuranceCompany);
 
+    // Doctors only see the patients they have an appointment with ("my patients").
+    // Every other role — receptionist, admin, nurse, billing, pharmacy, lab — gets
+    // the full registry so the front desk can book appointments for any patient.
     if (TryGetDoctorId(httpContext, out var doctorId))
     {
         query = query.Where(patient => db.Appointments.Any(appointment =>
-            appointment.PatientId == patient.Id && appointment.DoctorId == doctorId));
+            appointment.PatientId == patient.Id &&
+            appointment.DoctorId == doctorId &&
+            appointment.Status != "Cancelled" &&
+            appointment.Status != "No Show"));
     }
 
     var patients = await query
