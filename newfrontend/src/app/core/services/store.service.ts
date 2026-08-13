@@ -848,7 +848,15 @@ export class StoreService {
           this.addToast('success', 'Patient Registered', `${patient.name} registered successfully.`);
         }
       },
-      error: () => {
+      error: (err) => {
+        // Surface backend validation/message (e.g. duplicate phone or existing
+        // patient) instead of silently adding an offline copy. Only fall back to the
+        // in-memory record when the API is genuinely unreachable (network error).
+        const backendMessage = err?.error?.message || err?.error?.title;
+        if (err?.status && err.status >= 400 && err.status < 500 && backendMessage) {
+          this.addToast('error', 'Patient Not Registered', backendMessage);
+          return;
+        }
         // Fallback to in-memory
         const newId = 'p-' + Math.floor(100 + Math.random() * 900);
         const newMrn = 'MRN-' + Math.floor(10000 + Math.random() * 90000);

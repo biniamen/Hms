@@ -340,6 +340,27 @@ export class PatientsComponent {
     }
     const val = this.patientForm.value;
     const company = this.store.insuranceCompanies().find(item => item.id === val.insuranceCompanyId);
+
+    // Reject duplicate registrations before hitting the API: the same phone number,
+    // or the same patient (full name + date of birth) must not be registered twice.
+    const phone = (val.phone ?? '').trim();
+    const duplicateByPhone = this.store.patients().find(p => p.phone.trim().toLowerCase() === phone.toLowerCase());
+    if (duplicateByPhone) {
+      this.store.addToast('error', 'Patient Already Exists',
+        `A patient with phone number ${phone} is already registered (MRN ${duplicateByPhone.mrn}). Please use the existing record instead.`);
+      return;
+    }
+
+    const fullName = (val.name ?? '').trim().toLowerCase();
+    const duplicateByPatient = this.store.patients().find(p =>
+      p.name.trim().toLowerCase() === fullName && p.dob === (val.dob ?? '')
+    );
+    if (duplicateByPatient) {
+      this.store.addToast('error', 'Patient Already Exists',
+        `This patient is already registered (MRN ${duplicateByPatient.mrn}). Please use the existing record instead of registering again.`);
+      return;
+    }
+
     this.store.addPatient({
       name: val.name ?? '',
       firstName: (val.name ?? '').split(' ')[0],

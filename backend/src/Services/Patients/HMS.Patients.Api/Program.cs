@@ -159,6 +159,44 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, PatientsDbCont
         return Results.BadRequest(ApiResponse<object>.Fail("First name, last name, phone, and gender are required."));
     }
 
+    var phone = request.Phone.Trim();
+    var normalizedPhone = NormalizePhone(phone);
+    var existingByPhone = await db.Patients
+        .AsNoTracking()
+        .FirstOrDefaultAsync(patient => patient.Phone == phone);
+    if (existingByPhone is null)
+    {
+        // Catch formatting variants (spaces, dashes, punctuation) that the exact
+        // SQL match above cannot, by normalizing in memory.
+        var candidate = (await db.Patients.AsNoTracking()
+                .Select(patient => new { patient.Id, patient.Mrn, patient.FirstName, patient.LastName, patient.Phone })
+                .ToListAsync())
+            .FirstOrDefault(patient => NormalizePhone(patient.Phone) == normalizedPhone);
+        if (candidate is not null)
+        {
+            existingByPhone = await db.Patients.AsNoTracking().FirstAsync(patient => patient.Id == candidate.Id);
+        }
+    }
+    if (existingByPhone is not null)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail(
+            $"A patient with phone number {phone} is already registered (MRN {existingByPhone.Mrn}, {existingByPhone.FirstName} {existingByPhone.LastName}). Please use the existing record instead of registering a duplicate."));
+    }
+
+    var firstName = request.FirstName.Trim();
+    var lastName = request.LastName.Trim();
+    var existingByNameDob = await db.Patients
+        .AsNoTracking()
+        .FirstOrDefaultAsync(patient =>
+            patient.FirstName.ToLower() == firstName.ToLower() &&
+            patient.LastName.ToLower() == lastName.ToLower() &&
+            patient.DateOfBirth == request.DateOfBirth);
+    if (existingByNameDob is not null)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail(
+            $"This patient already exists (MRN {existingByNameDob.Mrn}, {existingByNameDob.FirstName} {existingByNameDob.LastName}). Please use the existing record instead of registering again."));
+    }
+
     var (photoContentType, photoData) = ParsePhoto(request.PhotoDataUrl);
     var patient = new Patient
     {
@@ -640,6 +678,9 @@ static string? CleanOrNull(string? value) =>
     string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 static string NormalizeCode(string value) => value.Trim().ToUpperInvariant().Replace(' ', '_');
+
+static string NormalizePhone(string? value) =>
+    new string((value ?? "").Where(char.IsDigit).ToArray());
 
 static async Task<Dictionary<Guid, string>> GetDoctorNameMapAsync(
     IHttpClientFactory httpClientFactory,
