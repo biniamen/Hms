@@ -126,6 +126,39 @@ export interface BackendBed {
   room: string;
   bedNumber: string;
   isAvailable: boolean;
+  category: string;
+  dailyRate: number;
+  currency: string;
+  currentAdmissionId?: string;
+  currentPatientId?: string;
+  currentPatientName?: string;
+  currentPatientMrn?: string;
+  admittedAtUtc?: string;
+}
+
+export interface BackendBedAdmission {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  bedId: string;
+  ward: string;
+  room: string;
+  bedNumber: string;
+  bedCategory: string;
+  dailyRate: number;
+  currency: string;
+  admittedAtUtc: string;
+  dischargedAtUtc?: string;
+  chargeableDays: number;
+  bedCharge: number;
+  status: string;
+  notes?: string;
+}
+
+export interface BackendBedDischarge {
+  bed: BackendBed;
+  admission: BackendBedAdmission;
 }
 
 export interface BackendDiagnosticTest {
@@ -406,6 +439,9 @@ export interface Patient {
   insurancePolicyNumber: string;
   insuranceCompanyName?: string;
   insuranceCompanyId?: string;
+  insuranceMemberType?: 'Employee' | 'Spouse' | 'Child' | 'Other';
+  principalMemberName?: string;
+  principalEmployeeId?: string;
   emergencyContact: {
     name: string;
     relation: string;
@@ -423,6 +459,18 @@ export interface Patient {
   photoDataUrl?: string;
   employerName?: string;
   occupation?: string;
+}
+
+export interface WardConfig {
+  id: string;
+  name: string;
+  code: string;
+  floor: string;
+  nurseStation: string;
+  category: 'Normal' | 'VIP' | 'VVIP' | string;
+  dailyRate: number;
+  currency: string;
+  isActive: boolean;
 }
 
 export type AppointmentStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
@@ -600,11 +648,36 @@ export interface Bed {
   wardName: string;
   bedNumber: string;
   type: string;
+  category: 'Normal' | 'VIP' | 'VVIP' | string;
+  dailyRate: number;
+  currency: string;
   isOccupied: boolean;
+  currentAdmissionId?: string;
   patientId?: string;
   patientName?: string;
   patientMrn?: string;
   admittedDate?: string;
+  admittedAtUtc?: string;
+}
+
+export interface BedAdmission {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  bedId: string;
+  wardName: string;
+  roomNumber: string;
+  bedNumber: string;
+  bedCategory: string;
+  dailyRate: number;
+  currency: string;
+  admittedAtUtc: string;
+  dischargedAtUtc?: string;
+  chargeableDays: number;
+  bedCharge: number;
+  status: 'Admitted' | 'Discharged' | string;
+  notes?: string;
 }
 
 export interface InsuranceClaim {
@@ -617,9 +690,47 @@ export interface InsuranceClaim {
   policyNumber: string;
   claimAmount: number;
   approvedAmount?: number;
-  status: 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED';
+  status: 'PREPARED' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'PAID';
   submittedDate: string;
   notes?: string;
+}
+
+export interface MedicalCertificate {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  doctorId: string;
+  doctorName: string;
+  reason: string;
+  diagnosis: string;
+  fitnessStatus: string;
+  startDate: string;
+  endDate: string;
+  restDays: number;
+  reviewDate?: string;
+  restrictions?: string;
+  approvedAt: string;
+}
+
+export interface ReferralRecord {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientMrn: string;
+  facilityName: string;
+  department: string;
+  consultant: string;
+  urgency: string;
+  reason: string;
+  clinicalSummary: string;
+  investigations: string;
+  treatmentGiven: string;
+  transportMode: string;
+  contactPhone: string;
+  createdAt: string;
+  approvedById: string;
+  approvedByName: string;
 }
 
 export interface ToastMessage {

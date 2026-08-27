@@ -289,22 +289,32 @@ app.MapGet("/api/clinical/lab-requests", async (
 
     if (isLabTechnician && !paymentSnapshot.Success)
     {
-        return Results.Problem(
-            detail: paymentSnapshot.Message,
-            statusCode: StatusCodes.Status503ServiceUnavailable,
-            title: "Billing verification unavailable");
+        var emergencyRequests = records
+            .Where(IsEmergencyLabRequest)
+            .Select(request => ToLabRequestDto(request) with { Status = "Requested" })
+            .ToList();
+
+        if (emergencyRequests.Count == 0)
+        {
+            return Results.Problem(
+                detail: paymentSnapshot.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Billing verification unavailable");
+        }
+
+        return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(emergencyRequests));
     }
 
     var visibleRecords = isLabTechnician
-        ? records.Where(request => paymentSnapshot.PaidLabRequestIds.Contains(request.Id))
+        ? records.Where(request => paymentSnapshot.PaidLabRequestIds.Contains(request.Id) || IsEmergencyLabRequest(request))
         : records;
 
     var labRequests = visibleRecords
         .Select(request =>
         {
             var dto = ToLabRequestDto(request);
-            return paymentSnapshot.PaidLabRequestIds.Contains(request.Id) &&
-                   request.Status.Equals("Awaiting Payment", StringComparison.OrdinalIgnoreCase)
+            var released = paymentSnapshot.PaidLabRequestIds.Contains(request.Id) || IsEmergencyLabRequest(request);
+            return released && request.Status.Equals("Awaiting Payment", StringComparison.OrdinalIgnoreCase)
                 ? dto with { Status = "Requested" }
                 : dto;
         })
@@ -363,6 +373,8 @@ app.MapPost("/api/clinical/lab-requests", async (
         return Results.BadRequest(ApiResponse<object>.Fail("All tests in one laboratory request must use the same currency."));
     }
 
+    var isEmergencyOrder = IsEmergencyText(request.Priority) || IsEmergencyText(request.Category) || IsEmergencyText(request.ClinicalNote);
+
     var labRequest = new LabRequest
     {
         Id = Guid.NewGuid(),
@@ -374,7 +386,7 @@ app.MapPost("/api/clinical/lab-requests", async (
         Priority = Clean(request.Priority, "Routine"),
         SpecimenType = Clean(request.SpecimenType, ""),
         ClinicalNote = Clean(request.ClinicalNote, ""),
-        Status = "Awaiting Payment",
+        Status = isEmergencyOrder ? "Requested" : "Awaiting Payment",
         OrderedAtUtc = DateTime.UtcNow,
         UpdatedAtUtc = DateTime.UtcNow
     };
@@ -422,9 +434,11 @@ app.MapPost("/api/clinical/lab-requests", async (
             title: "Laboratory invoice could not be created");
     }
 
-    var releaseMessage = coverage.HasInsurance
-        ? $"Lab request sent to Billing. It will be released to the laboratory as soon as the patient's copay is collected; the covered portion is settled through {coverage.Provider} by claim."
-        : "Lab request sent to Billing. It will be released to the laboratory after full payment.";
+    var releaseMessage = isEmergencyOrder
+        ? "Emergency diagnostic order released to the laboratory immediately. Charges remain on the patient account for final billing or insurance claim."
+        : coverage.HasInsurance
+            ? $"Lab request sent to Billing. It will be released to the laboratory as soon as the patient's copay is collected; the covered portion is settled through {coverage.Provider} by claim."
+            : "Lab request sent to Billing. It will be released to the laboratory after full payment.";
 
     return Results.Created($"/api/clinical/lab-requests/{labRequest.Id}", ApiResponse<LabRequestDto>.Ok(
         ToLabRequestDto(labRequest),
@@ -463,7 +477,7 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (
     }
 
     var paymentSnapshot = await GetLabPaymentSnapshotAsync(httpClientFactory, configuration, httpContext);
-    if (!paymentSnapshot.Success)
+    if (!paymentSnapshot.Success && !IsEmergencyLabRequest(labRequest))
     {
         return Results.Problem(
             detail: paymentSnapshot.Message,
@@ -471,7 +485,7 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (
             title: "Billing verification unavailable");
     }
 
-    if (!paymentSnapshot.PaidLabRequestIds.Contains(labRequest.Id))
+    if (!paymentSnapshot.PaidLabRequestIds.Contains(labRequest.Id) && !IsEmergencyLabRequest(labRequest))
     {
         return Results.Conflict(ApiResponse<object>.Fail(
             "Laboratory payment is not fully cleared. Results cannot be entered until the related invoice is paid."));
@@ -858,6 +872,24 @@ static async Task<PatientInsuranceSnapshot> GetPatientInsuranceAsync(
     }
 }
 
+static bool IsEmergencyLabRequest(LabRequest request) =>
+    IsEmergencyText(request.Priority) ||
+    IsEmergencyText(request.Category) ||
+    IsEmergencyText(request.ClinicalNote) ||
+    IsEmergencyText(request.TestName);
+
+static bool IsEmergencyText(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return false;
+    var text = value.Trim().ToLowerInvariant();
+    return text.Contains("emergency") ||
+        text.Contains("urgent") ||
+        text.Contains("critical") ||
+        text.Contains("trauma") ||
+        text.Contains("accident") ||
+        text.Contains("stat") ||
+        text.Contains("triage");
+}
 static string PatientsBaseUrl(IConfiguration configuration) =>
     Clean(configuration["Services:PatientsBaseUrl"], "http://localhost:5102").TrimEnd('/');
 

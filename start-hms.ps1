@@ -287,7 +287,7 @@ if (-not (Test-Path $ngCmd)) {
     Pop-Location
 }
 
-$frontendCommand = "`"$ngCmd`" serve --host 0.0.0.0 --port 4200 > `"$frontendOut`" 2> `"$frontendErr`""
+$frontendCommand = "`"$ngCmd`" serve --host localhost --port 4200 > `"$frontendOut`" 2> `"$frontendErr`""
 $frontendPsi = [System.Diagnostics.ProcessStartInfo]::new()
 $frontendPsi.FileName = $env:ComSpec
 $frontendPsi.WorkingDirectory = $frontend

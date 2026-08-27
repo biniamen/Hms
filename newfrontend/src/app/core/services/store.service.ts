@@ -3,13 +3,14 @@ import { Observable, tap } from 'rxjs';
 import { ApiService } from '../../api.service';
 import type {
   User, UserRole, Patient, Appointment, Prescription, LabOrder,
-  BillingInvoice, Department, Bed, InsuranceClaim, MedicalRecord,
+  BillingInvoice, Department, Bed, BedAdmission, InsuranceClaim, MedicalRecord,
   ToastMessage, VitalSigns, EnterpriseModule, DiagnosticTest, LabResultItem, ClinicalVitalEntry,
   ClinicalDiagnosis, BackendEmployee, BackendDoctorProfile,
   BackendPatient, BackendAppointment, BackendLabRequest,
-  BackendPrescription, BackendDepartment, BackendBed, BackendDiagnosticTest, BackendVitalSign, BackendDiagnosis,
+  BackendPrescription, BackendDepartment, BackendBed, BackendBedAdmission, BackendDiagnosticTest, BackendVitalSign, BackendDiagnosis,
   BackendInvoice, BackendInvoiceItem, BackendEnterpriseRecord,
   BackendClinicalEncounter, BackendInsuranceCompany, BackendQueueSummary,
+  WardConfig, MedicalCertificate, ReferralRecord,
 } from '../models';
 import { AVATARS } from '../models';
 
@@ -43,6 +44,7 @@ export class StoreService {
   readonly patients = signal<Patient[]>([]);
   readonly appointments = signal<Appointment[]>([]);
   readonly beds = signal<Bed[]>([]);
+  readonly bedAdmissions = signal<BedAdmission[]>([]);
   readonly departments = signal<Department[]>([]);
   readonly prescriptions = signal<Prescription[]>([]);
   readonly labOrders = signal<LabOrder[]>([]);
@@ -55,6 +57,10 @@ export class StoreService {
   readonly insuranceCompanies = signal<BackendInsuranceCompany[]>([]);
   readonly enterpriseRecords = signal<BackendEnterpriseRecord[]>([]);
   readonly queueSummary = signal<BackendQueueSummary[]>([]);
+  readonly wardConfigs = signal<WardConfig[]>(this.loadLocalArray<WardConfig>('hms.wardConfigs', this.defaultWardConfigs()));
+  readonly allClinicalHistoryPatients = signal<Patient[]>([]);
+  readonly medicalCertificates = signal<MedicalCertificate[]>(this.loadLocalArray<MedicalCertificate>('hms.medicalCertificates', []));
+  readonly referralRecords = signal<ReferralRecord[]>(this.loadLocalArray<ReferralRecord>('hms.referralRecords', []));
 
   // ── Employees as Users (for staff directory) ──
   readonly employeesAsUsers = computed<User[]>(() =>
@@ -112,7 +118,8 @@ export class StoreService {
     );
 
     return this.patients().filter(patient => {
-      if (!settledPatientIds.has(patient.id)) return false;
+      const hasEmergencyAccess = this.hasEmergencyClinicalAccess(patient.id, user);
+      if (!settledPatientIds.has(patient.id) && !hasEmergencyAccess) return false;
       if (user?.role === 'DOCTOR') {
         return this.appointments().some(appointment =>
           appointment.patientId === patient.id &&
@@ -127,8 +134,22 @@ export class StoreService {
           appointment.status !== 'NO_SHOW');
       }
       return true;
-    });
+    }).sort((left, right) => this.patientQueueRank(left.id, user) - this.patientQueueRank(right.id, user));
   });
+
+  readonly roleVisiblePatients = computed(() => {
+    const user = this.currentUser();
+    if (user?.role === 'DOCTOR') {
+      const assignedIds = new Set(this.clinicalWorklistPatients().map(patient => patient.id));
+      return this.patients().filter(patient => assignedIds.has(patient.id));
+    }
+    return this.patients();
+  });
+
+  readonly activeWardConfigs = computed(() =>
+    this.wardConfigs()
+      .filter(ward => ward.isActive)
+      .sort((left, right) => left.name.localeCompare(right.name)));
 
   // ── Enterprise Modules ──
   readonly enterpriseModules: EnterpriseModule[] = [
@@ -207,12 +228,17 @@ export class StoreService {
     this.clinicalDiagnoses.set([]);
     this.billingInvoices.set([]);
     this.beds.set([]);
+    this.bedAdmissions.set([]);
     this.departments.set([]);
     this.insuranceCompanies.set([]);
     this.enterpriseRecords.set([]);
     this.medicalRecords.set([]);
     this.insuranceClaims.set([]);
     this.queueSummary.set([]);
+    this.allClinicalHistoryPatients.set([]);
+    this.medicalCertificates.set(this.loadLocalArray<MedicalCertificate>('hms.medicalCertificates', []));
+    this.referralRecords.set(this.loadLocalArray<ReferralRecord>('hms.referralRecords', []));
+    this.wardConfigs.set(this.loadLocalArray<WardConfig>('hms.wardConfigs', this.defaultWardConfigs()));
     this.dataLoaded.set(false);
   }
 
@@ -298,6 +324,19 @@ export class StoreService {
     });
   }
 
+  loadClinicalHistoryPatients() {
+    this.api.getPatients(true).subscribe({
+      next: (r) => {
+        if (r.data) this.allClinicalHistoryPatients.set(r.data.map(p => this.mapBackendPatient(p)));
+      },
+      error: () => {
+        if (this.allClinicalHistoryPatients().length === 0) {
+          this.allClinicalHistoryPatients.set(this.patients());
+        }
+      },
+    });
+  }
+
   private callEndpoint(key: string) {
     const dec = () => {
       this.pending.update(p => p - 1);
@@ -328,7 +367,7 @@ export class StoreService {
         });
         break;
       case 'appointments':
-        this.api.getAppointments().subscribe({ next: (r) => { if (r.data) this.appointments.set(r.data.map(a => this.mapBackendAppointment(a))); dec(); }, error: dec });
+        this.api.getAppointments().subscribe({ next: (r) => { if (r.data) this.appointments.set(this.sortAppointmentsForQueue(r.data.map(a => this.mapBackendAppointment(a)))); dec(); }, error: dec });
         break;
       case 'departments':
         this.api.getDepartments().subscribe({ next: (r) => { if (r.data) this.departments.set(r.data.map(d => this.mapBackendDepartment(d))); dec(); }, error: dec });
@@ -337,7 +376,10 @@ export class StoreService {
         this.api.getInsuranceCompanies().subscribe({ next: (r) => { if (r.data) this.insuranceCompanies.set(r.data); dec(); }, error: dec });
         break;
       case 'beds':
-        this.api.getBeds().subscribe({ next: (r) => { if (r.data) this.beds.set(r.data.map(b => this.mapBackendBed(b))); dec(); }, error: dec });
+        this.api.getBeds().subscribe({ next: (r) => { if (r.data) { this.beds.set(r.data.map(b => this.mapBackendBed(b))); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
+        break;
+      case 'bedAdmissions':
+        this.api.getBedAdmissions().subscribe({ next: (r) => { if (r.data) this.bedAdmissions.set(r.data.map(a => this.mapBackendBedAdmission(a))); dec(); }, error: dec });
         break;
       case 'prescriptions':
         this.api.getPrescriptions().subscribe({ next: (r) => { if (r.data) this.prescriptions.set(r.data.map(p => this.mapBackendPrescription(p))); dec(); }, error: dec });
@@ -380,6 +422,7 @@ export class StoreService {
       || this.departments().length > 0
       || this.insuranceCompanies().length > 0
       || this.beds().length > 0
+      || this.bedAdmissions().length > 0
       || this.prescriptions().length > 0
       || this.labOrders().length > 0
       || this.diagnosticTests().length > 0
@@ -393,14 +436,14 @@ export class StoreService {
 
   private getEndpointsForRole(role: string): string[] {
     const roleEndpoints: Record<string, string[]> = {
-      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters', 'queue'],
-      DOCTOR: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters', 'queue'],
-      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'diagnosticTests', 'prescriptions', 'vitals', 'diagnoses', 'clinicalEncounters', 'queue'],
-      RECEPTIONIST: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'invoices', 'queue'],
+      ADMIN: ['employees', 'doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'bedAdmissions', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'invoices', 'enterpriseRecords', 'clinicalEncounters', 'queue'],
+      DOCTOR: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'bedAdmissions', 'invoices', 'diagnosticTests', 'prescriptions', 'labRequests', 'vitals', 'diagnoses', 'clinicalEncounters', 'queue'],
+      NURSE: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'invoices', 'beds', 'bedAdmissions', 'diagnosticTests', 'prescriptions', 'vitals', 'diagnoses', 'clinicalEncounters', 'queue'],
+      RECEPTIONIST: ['doctors', 'patients', 'appointments', 'departments', 'insuranceCompanies', 'beds', 'bedAdmissions', 'invoices', 'queue'],
       PHARMACIST: ['doctors', 'patients', 'appointments', 'prescriptions', 'enterpriseRecords'],
       LAB_TECHNICIAN: ['doctors', 'patients', 'appointments', 'diagnosticTests', 'labRequests', 'enterpriseRecords'],
-      ACCOUNTANT: ['patients', 'insuranceCompanies', 'invoices', 'enterpriseRecords'],
-      CASHIER: ['patients', 'insuranceCompanies', 'invoices'],
+      ACCOUNTANT: ['patients', 'insuranceCompanies', 'bedAdmissions', 'invoices', 'enterpriseRecords'],
+      CASHIER: ['patients', 'insuranceCompanies', 'bedAdmissions', 'invoices'],
       HR_MANAGER: ['employees', 'departments'],
     };
     return roleEndpoints[role] || ['doctors', 'patients', 'appointments'];
@@ -424,6 +467,8 @@ export class StoreService {
       insurancePolicyNumber: bp.insurancePolicyNumber || '',
       insuranceCompanyName: bp.insuranceCompanyName,
       insuranceCompanyId: bp.insuranceCompanyId,
+      insuranceMemberType: this.memberTypeFromPlan(bp.insurancePlan),
+      principalMemberName: this.principalNameFromPlan(bp.insurancePlan),
       emergencyContact: {
         name: bp.emergencyContactName || 'Not on file',
         relation: 'Emergency Contact',
@@ -444,6 +489,19 @@ export class StoreService {
     };
   }
 
+  private memberTypeFromPlan(plan?: string): Patient['insuranceMemberType'] {
+    const value = (plan || '').toLowerCase();
+    if (value.includes('spouse')) return 'Spouse';
+    if (value.includes('child')) return 'Child';
+    if (value.includes('employee')) return 'Employee';
+    return undefined;
+  }
+
+  private principalNameFromPlan(plan?: string): string | undefined {
+    const match = (plan || '').match(/of\s+(.+)$/i);
+    return match?.[1]?.trim() || undefined;
+  }
+
   private mapBackendAppointment(a: BackendAppointment): Appointment {
     const patient = this.patients().find(p => p.id === a.patientId);
     const employee = this.employees().find(e => e.id === a.doctorId);
@@ -459,13 +517,77 @@ export class StoreService {
       department: a.department,
       dateTime: a.startsAtUtc,
       timeSlot: timeStr,
-      status: a.queueStatus as Appointment['status'] || 'SCHEDULED',
-      type: a.appointmentType as Appointment['type'] || 'CONSULTATION',
+      status: this.mapAppointmentStatus(a.queueStatus || a.status),
+      type: this.mapAppointmentType(a.appointmentType || a.priority),
       reason: a.reason,
       notes: a.notes,
       queueNumber: a.queueNumber,
       waitingAhead: a.waitingAhead,
     };
+  }
+
+  private mapAppointmentStatus(status?: string): Appointment['status'] {
+    const value = (status || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+    if (value === 'completed') return 'COMPLETED';
+    if (value === 'cancelled' || value === 'canceled') return 'CANCELLED';
+    if (value === 'no show' || value === 'noshow') return 'NO_SHOW';
+    if (value === 'in service' || value === 'in progress') return 'IN_PROGRESS';
+    return 'SCHEDULED';
+  }
+
+  private mapAppointmentType(value?: string): Appointment['type'] {
+    const clean = (value || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+    if (clean.includes('emergency') || clean.includes('urgent') || clean.includes('critical') || clean.includes('trauma') || clean.includes('accident')) return 'EMERGENCY';
+    if (clean.includes('follow')) return 'FOLLOW_UP';
+    if (clean.includes('lab')) return 'LAB_TEST';
+    if (clean.includes('surgery')) return 'SURGERY';
+    return 'CONSULTATION';
+  }
+
+  private appointmentStatusToBackend(status: string): string {
+    switch ((status || '').toUpperCase()) {
+      case 'IN_PROGRESS': return 'In Service';
+      case 'COMPLETED': return 'Completed';
+      case 'CANCELLED': return 'Cancelled';
+      case 'NO_SHOW': return 'No Show';
+      default: return 'Waiting';
+    }
+  }
+
+  private sortAppointmentsForQueue(appointments: Appointment[]): Appointment[] {
+    return [...appointments].sort((left, right) =>
+      this.appointmentQueueRank(left) - this.appointmentQueueRank(right) ||
+      (left.queueNumber || 9999) - (right.queueNumber || 9999) ||
+      new Date(left.dateTime || 0).getTime() - new Date(right.dateTime || 0).getTime());
+  }
+
+  private appointmentQueueRank(appointment: Appointment): number {
+    const typeRank = appointment.type === 'EMERGENCY' ? 0 : 10;
+    const statusRank =
+      appointment.status === 'IN_PROGRESS' ? 0 :
+      appointment.status === 'SCHEDULED' ? 1 :
+      appointment.status === 'COMPLETED' ? 20 :
+      30;
+    return typeRank + statusRank;
+  }
+
+  private hasEmergencyClinicalAccess(patientId: string, user: User | null): boolean {
+    return this.appointments().some(appointment => {
+      if (appointment.patientId !== patientId || appointment.type !== 'EMERGENCY') return false;
+      if (appointment.status === 'COMPLETED' || appointment.status === 'CANCELLED' || appointment.status === 'NO_SHOW') return false;
+      if (user?.role === 'DOCTOR') return appointment.doctorId === user.id;
+      return true;
+    });
+  }
+
+  private patientQueueRank(patientId: string, user: User | null): number {
+    const appointment = this.sortAppointmentsForQueue(this.appointments().filter(item => {
+      if (item.patientId !== patientId) return false;
+      if (user?.role === 'DOCTOR' && item.doctorId !== user.id) return false;
+      if (item.status === 'CANCELLED' || item.status === 'NO_SHOW') return false;
+      return true;
+    }))[0];
+    return appointment ? this.appointmentQueueRank(appointment) * 10000 + (appointment.queueNumber || 9999) : 999999;
   }
 
   private mapBackendDepartment(d: BackendDepartment): Department {
@@ -490,8 +612,39 @@ export class StoreService {
       roomNumber: b.room,
       wardName: b.ward,
       bedNumber: b.bedNumber,
-      type: 'Standard',
+      type: b.category || 'Normal',
+      category: b.category || 'Normal',
+      dailyRate: b.dailyRate || 0,
+      currency: b.currency || 'ETB',
       isOccupied: !b.isAvailable,
+      currentAdmissionId: b.currentAdmissionId,
+      patientId: b.currentPatientId,
+      patientName: b.currentPatientName,
+      patientMrn: b.currentPatientMrn,
+      admittedAtUtc: b.admittedAtUtc,
+      admittedDate: b.admittedAtUtc ? new Date(b.admittedAtUtc).toISOString().split('T')[0] : undefined,
+    };
+  }
+
+  private mapBackendBedAdmission(a: BackendBedAdmission): BedAdmission {
+    return {
+      id: a.id,
+      patientId: a.patientId,
+      patientName: a.patientName,
+      patientMrn: a.patientMrn,
+      bedId: a.bedId,
+      wardName: a.ward,
+      roomNumber: a.room,
+      bedNumber: a.bedNumber,
+      bedCategory: a.bedCategory,
+      dailyRate: a.dailyRate || 0,
+      currency: a.currency || 'ETB',
+      admittedAtUtc: a.admittedAtUtc,
+      dischargedAtUtc: a.dischargedAtUtc,
+      chargeableDays: a.chargeableDays || 0,
+      bedCharge: a.bedCharge || 0,
+      status: a.status,
+      notes: a.notes,
     };
   }
 
@@ -647,9 +800,11 @@ export class StoreService {
         description: item.description,
         category: item.referenceType?.toUpperCase() === 'LAB_REQUEST'
           ? 'Laboratory' as const
-          : item.referenceType?.toUpperCase() === 'DOCTOR'
-            ? 'Consultation' as const
-            : 'Procedure' as const,
+          : item.referenceType?.toUpperCase() === 'BED_ADMISSION'
+            ? 'Room Charge' as const
+            : item.referenceType?.toUpperCase() === 'DOCTOR'
+              ? 'Consultation' as const
+              : 'Procedure' as const,
         amount: item.lineTotal,
         referenceType: item.referenceType,
         referenceId: item.referenceId,
@@ -693,6 +848,10 @@ export class StoreService {
 
   patientHasClinicalPayment(patientId: string): boolean {
     return this.billingInvoices().some(invoice => invoice.patientId === patientId && this.invoiceClearsClinicalAccess(invoice));
+  }
+
+  patientHasEmergencyAppointment(patientId: string): boolean {
+    return this.hasEmergencyClinicalAccess(patientId, this.currentUser());
   }
 
   private defaultSpecializationsForDepartment(departmentName: string): string[] {
@@ -796,6 +955,29 @@ export class StoreService {
       patientName: this.patientDisplayName(item.patientId),
       doctorName: this.doctorDisplayName(item.doctorId),
     })));
+    this.syncPatientAdmissions();
+  }
+
+  private syncPatientAdmissions() {
+    const occupiedByPatient = new Map(this.beds()
+      .filter(bed => bed.isOccupied && bed.patientId)
+      .map(bed => [bed.patientId!, bed]));
+
+    this.patients.update(items => items.map(patient => {
+      const bed = occupiedByPatient.get(patient.id);
+      if (!bed) {
+        return patient.assignedBedNumber
+          ? { ...patient, status: 'OUTPATIENT' as const, assignedBedNumber: undefined, assignedWard: undefined }
+          : patient;
+      }
+
+      return {
+        ...patient,
+        status: 'ADMITTED' as const,
+        assignedBedNumber: bed.bedNumber,
+        assignedWard: bed.wardName,
+      };
+    }));
   }
 
   employeeById(id: string): BackendEmployee | undefined {
@@ -835,6 +1017,11 @@ export class StoreService {
       address: patient.address,
       bloodType: patient.bloodType,
       insuranceCompanyId: patient.insuranceCompanyId || undefined,
+      employerName: patient.employerName || undefined,
+      occupation: patient.occupation || undefined,
+      insurancePlan: patient.insuranceMemberType
+        ? `${patient.insuranceMemberType}${patient.principalMemberName ? ` of ${patient.principalMemberName}` : ''}`
+        : undefined,
       insuranceProvider: patient.insuranceProvider || undefined,
       insurancePolicyNumber: patient.insurancePolicyNumber || undefined,
       emergencyContactName: patient.emergencyContact?.name || undefined,
@@ -880,15 +1067,20 @@ export class StoreService {
       reason: apt.reason,
       department: apt.department,
       appointmentType: apt.type,
-      priority: 'Normal',
+      priority: apt.type === 'EMERGENCY' ? 'Emergency' : 'Normal',
     };
     this.api.createAppointment(payload).subscribe({
       next: (res) => {
         if (res.data) {
           const mapped = this.mapBackendAppointment(res.data);
-          this.appointments.update(current => [mapped, ...current]);
+          this.appointments.update(current => this.sortAppointmentsForQueue([mapped, ...current]));
+          this.refreshQueueSummary();
           this.createAppointmentConsultationInvoice(mapped);
-          this.addToast('success', 'Appointment Booked', `Scheduled for ${apt.patientName}.`);
+          if (mapped.type === 'EMERGENCY') {
+            this.addToast('success', 'Emergency Queued', `${apt.patientName} was routed to the assigned doctor before payment clearance. The consultation charge was posted for final billing.`);
+          } else {
+            this.addToast('success', 'Appointment Booked', `Scheduled for ${apt.patientName}.`);
+          }
         }
       },
       error: () => {
@@ -914,7 +1106,8 @@ export class StoreService {
       || company?.name
       || '';
 
-    const isInsured = !!patient.insuranceCompanyId || !!provider;
+    const spouseNotCovered = patient.insuranceMemberType === 'Spouse' && company && !company.spouseCoverageAllowed;
+    const isInsured = (!!patient.insuranceCompanyId || !!provider) && !spouseNotCovered;
     return {
       isInsured,
       provider: company?.name || patient.insuranceCompanyName || (!selfPay ? patient.insuranceProvider || '' : '') || '',
@@ -953,14 +1146,27 @@ export class StoreService {
   }
 
   updateAppointmentStatus(id: string, status: string) {
-    this.api.updateAppointmentStatus(id, status).subscribe({
-      next: () => {
+    const backendStatus = this.appointmentStatusToBackend(status);
+    this.api.updateAppointmentStatus(id, backendStatus).subscribe({
+      next: (res) => {
         this.appointments.update(current =>
-          current.map(a => a.id === id ? { ...a, status: status as any } : a)
+          this.sortAppointmentsForQueue(current.map(a => a.id === id
+            ? (res.data ? this.mapBackendAppointment(res.data) : { ...a, status: this.mapAppointmentStatus(backendStatus) })
+            : a))
         );
+        this.refreshQueueSummary();
         this.addToast('info', 'Status Updated', `Appointment marked as ${status}.`);
       },
       error: () => this.addToast('info', 'Status Updated', `Appointment status updated (offline mode).`),
+    });
+  }
+
+  private refreshQueueSummary() {
+    this.api.getQueueSummary().subscribe({
+      next: response => {
+        if (response.data) this.queueSummary.set(response.data);
+      },
+      error: () => {},
     });
   }
 
@@ -1004,11 +1210,15 @@ export class StoreService {
       specimenType: lab.specimenType,
       clinicalNote: lab.clinicalNote,
     };
+    const emergencyOrder = (payload.priority || '').toLowerCase().includes('emergency');
     this.api.createLabRequest(payload).subscribe({
       next: (res) => {
         if (res.data) {
           this.labOrders.update(current => [this.mapBackendLabRequest(res.data), ...current]);
-          this.addToast('success', 'Sent to Billing', `${lab.testName} was invoiced for ${lab.patientName}. The laboratory will receive it after full payment.`);
+          const message = emergencyOrder
+            ? `${lab.testName} was released to the laboratory immediately and invoiced for final settlement.`
+            : `${lab.testName} was invoiced for ${lab.patientName}. The laboratory will receive it after payment clearance.`;
+          this.addToast('success', emergencyOrder ? 'Emergency Diagnostic Released' : 'Sent to Billing', message);
         }
       },
       error: (error) => this.addToast(
@@ -1082,7 +1292,7 @@ export class StoreService {
     });
   }
 
-  createBed(payload: { ward: string; room: string; bedNumber: string; isAvailable: boolean }) {
+  createBed(payload: { ward: string; room: string; bedNumber: string; isAvailable: boolean; category: string; dailyRate: number; currency: string }) {
     this.api.createBed(payload).subscribe({
       next: (res) => {
         if (res.data) {
@@ -1100,6 +1310,7 @@ export class StoreService {
         if (res.data) {
           const mapped = this.mapBackendBed(res.data);
           this.beds.update(current => current.map(bed => bed.id === id ? { ...bed, ...mapped } : bed));
+          this.refreshResolvedDisplayValues();
           this.addToast('success', isAvailable ? 'Bed Released' : 'Bed Assigned', isAvailable ? 'The bed is now available.' : 'The bed is now marked occupied.');
         }
       },
@@ -1107,6 +1318,71 @@ export class StoreService {
     });
   }
 
+  assignBedToPatient(bed: Bed, patientId: string, notes?: string) {
+    this.api.assignBed(bed.id, patientId, notes).subscribe({
+      next: (res) => {
+        if (!res.data) return;
+        const admission = this.mapBackendBedAdmission(res.data);
+        this.bedAdmissions.update(current => [admission, ...current.filter(item => item.id !== admission.id)]);
+        this.beds.update(current => current.map(item => item.id === bed.id ? {
+          ...item,
+          isOccupied: true,
+          currentAdmissionId: admission.id,
+          patientId: admission.patientId,
+          patientName: admission.patientName,
+          patientMrn: admission.patientMrn,
+          admittedAtUtc: admission.admittedAtUtc,
+          admittedDate: new Date(admission.admittedAtUtc).toISOString().split('T')[0],
+        } : item));
+        this.refreshResolvedDisplayValues();
+        this.addToast('success', 'Admission Saved', `${admission.patientName} admitted to ${admission.wardName} bed ${admission.bedNumber}.`);
+      },
+      error: (error) => this.addToast('error', 'Admission Failed', error?.error?.message || 'Unable to assign this bed. Please confirm the patient is not already admitted.'),
+    });
+  }
+
+  dischargeBedAndInvoice(bed: Bed, notes?: string) {
+    this.api.dischargeBed(bed.id, notes).subscribe({
+      next: (res) => {
+        if (!res.data) return;
+        const mappedBed = this.mapBackendBed(res.data.bed);
+        const admission = this.mapBackendBedAdmission(res.data.admission);
+        this.beds.update(current => current.map(item => item.id === bed.id ? mappedBed : item));
+        this.bedAdmissions.update(current => [admission, ...current.filter(item => item.id !== admission.id)]);
+        this.patients.update(current => current.map(patient => patient.id === admission.patientId ? {
+          ...patient,
+          status: 'DISCHARGED' as const,
+          assignedBedNumber: undefined,
+          assignedWard: undefined,
+        } : patient));
+
+        if (admission.bedCharge > 0) {
+          this.addBillingInvoice({
+            patientId: admission.patientId,
+            patientName: admission.patientName,
+            patientMrn: admission.patientMrn,
+            dueDate: new Date().toISOString().split('T')[0],
+            items: [{
+              id: `BED-${admission.id.slice(0, 8)}`,
+              serviceCode: 'BED-STAY',
+              description: `${admission.wardName} bed ${admission.bedNumber} (${admission.bedCategory}) - ${admission.chargeableDays} day(s) x ${admission.dailyRate.toFixed(2)} ${admission.currency}`,
+              category: 'Room Charge',
+              amount: admission.bedCharge,
+              referenceType: 'BED_ADMISSION',
+              referenceId: admission.id,
+            }],
+            totalAmount: admission.bedCharge,
+            insuranceCoveredAmount: 0,
+            paymentType: this.insuranceCoverageFor(admission.patientId).isInsured ? 'INSURANCE' : 'CASH',
+            insuranceProvider: this.insuranceCoverageFor(admission.patientId).provider || undefined,
+          });
+        }
+
+        this.addToast('success', 'Discharge Completed', `${admission.patientName} discharged. Bed charge: ${admission.currency} ${admission.bedCharge.toFixed(2)}.`);
+      },
+      error: (error) => this.addToast('error', 'Discharge Failed', error?.error?.message || 'Unable to discharge this patient from the bed.'),
+    });
+  }
   addClinicalEncounter(payload: {
     patientId: string;
     patientName: string;
@@ -1350,12 +1626,15 @@ export class StoreService {
   }
 
   addBillingInvoice(inv: Omit<BillingInvoice, 'id' | 'invoiceNumber' | 'date' | 'status' | 'patientPaidAmount'>) {
-    const items = inv.items.map(item => ({
-      serviceCode: item.id || 'SVC-001',
+        const items = inv.items.map(item => ({
+      serviceCode: item.serviceCode || item.id || 'SVC-001',
       description: item.description,
       quantity: 1,
       unitPrice: item.amount,
       discount: 0,
+      referenceType: item.referenceType,
+      referenceId: item.referenceId,
+      serviceDateUtc: new Date().toISOString(),
     }));
     const coverage = this.insuranceCoverageFor(inv.patientId);
     const payload = {
@@ -1372,7 +1651,7 @@ export class StoreService {
       next: (res) => {
         if (res.data) {
           this.billingInvoices.update(current => [this.mapBackendInvoice(res.data), ...current]);
-          this.addToast('success', 'Invoice Generated', `Invoice created for $${inv.totalAmount}.`);
+          this.addToast('success', 'Invoice Generated', `Invoice created for ETB ${inv.totalAmount}.`);
         }
       },
       error: () => this.addToast('success', 'Invoice Generated', `Invoice created (offline mode).`),
@@ -1394,6 +1673,9 @@ export class StoreService {
               : newPaid > 0
                 ? 'PARTIALLY_PAID'
                 : 'UNPAID';
+            if ((paymentMethod || '').toLowerCase().includes('insurance') && newPaid >= inv.totalAmount) {
+              this.markInsuranceClaimPaid(inv.id, amount);
+            }
             return { ...inv, patientPaidAmount: newPaid, status, paymentMethod: paymentMethod as any };
           }
           return inv;
@@ -1413,27 +1695,34 @@ export class StoreService {
             if (res.data) {
               const mapped = this.mapBackendInvoice(res.data);
               this.billingInvoices.update(current => current.map(inv => inv.id === id ? mapped : inv));
+              if ((paymentMethod || '').toLowerCase().includes('insurance') && mapped.status === 'PAID') {
+                this.markInsuranceClaimPaid(id, amount);
+              }
             } else {
               applyLocalPayment();
             }
-            this.addToast('success', 'Payment Processed', `$${amount} payment recorded.`);
+            this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded.`);
           },
           error: () => {
             applyLocalPayment();
-            this.addToast('success', 'Payment Processed', `$${amount} payment recorded.`);
+            this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded.`);
           },
         });
       },
       error: () => {
         applyLocalPayment();
-        this.addToast('success', 'Payment Processed', `$${amount} payment recorded (offline mode).`);
+        this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded (offline mode).`);
       },
     });
   }
 
-  submitInsuranceClaim(invoiceId: string) {
+  prepareInsuranceClaim(invoiceId: string) {
     const inv = this.billingInvoices().find(i => i.id === invoiceId);
     if (!inv) return;
+    if (this.claimForInvoice(invoiceId)) {
+      this.addToast('info', 'Claim Already Prepared', 'This invoice is already in the insurance claim report.');
+      return;
+    }
     const patient = this.patients().find(p => p.id === inv.patientId);
     const coverage = this.insuranceCoverageFor(inv.patientId);
     const claimAmount = inv.insuranceCoveredAmount > 0
@@ -1448,14 +1737,46 @@ export class StoreService {
       provider: coverage.provider || patient?.insuranceProvider || 'Primary Insurance',
       policyNumber: coverage.policyNumber || patient?.insurancePolicyNumber || 'POL-9921',
       claimAmount,
-      status: 'SUBMITTED',
+      status: 'PREPARED',
       submittedDate: new Date().toISOString().split('T')[0],
+      notes: `Prepared from invoice ${inv.invoiceNumber}. Patient portion and insurance portion are managed separately.`,
     };
     this.insuranceClaims.update(current => [newClaim, ...current]);
     this.billingInvoices.update(current =>
       current.map(i => i.id === invoiceId ? { ...i, status: 'INSURANCE_PENDING' as const } : i)
     );
-    this.addToast('info', 'Claim Submitted', `Claim sent to ${newClaim.provider}.`);
+    this.addToast('info', 'Claim Prepared', `Claim prepared for ${newClaim.provider}.`);
+  }
+
+  submitInsuranceClaim(invoiceId: string) {
+    const claim = this.claimForInvoice(invoiceId);
+    if (!claim) {
+      this.prepareInsuranceClaim(invoiceId);
+      return;
+    }
+    this.insuranceClaims.update(current => {
+      const updated = current.map(item => item.id === claim.id ? {
+        ...item,
+        status: 'SUBMITTED' as const,
+        submittedDate: new Date().toISOString().split('T')[0],
+      } : item);
+      return updated;
+    });
+    this.billingInvoices.update(current =>
+      current.map(i => i.id === invoiceId ? { ...i, status: 'INSURANCE_PENDING' as const } : i)
+    );
+    this.addToast('success', 'Claim Sent', `Claim ${claim.claimNumber} was sent to ${claim.provider}.`);
+  }
+
+  private markInsuranceClaimPaid(invoiceId: string, paidAmount: number) {
+    this.insuranceClaims.update(current =>
+      current.map(item => item.invoiceId === invoiceId ? {
+        ...item,
+        status: 'PAID' as const,
+        approvedAmount: item.approvedAmount || paidAmount,
+        notes: `Insurance remittance collected on ${new Date().toISOString().split('T')[0]}.`,
+      } : item)
+    );
   }
 
   createEnterpriseRecord(payload: Record<string, unknown>): Observable<any> {
@@ -1470,9 +1791,97 @@ export class StoreService {
     return this.api.startService(id);
   }
 
+  addWardConfig(payload: Omit<WardConfig, 'id' | 'isActive'>) {
+    const ward: WardConfig = {
+      ...payload,
+      id: `ward-${Date.now()}`,
+      currency: payload.currency || 'ETB',
+      isActive: true,
+    };
+    this.wardConfigs.update(current => {
+      const updated = [ward, ...current.filter(item => item.name.toLowerCase() !== ward.name.toLowerCase())];
+      this.saveLocalArray('hms.wardConfigs', updated);
+      return updated;
+    });
+    this.addToast('success', 'Ward Saved', `${ward.name} is ready for bed assignment.`);
+  }
+
+  saveMedicalCertificate(payload: Omit<MedicalCertificate, 'id' | 'approvedAt'>): MedicalCertificate {
+    const certificate: MedicalCertificate = {
+      ...payload,
+      id: `MC-${Date.now()}`,
+      approvedAt: new Date().toISOString(),
+    };
+    this.medicalCertificates.update(current => {
+      const updated = [certificate, ...current];
+      this.saveLocalArray('hms.medicalCertificates', updated);
+      return updated;
+    });
+    return certificate;
+  }
+
+  certificatesForPatient(patientId: string): MedicalCertificate[] {
+    return this.medicalCertificates()
+      .filter(item => item.patientId === patientId)
+      .sort((a, b) => b.approvedAt.localeCompare(a.approvedAt));
+  }
+
+  saveReferralRecord(payload: Omit<ReferralRecord, 'id' | 'createdAt'>): ReferralRecord {
+    const record: ReferralRecord = {
+      ...payload,
+      id: `REF-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.referralRecords.update(current => {
+      const updated = [record, ...current];
+      this.saveLocalArray('hms.referralRecords', updated);
+      return updated;
+    });
+    return record;
+  }
+
+  referralsForPatient(patientId: string): ReferralRecord[] {
+    return this.referralRecords()
+      .filter(item => item.patientId === patientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  claimForInvoice(invoiceId: string): InsuranceClaim | undefined {
+    return this.insuranceClaims().find(claim => claim.invoiceId === invoiceId);
+  }
+
+  private loadLocalArray<T>(key: string, fallback: T[]): T[] {
+    try {
+      if (typeof localStorage === 'undefined') return fallback;
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed as T[] : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private saveLocalArray<T>(key: string, value: T[]) {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+    }
+  }
+
+  private defaultWardConfigs(): WardConfig[] {
+    return [
+      { id: 'ward-emergency', name: 'Emergency Ward', code: 'ER', floor: 'Ground', nurseStation: 'ER Desk', category: 'VIP', dailyRate: 1800, currency: 'ETB', isActive: true },
+      { id: 'ward-medical', name: 'Medical Ward', code: 'MED', floor: 'First', nurseStation: 'Station A', category: 'Normal', dailyRate: 1200, currency: 'ETB', isActive: true },
+      { id: 'ward-surgical', name: 'Surgical Ward', code: 'SUR', floor: 'Second', nurseStation: 'Station B', category: 'VIP', dailyRate: 2200, currency: 'ETB', isActive: true },
+      { id: 'ward-private', name: 'Private Ward', code: 'PRV', floor: 'Third', nurseStation: 'Station C', category: 'VVIP', dailyRate: 3500, currency: 'ETB', isActive: true },
+    ];
+  }
+
   // ── Utils ──
   money(value: number): string {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'ETB' }).format(value);
   }
 
   cell(value: unknown): string {

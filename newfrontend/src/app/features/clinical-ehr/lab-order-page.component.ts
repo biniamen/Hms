@@ -305,6 +305,7 @@ export class LabOrderPageComponent {
     const value = this.labForm.getRawValue();
     const patient = this.requirePatient(value.patientId);
     if (!patient) return;
+    const emergencyOrder = this.store.patientHasEmergencyAppointment(patient.id);
     this.store.addLabOrder({
       patientId: patient.id,
       patientName: patient.name,
@@ -314,9 +315,10 @@ export class LabOrderPageComponent {
       testName: selectedTests.map(test => test.testName).join(', '),
       testCatalogIds: selectedTests.map(test => test.id),
       category: selectedTests[0]?.groupName || value.category || 'Biochemistry',
-      priority: value.priority || 'Routine',
+      priority: emergencyOrder ? 'Emergency' : value.priority || 'Routine',
       specimenType: value.specimenType || selectedTests[0]?.specimenType || 'Whole blood',
       clinicalNote: [
+        emergencyOrder ? 'Emergency workflow: diagnostic service released before payment clearance.' : '',
         value.clinicalNote || '',
         `Requested panels: ${selectedTests.map(test => `${test.groupName}/${test.subGroup}/${test.testName}`).join('; ')}`
       ].filter(Boolean).join('\n'),

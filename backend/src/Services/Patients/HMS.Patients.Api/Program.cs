@@ -46,7 +46,7 @@ await EnsureRabbitMqAsync(app.Configuration);
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patient-management", status = "healthy" })));
 
-app.MapGet("/api/patients", async (PatientsDbContext db, HttpContext httpContext) =>
+app.MapGet("/api/patients", async (bool history, PatientsDbContext db, HttpContext httpContext) =>
 {
     IQueryable<Patient> query = db.Patients
         .AsNoTracking()
@@ -55,7 +55,7 @@ app.MapGet("/api/patients", async (PatientsDbContext db, HttpContext httpContext
     // Doctors only see the patients they have an appointment with ("my patients").
     // Every other role — receptionist, admin, nurse, billing, pharmacy, lab — gets
     // the full registry so the front desk can book appointments for any patient.
-    if (TryGetDoctorId(httpContext, out var doctorId))
+    if (!history && TryGetDoctorId(httpContext, out var doctorId))
     {
         query = query.Where(patient => db.Appointments.Any(appointment =>
             appointment.PatientId == patient.Id &&
@@ -300,9 +300,7 @@ app.MapGet("/api/appointments", async (PatientsDbContext db, HttpContext httpCon
         query = query.Where(appointment => appointment.DoctorId == doctorId);
     }
 
-    var appointments = await query
-        .OrderByDescending(appointment => appointment.StartsAtUtc)
-        .ToListAsync();
+    var appointments = await query.ToListAsync();
 
     return Results.Ok(ApiResponse<IEnumerable<AppointmentDto>>.Ok(ToAppointmentDtos(appointments)));
 });
@@ -361,17 +359,24 @@ app.MapPost("/api/appointments", async (CreateAppointmentRequest request, Patien
         return Results.BadRequest(ApiResponse<object>.Fail("Selected patient does not exist."));
     }
 
+    var department = Clean(request.Department, "Outpatient");
+    var appointmentType = NormalizeAppointmentType(request.AppointmentType);
+    var isEmergency = IsEmergencyText(appointmentType) ||
+        IsEmergencyText(request.Priority) ||
+        IsEmergencyText(department) ||
+        IsEmergencyText(request.Reason);
+
     var appointment = new Appointment
     {
         Id = Guid.NewGuid(),
         PatientId = request.PatientId,
         DoctorId = request.DoctorId,
-        StartsAtUtc = ToUtc(request.StartsAtUtc),
+        StartsAtUtc = isEmergency ? DateTime.UtcNow : ToUtc(request.StartsAtUtc),
         Status = "Waiting",
         Reason = request.Reason.Trim(),
-        Department = Clean(request.Department, "Outpatient"),
-        AppointmentType = Clean(request.AppointmentType, "Consultation"),
-        Priority = Clean(request.Priority, "Normal"),
+        Department = department,
+        AppointmentType = isEmergency ? "Emergency" : appointmentType,
+        Priority = isEmergency ? "Emergency" : NormalizePriority(request.Priority),
         Notes = CleanOrNull(request.Notes),
         CreatedAtUtc = DateTime.UtcNow
     };
@@ -416,21 +421,47 @@ app.MapGet("/api/beds", async (PatientsDbContext db) =>
         .OrderBy(bed => bed.Ward)
         .ThenBy(bed => bed.Room)
         .ThenBy(bed => bed.BedNumber)
-        .Select(bed => new BedDto(bed.Id, bed.Ward, bed.Room, bed.BedNumber, bed.IsAvailable))
         .ToListAsync();
 
-    return Results.Ok(ApiResponse<IEnumerable<BedDto>>.Ok(beds));
+    return Results.Ok(ApiResponse<IEnumerable<BedDto>>.Ok(beds.Select(ToBedDto)));
 });
 
+app.MapGet("/api/bed-admissions", async (bool activeOnly, PatientsDbContext db) =>
+{
+    var query = db.BedAdmissions.AsNoTracking();
+    if (activeOnly)
+    {
+        query = query.Where(admission => admission.Status == "Admitted");
+    }
+
+    var admissions = await query
+        .OrderByDescending(admission => admission.AdmittedAtUtc)
+        .ThenBy(admission => admission.PatientMrn)
+        .ToListAsync();
+
+    return Results.Ok(ApiResponse<IEnumerable<BedAdmissionDto>>.Ok(admissions.Select(ToBedAdmissionDto)));
+});
 app.MapPost("/api/beds", async (CreateBedRequest request, PatientsDbContext db) =>
 {
     var ward = Clean(request.Ward, "");
     var room = Clean(request.Room, "");
     var bedNumber = Clean(request.BedNumber, "");
+    var category = NormalizeBedCategory(request.Category);
+    var currency = Clean(request.Currency, "ETB").ToUpperInvariant();
 
     if (string.IsNullOrWhiteSpace(ward) || string.IsNullOrWhiteSpace(room) || string.IsNullOrWhiteSpace(bedNumber))
     {
         return Results.BadRequest(ApiResponse<object>.Fail("Ward, room, and bed number are required."));
+    }
+
+    if (request.DailyRate <= 0)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Daily bed rate must be greater than zero."));
+    }
+
+    if (currency.Length != 3)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Currency must be a three-letter code such as ETB."));
     }
 
     if (await db.Beds.AnyAsync(item => item.BedNumber == bedNumber))
@@ -444,6 +475,9 @@ app.MapPost("/api/beds", async (CreateBedRequest request, PatientsDbContext db) 
         Ward = ward,
         Room = room,
         BedNumber = bedNumber,
+        Category = category,
+        DailyRate = request.DailyRate,
+        Currency = currency,
         IsAvailable = request.IsAvailable,
         CreatedAtUtc = DateTime.UtcNow
     };
@@ -463,9 +497,130 @@ app.MapPut("/api/beds/{id:guid}/status", async (Guid id, BedStatusUpdateRequest 
     }
 
     bed.IsAvailable = request.IsAvailable;
+    if (request.IsAvailable)
+    {
+        bed.CurrentAdmissionId = null;
+        bed.CurrentPatientId = null;
+        bed.CurrentPatientName = null;
+        bed.CurrentPatientMrn = null;
+        bed.AdmittedAtUtc = null;
+    }
+
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<BedDto>.Ok(ToBedDto(bed), request.IsAvailable ? "Bed released." : "Bed assigned."));
+});
+
+app.MapPost("/api/beds/{id:guid}/assign", async (Guid id, AssignBedRequest request, PatientsDbContext db) =>
+{
+    if (request.PatientId == Guid.Empty)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Patient is required for admission."));
+    }
+
+    var bed = await db.Beds.FirstOrDefaultAsync(item => item.Id == id);
+    if (bed is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Bed not found."));
+    }
+
+    if (!bed.IsAvailable || bed.CurrentPatientId is not null)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("This bed is already occupied."));
+    }
+
+    var patient = await db.Patients.AsNoTracking().FirstOrDefaultAsync(item => item.Id == request.PatientId);
+    if (patient is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Patient not found."));
+    }
+
+    var hasActiveAdmission = await db.BedAdmissions.AnyAsync(admission =>
+        admission.PatientId == patient.Id && admission.Status == "Admitted");
+    if (hasActiveAdmission)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("This patient already has an active bed admission."));
+    }
+
+    var admittedAtUtc = DateTime.UtcNow;
+    var admission = new BedAdmission
+    {
+        Id = Guid.NewGuid(),
+        PatientId = patient.Id,
+        PatientName = $"{patient.FirstName} {patient.LastName}",
+        PatientMrn = patient.Mrn,
+        BedId = bed.Id,
+        Ward = bed.Ward,
+        Room = bed.Room,
+        BedNumber = bed.BedNumber,
+        BedCategory = bed.Category,
+        DailyRate = bed.DailyRate,
+        Currency = bed.Currency,
+        AdmittedAtUtc = admittedAtUtc,
+        Status = "Admitted",
+        Notes = Clean(request.Notes, ""),
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    bed.IsAvailable = false;
+    bed.CurrentAdmissionId = admission.Id;
+    bed.CurrentPatientId = patient.Id;
+    bed.CurrentPatientName = admission.PatientName;
+    bed.CurrentPatientMrn = admission.PatientMrn;
+    bed.AdmittedAtUtc = admittedAtUtc;
+
+    db.BedAdmissions.Add(admission);
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<BedAdmissionDto>.Ok(ToBedAdmissionDto(admission), "Patient admitted to bed."));
+});
+
+app.MapPost("/api/beds/{id:guid}/discharge", async (Guid id, DischargeBedRequest request, PatientsDbContext db) =>
+{
+    var bed = await db.Beds.FirstOrDefaultAsync(item => item.Id == id);
+    if (bed is null)
+    {
+        return Results.NotFound(ApiResponse<object>.Fail("Bed not found."));
+    }
+
+    var admission = bed.CurrentAdmissionId is not null
+        ? await db.BedAdmissions.FirstOrDefaultAsync(item => item.Id == bed.CurrentAdmissionId)
+        : await db.BedAdmissions
+            .Where(item => item.BedId == bed.Id && item.Status == "Admitted")
+            .OrderByDescending(item => item.AdmittedAtUtc)
+            .FirstOrDefaultAsync();
+
+    if (admission is null)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("This bed has no active admission to discharge."));
+    }
+
+    var dischargedAtUtc = request.DischargedAtUtc is null ? DateTime.UtcNow : ToUtc(request.DischargedAtUtc.Value);
+    if (dischargedAtUtc < admission.AdmittedAtUtc)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Discharge date cannot be earlier than admission date."));
+    }
+
+    var stayHours = Math.Max(1, (dischargedAtUtc - admission.AdmittedAtUtc).TotalHours);
+    var chargeableDays = Math.Max(1, (int)Math.Ceiling(stayHours / 24d));
+    admission.DischargedAtUtc = dischargedAtUtc;
+    admission.ChargeableDays = chargeableDays;
+    admission.BedCharge = chargeableDays * admission.DailyRate;
+    admission.Status = "Discharged";
+    admission.Notes = Clean(request.Notes, admission.Notes ?? "");
+
+    bed.IsAvailable = true;
+    bed.CurrentAdmissionId = null;
+    bed.CurrentPatientId = null;
+    bed.CurrentPatientName = null;
+    bed.CurrentPatientMrn = null;
+    bed.AdmittedAtUtc = null;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ApiResponse<BedDischargeDto>.Ok(
+        new BedDischargeDto(ToBedDto(bed), ToBedAdmissionDto(admission)),
+        "Patient discharged and bed charge calculated."));
 });
 
 app.Run();
@@ -515,12 +670,46 @@ static PatientDto ToPatientDto(Patient patient)
         patient.InsuranceCompany?.CoveragePercent);
 }
 
-static BedDto ToBedDto(Bed bed) => new(bed.Id, bed.Ward, bed.Room, bed.BedNumber, bed.IsAvailable);
+static BedDto ToBedDto(Bed bed) => new(
+    bed.Id,
+    bed.Ward,
+    bed.Room,
+    bed.BedNumber,
+    bed.IsAvailable,
+    bed.Category,
+    bed.DailyRate,
+    bed.Currency,
+    bed.CurrentAdmissionId,
+    bed.CurrentPatientId,
+    bed.CurrentPatientName,
+    bed.CurrentPatientMrn,
+    bed.AdmittedAtUtc);
+
+static BedAdmissionDto ToBedAdmissionDto(BedAdmission admission) => new(
+    admission.Id,
+    admission.PatientId,
+    admission.PatientName,
+    admission.PatientMrn,
+    admission.BedId,
+    admission.Ward,
+    admission.Room,
+    admission.BedNumber,
+    admission.BedCategory,
+    admission.DailyRate,
+    admission.Currency,
+    admission.AdmittedAtUtc,
+    admission.DischargedAtUtc,
+    admission.ChargeableDays,
+    admission.BedCharge,
+    admission.Status,
+    admission.Notes);
 
 static List<AppointmentDto> ToAppointmentDtos(IEnumerable<Appointment> appointments)
 {
     var orderedAppointments = appointments
-        .OrderBy(appointment => appointment.StartsAtUtc)
+        .OrderBy(AppointmentPriorityRank)
+        .ThenBy(AppointmentStatusRank)
+        .ThenBy(appointment => appointment.StartsAtUtc)
         .ThenBy(appointment => appointment.CreatedAtUtc)
         .ToList();
 
@@ -533,13 +722,12 @@ static List<AppointmentDto> ToAppointmentDtos(IEnumerable<Appointment> appointme
             var current = groupAppointments[index];
             var waitingAhead = groupAppointments
                 .Take(index)
-                .Count(appointment => appointment.Status is "Scheduled" or "Waiting");
+                .Count(IsQueueBlocking);
             queueValues[current.Id] = (index + 1, waitingAhead);
         }
     }
 
     return orderedAppointments
-        .OrderByDescending(appointment => appointment.StartsAtUtc)
         .Select(appointment =>
         {
             var queue = queueValues.GetValueOrDefault(appointment.Id);
@@ -559,6 +747,89 @@ static List<AppointmentDto> ToAppointmentDtos(IEnumerable<Appointment> appointme
                 appointment.Status);
         })
         .ToList();
+}
+
+static int AppointmentPriorityRank(Appointment appointment)
+{
+    if (IsEmergencyText(appointment.Priority) ||
+        IsEmergencyText(appointment.AppointmentType) ||
+        IsEmergencyText(appointment.Department) ||
+        IsEmergencyText(appointment.Reason))
+    {
+        return 0;
+    }
+
+    var priority = (appointment.Priority ?? "").Trim().ToLowerInvariant();
+    if (priority is "urgent" or "critical" or "high") return 1;
+    return 2;
+}
+
+static int AppointmentStatusRank(Appointment appointment)
+{
+    var status = (appointment.Status ?? "").Trim().ToLowerInvariant();
+    if (status is "in service" or "in progress") return 0;
+    if (status is "waiting" or "scheduled") return 1;
+    if (status is "completed") return 2;
+    return 3;
+}
+
+static bool IsQueueBlocking(Appointment appointment)
+{
+    var status = (appointment.Status ?? "").Trim().ToLowerInvariant();
+    return status is "scheduled" or "waiting" or "in service" or "in progress";
+}
+
+static bool IsEmergencyText(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return false;
+    var text = value.Trim().ToLowerInvariant();
+    return text.Contains("emergency") ||
+        text.Contains("urgent") ||
+        text.Contains("critical") ||
+        text.Contains("trauma") ||
+        text.Contains("accident") ||
+        text.Contains("triage");
+}
+
+static string NormalizeAppointmentType(string? value)
+{
+    var clean = Clean(value, "Consultation").Trim();
+    return clean.ToUpperInvariant() switch
+    {
+        "CONSULTATION" => "Consultation",
+        "FOLLOW_UP" => "Follow-up",
+        "FOLLOWUP" => "Follow-up",
+        "EMERGENCY" => "Emergency",
+        "LAB_TEST" => "Lab Test",
+        "LABTEST" => "Lab Test",
+        "SURGERY" => "Surgery",
+        _ => clean
+    };
+}
+
+static string NormalizeBedCategory(string? value)
+{
+    var clean = Clean(value, "Normal").Trim();
+    return clean.ToUpperInvariant() switch
+    {
+        "VIP" => "VIP",
+        "VVIP" => "VVIP",
+        "NORMAL" => "Normal",
+        _ => clean
+    };
+}
+static string NormalizePriority(string? value)
+{
+    var clean = Clean(value, "Normal").Trim();
+    return clean.ToUpperInvariant() switch
+    {
+        "EMERGENCY" => "Emergency",
+        "URGENT" => "Urgent",
+        "CRITICAL" => "Critical",
+        "HIGH" => "High",
+        "LOW" => "Low",
+        _ => "Normal"
+    };
 }
 
 static async Task<string> NextMrnAsync(PatientsDbContext db)

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs/operators';
 import { StoreService } from '../../core/services/store.service';
@@ -8,10 +9,34 @@ import type { ClinicalDiagnosis, ClinicalVitalEntry, LabOrder, MedicalRecord, Pr
 
 type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'labs';
 
+type CertificateForm = {
+  reason: string;
+  fitnessStatus: string;
+  diagnosis: string;
+  startDate: string;
+  endDate: string;
+  restDays: number;
+  reviewDate: string;
+  restrictions: string;
+};
+
+type ReferralForm = {
+  facilityName: string;
+  department: string;
+  consultant: string;
+  urgency: string;
+  reason: string;
+  clinicalSummary: string;
+  investigations: string;
+  treatmentGiven: string;
+  transportMode: string;
+  contactPhone: string;
+};
+
 @Component({
   selector: 'app-clinical-ehr',
   standalone: true,
-  imports: [CommonModule, RouterOutlet],
+  imports: [CommonModule, FormsModule, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Always mounted so child form pages can render into it reliably; it renders nothing when no child route is active. -->
@@ -60,9 +85,17 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
               </button>
             }
             @if (canCreate('encounters')) {
-              <button (click)="printMedicalCertificate()" class="clinical-action bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+              <button (click)="openMedicalCertificate()" class="clinical-action bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
                 <span class="material-icons text-base">assignment</span>
                 Medical Certificate
+              </button>
+              <button (click)="openReferralDesk()" class="clinical-action bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+                <span class="material-icons text-base">forward_to_inbox</span>
+                Referral
+              </button>
+              <button (click)="openAdmissionBoard()" class="clinical-action bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50">
+                <span class="material-icons text-base">king_bed</span>
+                Admit / Discharge
               </button>
             }
           </div>
@@ -275,6 +308,169 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
             </div>
           </div>
         </div>
+
+        @if (isCertificateOpen()) {
+          <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+            <section class="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
+              <div class="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+                <div>
+                  <p class="text-[10px] font-black uppercase tracking-[0.24em] text-teal-600">Doctor Approval</p>
+                  <h2 class="mt-1 text-lg font-black text-slate-900">Medical Certificate</h2>
+                  @if (activePatient(); as patient) {
+                    <p class="mt-1 text-xs font-bold text-slate-500">{{ patient.name }} | {{ patient.mrn }}</p>
+                  }
+                </div>
+                <button type="button" (click)="closeMedicalCertificate()" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">Close</button>
+              </div>
+
+              <div class="grid gap-4 p-5 md:grid-cols-2">
+                <label class="doc-field">
+                  <span>Reason for Certificate *</span>
+                  <input [(ngModel)]="certificateForm.reason" name="certificateReason" class="doc-input" placeholder="Sick leave, fitness, follow-up clearance" />
+                </label>
+                <label class="doc-field">
+                  <span>Fitness Status *</span>
+                  <select [(ngModel)]="certificateForm.fitnessStatus" name="fitnessStatus" class="doc-input">
+                    <option value="Temporarily unfit for duty">Temporarily unfit for duty</option>
+                    <option value="Fit to resume duty">Fit to resume duty</option>
+                    <option value="Fit with restriction">Fit with restriction</option>
+                    <option value="Requires specialist review">Requires specialist review</option>
+                  </select>
+                </label>
+                <label class="doc-field md:col-span-2">
+                  <span>Diagnosis / Assessment *</span>
+                  <textarea [(ngModel)]="certificateForm.diagnosis" name="certificateDiagnosis" class="doc-input min-h-24" placeholder="Clinical diagnosis or assessment supporting the certificate"></textarea>
+                </label>
+                <label class="doc-field">
+                  <span>Start Date *</span>
+                  <input [(ngModel)]="certificateForm.startDate" name="certificateStartDate" type="date" class="doc-input" />
+                </label>
+                <label class="doc-field">
+                  <span>End Date *</span>
+                  <input [(ngModel)]="certificateForm.endDate" name="certificateEndDate" type="date" class="doc-input" />
+                </label>
+                <label class="doc-field">
+                  <span>Rest Days *</span>
+                  <input [(ngModel)]="certificateForm.restDays" name="certificateRestDays" type="number" min="0" class="doc-input" />
+                </label>
+                <label class="doc-field">
+                  <span>Review Date</span>
+                  <input [(ngModel)]="certificateForm.reviewDate" name="certificateReviewDate" type="date" class="doc-input" />
+                </label>
+                <label class="doc-field md:col-span-2">
+                  <span>Restrictions / Advice</span>
+                  <textarea [(ngModel)]="certificateForm.restrictions" name="certificateRestrictions" class="doc-input min-h-20" placeholder="Work restriction, rest advice, medication precautions, or follow-up instruction"></textarea>
+                </label>
+              </div>
+
+              @if (certificateErrors().length) {
+                <div class="mx-5 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">
+                  @for (error of certificateErrors(); track error) {
+                    <div>{{ error }}</div>
+                  }
+                </div>
+              }
+
+              <div class="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div class="rounded-2xl px-3 py-2 text-xs font-black"
+                  [class]="certificateApproved() ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'">
+                  {{ certificateApproved() ? 'Approved by clinician' : 'Pending clinician approval' }}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" (click)="approveMedicalCertificate()" class="clinical-action bg-slate-900 text-white">Approve</button>
+                  <button type="button" (click)="printMedicalCertificate()" [disabled]="!certificateApproved()" class="clinical-action bg-teal-600 text-white disabled:cursor-not-allowed disabled:opacity-40">Print Certificate</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        }
+
+        @if (isReferralOpen()) {
+          <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+            <section class="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
+              <div class="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+                <div>
+                  <p class="text-[10px] font-black uppercase tracking-[0.24em] text-sky-600">Continuity of Care</p>
+                  <h2 class="mt-1 text-lg font-black text-slate-900">Referral Letter</h2>
+                  @if (activePatient(); as patient) {
+                    <p class="mt-1 text-xs font-bold text-slate-500">{{ patient.name }} | {{ patient.mrn }}</p>
+                  }
+                </div>
+                <button type="button" (click)="closeReferralLetter()" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-50">Close</button>
+              </div>
+
+              <div class="grid gap-4 p-5 md:grid-cols-2">
+                <label class="doc-field">
+                  <span>Receiving Facility *</span>
+                  <input [(ngModel)]="referralForm.facilityName" name="referralFacility" class="doc-input" placeholder="Hospital or medical center name" />
+                </label>
+                <label class="doc-field">
+                  <span>Receiving Department *</span>
+                  <input [(ngModel)]="referralForm.department" name="referralDepartment" class="doc-input" placeholder="Emergency, Surgery, Cardiology" />
+                </label>
+                <label class="doc-field">
+                  <span>Consultant / Unit</span>
+                  <input [(ngModel)]="referralForm.consultant" name="referralConsultant" class="doc-input" placeholder="Named consultant or receiving unit" />
+                </label>
+                <label class="doc-field">
+                  <span>Urgency *</span>
+                  <select [(ngModel)]="referralForm.urgency" name="referralUrgency" class="doc-input">
+                    <option value="Immediate">Immediate</option>
+                    <option value="Urgent">Urgent</option>
+                    <option value="Routine">Routine</option>
+                  </select>
+                </label>
+                <label class="doc-field md:col-span-2">
+                  <span>Reason for Referral *</span>
+                  <textarea [(ngModel)]="referralForm.reason" name="referralReason" class="doc-input min-h-20" placeholder="Reason the patient requires transfer or specialist review"></textarea>
+                </label>
+                <label class="doc-field md:col-span-2">
+                  <span>Clinical Summary *</span>
+                  <textarea [(ngModel)]="referralForm.clinicalSummary" name="referralSummary" class="doc-input min-h-28" placeholder="History, examination findings, diagnosis, and current condition"></textarea>
+                </label>
+                <label class="doc-field">
+                  <span>Investigations Completed</span>
+                  <textarea [(ngModel)]="referralForm.investigations" name="referralInvestigations" class="doc-input min-h-20" placeholder="Lab, imaging, ECG, ultrasound, or other diagnostics"></textarea>
+                </label>
+                <label class="doc-field">
+                  <span>Treatment Given</span>
+                  <textarea [(ngModel)]="referralForm.treatmentGiven" name="referralTreatment" class="doc-input min-h-20" placeholder="Stabilization, medication, fluids, procedures"></textarea>
+                </label>
+                <label class="doc-field">
+                  <span>Transport Mode *</span>
+                  <select [(ngModel)]="referralForm.transportMode" name="referralTransport" class="doc-input">
+                    <option value="Ambulance">Ambulance</option>
+                    <option value="Hospital vehicle">Hospital vehicle</option>
+                    <option value="Private transport">Private transport</option>
+                  </select>
+                </label>
+                <label class="doc-field">
+                  <span>Contact Phone</span>
+                  <input [(ngModel)]="referralForm.contactPhone" name="referralPhone" class="doc-input" placeholder="+251..." />
+                </label>
+              </div>
+
+              @if (referralErrors().length) {
+                <div class="mx-5 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">
+                  @for (error of referralErrors(); track error) {
+                    <div>{{ error }}</div>
+                  }
+                </div>
+              }
+
+              <div class="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div class="rounded-2xl px-3 py-2 text-xs font-black"
+                  [class]="referralApproved() ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'">
+                  {{ referralApproved() ? 'Referral approved' : 'Pending referral approval' }}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" (click)="approveReferralLetter()" class="clinical-action bg-slate-900 text-white">Approve</button>
+                  <button type="button" (click)="printReferralLetter()" [disabled]="!referralApproved()" class="clinical-action bg-sky-600 text-white disabled:cursor-not-allowed disabled:opacity-40">Print Referral</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        }
       </div>
     }
   `,
@@ -347,6 +543,38 @@ type ClinicalTab = 'encounters' | 'vitals' | 'diagnoses' | 'prescriptions' | 'la
       font-weight: 800;
       color: rgb(148 163 184) !important;
     }
+
+    .doc-field {
+      display: flex;
+      flex-direction: column;
+      gap: .45rem;
+      font-size: .68rem;
+      font-weight: 900;
+      color: rgb(71 85 105);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .doc-input {
+      width: 100%;
+      border-radius: .9rem;
+      border: 1px solid rgb(203 213 225);
+      background: rgb(248 250 252);
+      padding: .8rem .95rem;
+      font-size: .78rem;
+      font-weight: 700;
+      color: rgb(15 23 42);
+      text-transform: none;
+      letter-spacing: 0;
+      outline: none;
+      transition: all .18s ease;
+    }
+
+    .doc-input:focus {
+      border-color: rgb(20 184 166);
+      background: white;
+      box-shadow: 0 0 0 4px rgba(20, 184, 166, .1);
+    }
   `]
 })
 export class ClinicalEhrComponent {
@@ -357,6 +585,15 @@ export class ClinicalEhrComponent {
   activeTab = signal<ClinicalTab>('encounters');
   selectedPatientId = signal('');
   isFormRoute = signal(false);
+  isCertificateOpen = signal(false);
+  certificateApproved = signal(false);
+  certificateErrors = signal<string[]>([]);
+  activeCertificateId = signal<string>('');
+  isReferralOpen = signal(false);
+  referralApproved = signal(false);
+  referralErrors = signal<string[]>([]);
+  certificateForm: CertificateForm = this.defaultCertificateForm();
+  referralForm: ReferralForm = this.defaultReferralForm();
 
   clinicalPatients = computed(() => this.store.clinicalWorklistPatients());
   private clinicalPatientIds = computed(() => new Set(this.clinicalPatients().map(patient => patient.id)));
@@ -528,25 +765,246 @@ export class ClinicalEhrComponent {
     ], patientName, patientMrn);
   }
 
+  openMedicalCertificate() {
+    const patient = this.activePatient();
+    if (!patient) {
+      this.store.addToast('error', 'Patient Required', 'Select a patient before preparing a medical certificate.');
+      return;
+    }
+    this.certificateForm = {
+      ...this.defaultCertificateForm(),
+      diagnosis: this.latestClinicalAssessment(),
+    };
+    const existing = this.store.certificatesForPatient(patient.id)[0];
+    if (existing) {
+      this.certificateForm = {
+        reason: existing.reason,
+        fitnessStatus: existing.fitnessStatus,
+        diagnosis: existing.diagnosis,
+        startDate: existing.startDate,
+        endDate: existing.endDate,
+        restDays: existing.restDays,
+        reviewDate: existing.reviewDate || '',
+        restrictions: existing.restrictions || '',
+      };
+      this.activeCertificateId.set(existing.id);
+      this.certificateApproved.set(true);
+    } else {
+      this.activeCertificateId.set('');
+      this.certificateApproved.set(false);
+    }
+    this.certificateErrors.set([]);
+    this.isCertificateOpen.set(true);
+  }
+
+  closeMedicalCertificate() {
+    this.isCertificateOpen.set(false);
+  }
+
+  approveMedicalCertificate() {
+    const errors = this.validateCertificate();
+    this.certificateErrors.set(errors);
+    if (errors.length) {
+      this.certificateApproved.set(false);
+      return;
+    }
+    if (!this.activeCertificateId()) {
+      const patient = this.activePatient();
+      if (patient) {
+        const saved = this.store.saveMedicalCertificate({
+          patientId: patient.id,
+          patientName: patient.name,
+          patientMrn: patient.mrn,
+          doctorId: this.store.currentUser()?.id || '',
+          doctorName: this.currentDoctorName(),
+          reason: this.certificateForm.reason,
+          diagnosis: this.certificateForm.diagnosis,
+          fitnessStatus: this.certificateForm.fitnessStatus,
+          startDate: this.certificateForm.startDate,
+          endDate: this.certificateForm.endDate,
+          restDays: Number(this.certificateForm.restDays || 0),
+          reviewDate: this.certificateForm.reviewDate,
+          restrictions: this.certificateForm.restrictions,
+        });
+        this.activeCertificateId.set(saved.id);
+      }
+    }
+    this.certificateApproved.set(true);
+    this.store.addToast('success', 'Certificate Approved', 'The medical certificate is ready for printing.');
+  }
+
   printMedicalCertificate() {
     const patient = this.activePatient();
     if (!patient) {
       this.store.addToast('error', 'Patient Required', 'Select a patient before printing a medical certificate.');
       return;
     }
-    const latestDiagnosis = this.visibleDiagnoses()[0]?.description || this.visibleEncounters()[0]?.diagnosis || 'Medical evaluation completed';
+    if (!this.certificateApproved()) {
+      this.store.addToast('warning', 'Approval Required', 'Approve the medical certificate before printing.');
+      return;
+    }
+    const saved = this.store.certificatesForPatient(patient.id).find(item => item.id === this.activeCertificateId()) || this.store.certificatesForPatient(patient.id)[0];
+    const form = saved || this.certificateForm;
+    const doctorName = saved?.doctorName || this.currentDoctorName();
     const html = `
       <h1>Medical Certificate</h1>
-      <p class="lead">This is to certify that <strong>${this.escapeHtml(patient.name)}</strong>, MRN <strong>${this.escapeHtml(patient.mrn)}</strong>, was evaluated at Bethzatha General Hospital.</p>
+      <p class="lead">This is to certify that <strong>${this.escapeHtml(patient.name)}</strong>, MRN <strong>${this.escapeHtml(patient.mrn)}</strong>, was evaluated at Bethzatha General Hospital by ${this.escapeHtml(doctorName)}.</p>
       <table>
         <tr><th>Patient Name</th><td>${this.escapeHtml(patient.name)}</td><th>MRN</th><td>${this.escapeHtml(patient.mrn)}</td></tr>
         <tr><th>Gender</th><td>${this.escapeHtml(patient.gender)}</td><th>Blood Type</th><td>${this.escapeHtml(patient.bloodType)}</td></tr>
-        <tr><th>Diagnosis / Assessment</th><td colspan="3">${this.escapeHtml(latestDiagnosis)}</td></tr>
-        <tr><th>Recommended Rest</th><td colspan="3">As clinically indicated by the attending physician.</td></tr>
+        <tr><th>Reason</th><td colspan="3">${this.escapeHtml(form.reason)}</td></tr>
+        <tr><th>Diagnosis / Assessment</th><td colspan="3">${this.escapeHtml(form.diagnosis)}</td></tr>
+        <tr><th>Fitness Status</th><td colspan="3">${this.escapeHtml(form.fitnessStatus)}</td></tr>
+        <tr><th>Rest Period</th><td>${this.escapeHtml(String(form.restDays))} day(s)</td><th>Dates</th><td>${this.escapeHtml(form.startDate)} to ${this.escapeHtml(form.endDate)}</td></tr>
+        <tr><th>Review Date</th><td colspan="3">${this.escapeHtml(form.reviewDate || 'As clinically indicated')}</td></tr>
+        <tr><th>Restrictions / Advice</th><td colspan="3">${this.escapeHtml(form.restrictions || 'None recorded')}</td></tr>
       </table>
-      <p class="note">This certificate is issued based on the clinical record available at the time of consultation.</p>
+      <p class="note">Approved by ${this.escapeHtml(doctorName)}. This certificate is issued based on the clinical record available at the time of consultation.</p>
     `;
     this.openPrintableHtml(html, 'Medical Certificate', patient.name, patient.mrn);
+  }
+
+  openAdmissionBoard() {
+    this.router.navigate(['/wards-beds']);
+  }
+  openReferralDesk() {
+    this.router.navigate(['/referrals-history'], {
+      queryParams: { patient: this.selectedPatientId() || undefined },
+    });
+  }
+  openReferralLetter() {
+    const patient = this.activePatient();
+    if (!patient) {
+      this.store.addToast('error', 'Patient Required', 'Select a patient before preparing a referral letter.');
+      return;
+    }
+    this.referralForm = {
+      ...this.defaultReferralForm(),
+      department: this.selectedAppointmentDepartment(),
+      clinicalSummary: this.latestClinicalAssessment(),
+      investigations: this.visibleLabs().map(lab => `${lab.testName}: ${lab.result || lab.status}`).join('\n'),
+      treatmentGiven: this.visiblePrescriptions().map(rx => this.medicationSummary(rx)).join('\n'),
+    };
+    this.referralApproved.set(false);
+    this.referralErrors.set([]);
+    this.isReferralOpen.set(true);
+  }
+
+  closeReferralLetter() {
+    this.isReferralOpen.set(false);
+  }
+
+  approveReferralLetter() {
+    const errors = this.validateReferral();
+    this.referralErrors.set(errors);
+    if (errors.length) {
+      this.referralApproved.set(false);
+      return;
+    }
+    this.referralApproved.set(true);
+    this.store.addToast('success', 'Referral Approved', 'The referral letter is ready for printing.');
+  }
+
+  printReferralLetter() {
+    const patient = this.activePatient();
+    if (!patient) {
+      this.store.addToast('error', 'Patient Required', 'Select a patient before printing a referral letter.');
+      return;
+    }
+    if (!this.referralApproved()) {
+      this.store.addToast('warning', 'Approval Required', 'Approve the referral letter before printing.');
+      return;
+    }
+    const form = this.referralForm;
+    const html = `
+      <h1>Referral Letter</h1>
+      <p class="lead">Kindly receive <strong>${this.escapeHtml(patient.name)}</strong>, MRN <strong>${this.escapeHtml(patient.mrn)}</strong>, for ${this.escapeHtml(form.urgency.toLowerCase())} care continuity.</p>
+      <table>
+        <tr><th>Receiving Facility</th><td>${this.escapeHtml(form.facilityName)}</td><th>Department</th><td>${this.escapeHtml(form.department)}</td></tr>
+        <tr><th>Consultant / Unit</th><td>${this.escapeHtml(form.consultant || 'Receiving clinician')}</td><th>Urgency</th><td>${this.escapeHtml(form.urgency)}</td></tr>
+        <tr><th>Reason for Referral</th><td colspan="3">${this.escapeHtml(form.reason)}</td></tr>
+        <tr><th>Clinical Summary</th><td colspan="3">${this.escapeHtml(form.clinicalSummary)}</td></tr>
+        <tr><th>Investigations</th><td colspan="3">${this.escapeHtml(form.investigations || 'Not recorded')}</td></tr>
+        <tr><th>Treatment Given</th><td colspan="3">${this.escapeHtml(form.treatmentGiven || 'Not recorded')}</td></tr>
+        <tr><th>Transport Mode</th><td>${this.escapeHtml(form.transportMode)}</td><th>Contact Phone</th><td>${this.escapeHtml(form.contactPhone || 'N/A')}</td></tr>
+      </table>
+      <p class="note">Prepared and approved by ${this.escapeHtml(this.currentDoctorName())} for safe transfer and continuity of care.</p>
+    `;
+    this.openPrintableHtml(html, 'Referral Letter', patient.name, patient.mrn);
+  }
+
+  private defaultCertificateForm(): CertificateForm {
+    return {
+      reason: '',
+      fitnessStatus: 'Temporarily unfit for duty',
+      diagnosis: '',
+      startDate: this.todayIso(),
+      endDate: this.dateAfterDays(1),
+      restDays: 1,
+      reviewDate: '',
+      restrictions: '',
+    };
+  }
+
+  private defaultReferralForm(): ReferralForm {
+    return {
+      facilityName: '',
+      department: 'Emergency',
+      consultant: '',
+      urgency: 'Urgent',
+      reason: '',
+      clinicalSummary: '',
+      investigations: '',
+      treatmentGiven: '',
+      transportMode: 'Ambulance',
+      contactPhone: '',
+    };
+  }
+
+  private validateCertificate(): string[] {
+    const errors: string[] = [];
+    const form = this.certificateForm;
+    if (!form.reason.trim()) errors.push('Reason for certificate is required.');
+    if (!form.diagnosis.trim()) errors.push('Diagnosis or assessment is required.');
+    if (!form.startDate) errors.push('Start date is required.');
+    if (!form.endDate) errors.push('End date is required.');
+    if (Number(form.restDays) < 0) errors.push('Rest days cannot be negative.');
+    if (form.startDate && form.endDate && form.endDate < form.startDate) errors.push('End date cannot be before start date.');
+    return errors;
+  }
+
+  private validateReferral(): string[] {
+    const errors: string[] = [];
+    const form = this.referralForm;
+    if (!form.facilityName.trim()) errors.push('Receiving facility is required.');
+    if (!form.department.trim()) errors.push('Receiving department is required.');
+    if (!form.reason.trim()) errors.push('Reason for referral is required.');
+    if (!form.clinicalSummary.trim()) errors.push('Clinical summary is required.');
+    if (!form.transportMode.trim()) errors.push('Transport mode is required.');
+    return errors;
+  }
+
+  private latestClinicalAssessment(): string {
+    return this.visibleDiagnoses()[0]?.description
+      || this.visibleEncounters()[0]?.diagnosis
+      || this.visibleEncounters()[0]?.clinicalNotes
+      || 'Clinical evaluation completed';
+  }
+
+  private selectedAppointmentDepartment(): string {
+    const patientId = this.selectedPatientId();
+    const appointment = this.store.appointments().find(item => item.patientId === patientId && item.status !== 'CANCELLED' && item.status !== 'NO_SHOW');
+    return appointment?.department || 'Emergency';
+  }
+
+  private todayIso(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  private dateAfterDays(days: number): string {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split('T')[0];
   }
 
   exportCurrentTab() {

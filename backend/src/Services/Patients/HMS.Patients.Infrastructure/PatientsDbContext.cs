@@ -10,6 +10,7 @@ public sealed class PatientsDbContext(DbContextOptions<PatientsDbContext> option
     public DbSet<InsuranceCompany> InsuranceCompanies => Set<InsuranceCompany>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<Bed> Beds => Set<Bed>();
+    public DbSet<BedAdmission> BedAdmissions => Set<BedAdmission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,8 +73,49 @@ public sealed class PatientsDbContext(DbContextOptions<PatientsDbContext> option
             entity.Property(bed => bed.Ward).HasColumnName("ward").HasMaxLength(96);
             entity.Property(bed => bed.Room).HasColumnName("room").HasMaxLength(32);
             entity.Property(bed => bed.BedNumber).HasColumnName("bed_number").HasMaxLength(32);
+            entity.Property(bed => bed.Category).HasColumnName("category").HasMaxLength(32);
+            entity.Property(bed => bed.DailyRate).HasColumnName("daily_rate").HasPrecision(12, 2);
+            entity.Property(bed => bed.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(bed => bed.IsAvailable).HasColumnName("is_available");
+            entity.Property(bed => bed.CurrentAdmissionId).HasColumnName("current_admission_id");
+            entity.Property(bed => bed.CurrentPatientId).HasColumnName("current_patient_id");
+            entity.Property(bed => bed.CurrentPatientName).HasColumnName("current_patient_name").HasMaxLength(180);
+            entity.Property(bed => bed.CurrentPatientMrn).HasColumnName("current_patient_mrn").HasMaxLength(32);
+            entity.Property(bed => bed.AdmittedAtUtc).HasColumnName("admitted_at_utc");
             entity.Property(bed => bed.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
+        });
+
+        modelBuilder.Entity<BedAdmission>(entity =>
+        {
+            entity.ToTable("bed_admissions");
+            entity.HasKey(admission => admission.Id);
+            entity.HasIndex(admission => new { admission.PatientId, admission.Status });
+            entity.HasIndex(admission => new { admission.BedId, admission.Status });
+            entity.Property(admission => admission.PatientId).HasColumnName("patient_id");
+            entity.Property(admission => admission.PatientName).HasColumnName("patient_name").HasMaxLength(180);
+            entity.Property(admission => admission.PatientMrn).HasColumnName("patient_mrn").HasMaxLength(32);
+            entity.Property(admission => admission.BedId).HasColumnName("bed_id");
+            entity.Property(admission => admission.Ward).HasColumnName("ward").HasMaxLength(96);
+            entity.Property(admission => admission.Room).HasColumnName("room").HasMaxLength(32);
+            entity.Property(admission => admission.BedNumber).HasColumnName("bed_number").HasMaxLength(32);
+            entity.Property(admission => admission.BedCategory).HasColumnName("bed_category").HasMaxLength(32);
+            entity.Property(admission => admission.DailyRate).HasColumnName("daily_rate").HasPrecision(12, 2);
+            entity.Property(admission => admission.Currency).HasColumnName("currency").HasMaxLength(3);
+            entity.Property(admission => admission.AdmittedAtUtc).HasColumnName("admitted_at_utc");
+            entity.Property(admission => admission.DischargedAtUtc).HasColumnName("discharged_at_utc");
+            entity.Property(admission => admission.ChargeableDays).HasColumnName("chargeable_days");
+            entity.Property(admission => admission.BedCharge).HasColumnName("bed_charge").HasPrecision(12, 2);
+            entity.Property(admission => admission.Status).HasColumnName("status").HasMaxLength(32);
+            entity.Property(admission => admission.Notes).HasColumnName("notes");
+            entity.Property(admission => admission.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
+            entity.HasOne(admission => admission.Bed)
+                .WithMany(bed => bed.Admissions)
+                .HasForeignKey(admission => admission.BedId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(admission => admission.Patient)
+                .WithMany(patient => patient.BedAdmissions)
+                .HasForeignKey(admission => admission.PatientId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Appointment>(entity =>
@@ -124,6 +166,7 @@ public sealed class Patient : Entity
     public byte[]? PhotoData { get; set; }
     public InsuranceCompany? InsuranceCompany { get; set; }
     public List<Appointment> Appointments { get; set; } = [];
+    public List<BedAdmission> BedAdmissions { get; set; } = [];
 }
 
 public sealed class InsuranceCompany : Entity
@@ -160,9 +203,39 @@ public sealed class Bed : Entity
     public string Ward { get; set; } = "";
     public string Room { get; set; } = "";
     public string BedNumber { get; set; } = "";
+    public string Category { get; set; } = "Normal";
+    public decimal DailyRate { get; set; }
+    public string Currency { get; set; } = "ETB";
     public bool IsAvailable { get; set; } = true;
+    public Guid? CurrentAdmissionId { get; set; }
+    public Guid? CurrentPatientId { get; set; }
+    public string? CurrentPatientName { get; set; }
+    public string? CurrentPatientMrn { get; set; }
+    public DateTime? AdmittedAtUtc { get; set; }
+    public List<BedAdmission> Admissions { get; set; } = [];
 }
 
+public sealed class BedAdmission : Entity
+{
+    public Guid PatientId { get; set; }
+    public string PatientName { get; set; } = "";
+    public string PatientMrn { get; set; } = "";
+    public Guid BedId { get; set; }
+    public string Ward { get; set; } = "";
+    public string Room { get; set; } = "";
+    public string BedNumber { get; set; } = "";
+    public string BedCategory { get; set; } = "Normal";
+    public decimal DailyRate { get; set; }
+    public string Currency { get; set; } = "ETB";
+    public DateTime AdmittedAtUtc { get; set; }
+    public DateTime? DischargedAtUtc { get; set; }
+    public int ChargeableDays { get; set; }
+    public decimal BedCharge { get; set; }
+    public string Status { get; set; } = "Admitted";
+    public string? Notes { get; set; }
+    public Patient? Patient { get; set; }
+    public Bed? Bed { get; set; }
+}
 public static class PatientsSeedData
 {
     public static async Task SeedAsync(PatientsDbContext db)
@@ -260,32 +333,83 @@ public static class PatientsSeedData
 
     private static async Task UpsertBedsAsync(PatientsDbContext db)
     {
-        var beds = new[]
+        var patientsByMrn = (await db.Patients.AsNoTracking().ToListAsync())
+            .ToDictionary(patient => patient.Mrn, patient => patient);
+
+        var bedSeeds = new[]
         {
-            new Bed { Id = Guid.Parse("c7e6c2bc-972f-47c1-a206-5f4e27f50cf7"), Ward = "General Ward A", Room = "101", BedNumber = "A1", IsAvailable = true },
-            new Bed { Id = Guid.Parse("e33cfb8d-6d4a-4785-ac08-f436dc63a476"), Ward = "General Ward A", Room = "102", BedNumber = "A2", IsAvailable = true },
-            new Bed { Id = Guid.Parse("c0b45ba1-93ea-4071-8397-c96214872c5b"), Ward = "Emergency", Room = "201", BedNumber = "E1", IsAvailable = false },
-            new Bed { Id = Guid.Parse("79b0da28-9451-4d45-982e-b273fbdde901"), Ward = "Maternity", Room = "301", BedNumber = "M1", IsAvailable = true },
-            new Bed { Id = Guid.Parse("4cc4850e-5f83-4591-83de-bf4f0c75bb02"), Ward = "Pediatrics", Room = "401", BedNumber = "P1", IsAvailable = false },
-            new Bed { Id = Guid.Parse("b1207213-92a8-4a73-8dd1-c6372de8fc03"), Ward = "Surgical Ward", Room = "501", BedNumber = "S1", IsAvailable = true }
+            new BedSeed("c7e6c2bc-972f-47c1-a206-5f4e27f50cf7", "General Ward A", "101", "A1", "Normal", 1200m, true, null),
+            new BedSeed("e33cfb8d-6d4a-4785-ac08-f436dc63a476", "General Ward A", "102", "A2", "Normal", 1200m, true, null),
+            new BedSeed("c0b45ba1-93ea-4071-8397-c96214872c5b", "Emergency", "201", "E1", "VIP", 1800m, false, "MRN-0002"),
+            new BedSeed("79b0da28-9451-4d45-982e-b273fbdde901", "Maternity", "301", "M1", "VIP", 2200m, true, null),
+            new BedSeed("4cc4850e-5f83-4591-83de-bf4f0c75bb02", "Pediatrics", "401", "P1", "Normal", 1000m, true, null),
+            new BedSeed("b1207213-92a8-4a73-8dd1-c6372de8fc03", "Surgical Ward", "501", "S1", "VVIP", 3500m, true, null)
         };
 
-        foreach (var bed in beds)
+        foreach (var seed in bedSeeds)
         {
-            var existing = await db.Beds.FirstOrDefaultAsync(item => item.BedNumber == bed.BedNumber);
+            var bedId = Guid.Parse(seed.Id);
+            var existing = await db.Beds.FirstOrDefaultAsync(item => item.BedNumber == seed.BedNumber);
+            var bed = existing ?? new Bed { Id = bedId, BedNumber = seed.BedNumber, CreatedAtUtc = DateTime.UtcNow };
+            bed.Ward = seed.Ward;
+            bed.Room = seed.Room;
+            bed.Category = seed.Category;
+            bed.DailyRate = seed.DailyRate;
+            bed.Currency = "ETB";
+            bed.IsAvailable = seed.IsAvailable;
+
             if (existing is null)
             {
                 db.Beds.Add(bed);
             }
-            else
+
+            if (seed.CurrentPatientMrn is null || !patientsByMrn.TryGetValue(seed.CurrentPatientMrn, out var patient))
             {
-                existing.Ward = bed.Ward;
-                existing.Room = bed.Room;
-                existing.IsAvailable = bed.IsAvailable;
+                if (seed.IsAvailable)
+                {
+                    bed.CurrentAdmissionId = null;
+                    bed.CurrentPatientId = null;
+                    bed.CurrentPatientName = null;
+                    bed.CurrentPatientMrn = null;
+                    bed.AdmittedAtUtc = null;
+                }
+                continue;
             }
+
+            var activeAdmission = await db.BedAdmissions.FirstOrDefaultAsync(admission =>
+                admission.PatientId == patient.Id && admission.Status == "Admitted");
+            var admittedAtUtc = DateTime.UtcNow.AddDays(-1).AddHours(-4);
+            if (activeAdmission is null)
+            {
+                activeAdmission = new BedAdmission
+                {
+                    Id = Guid.NewGuid(),
+                    PatientId = patient.Id,
+                    PatientName = $"{patient.FirstName} {patient.LastName}",
+                    PatientMrn = patient.Mrn,
+                    BedId = bed.Id,
+                    Ward = bed.Ward,
+                    Room = bed.Room,
+                    BedNumber = bed.BedNumber,
+                    BedCategory = bed.Category,
+                    DailyRate = bed.DailyRate,
+                    Currency = bed.Currency,
+                    AdmittedAtUtc = admittedAtUtc,
+                    Status = "Admitted",
+                    Notes = "Seed inpatient case for ward workflow review.",
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                db.BedAdmissions.Add(activeAdmission);
+            }
+
+            bed.IsAvailable = false;
+            bed.CurrentAdmissionId = activeAdmission.Id;
+            bed.CurrentPatientId = patient.Id;
+            bed.CurrentPatientName = activeAdmission.PatientName;
+            bed.CurrentPatientMrn = activeAdmission.PatientMrn;
+            bed.AdmittedAtUtc = activeAdmission.AdmittedAtUtc;
         }
     }
-
     private static async Task UpsertAppointmentsAsync(PatientsDbContext db)
     {
         // Resolve patient IDs by MRN from the actual registry. Seed patients are
@@ -344,6 +468,8 @@ public static class PatientsSeedData
             }
         }
     }
+
+    private sealed record BedSeed(string Id, string Ward, string Room, string BedNumber, string Category, decimal DailyRate, bool IsAvailable, string? CurrentPatientMrn);
 
     private sealed record AppointmentSeed(
         string Id,

@@ -10,6 +10,7 @@ interface NavItem {
   icon: string;
   badge?: () => number | string;
   allowedRoles?: string[];
+  children?: NavItem[];
 }
 
 @Component({
@@ -55,26 +56,50 @@ interface NavItem {
 
         <!-- Navigation Links -->
         <nav class="flex-1 px-4 space-y-1 mt-2 overflow-y-auto">
-          @for (item of filteredNavItems(); track item.route) {
-            <a 
-              [routerLink]="item.route" 
-              routerLinkActive="bg-slate-800 text-white border-l-4 border-teal-500"
-              [routerLinkActiveOptions]="{ exact: item.route === '/dashboard' }"
-              (click)="closeMobileMenuOnNav()"
-              [title]="isSidebarCollapsed() ? item.label : ''"
-              class="flex items-center space-x-3 text-slate-300 hover:bg-slate-800 hover:text-white px-4 py-3 rounded-xl transition-all group relative text-xs font-medium">
-              <span class="material-icons text-slate-400 group-hover:text-teal-400 transition-colors text-xl shrink-0">
-                {{ item.icon }}
-              </span>
+          @for (item of filteredNavItems(); track item.route || item.label) {
+            @if (item.label.startsWith('──')) {
               @if (!isSidebarCollapsed()) {
-                <span class="truncate flex-1 font-medium">{{ item.label }}</span>
-                @if (item.badge && item.badge()) {
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
-                    {{ item.badge!() }}
-                  </span>
-                }
+                <div class="px-4 pt-4 pb-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                  Administration
+                </div>
               }
-            </a>
+            } @else {
+              <a
+                [routerLink]="item.route"
+                routerLinkActive="bg-slate-800 text-white border-l-4 border-teal-500"
+                [routerLinkActiveOptions]="{ exact: item.route === '/dashboard' }"
+                (click)="closeMobileMenuOnNav()"
+                [title]="isSidebarCollapsed() ? item.label : ''"
+                class="flex items-center space-x-3 text-slate-300 hover:bg-slate-800 hover:text-white px-4 py-3 rounded-xl transition-all group relative text-xs font-medium">
+                <span class="material-icons text-slate-400 group-hover:text-teal-400 transition-colors text-xl shrink-0">
+                  {{ item.icon }}
+                </span>
+                @if (!isSidebarCollapsed()) {
+                  <span class="truncate flex-1 font-medium">{{ item.label }}</span>
+                  @if (item.badge && item.badge()) {
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                      {{ item.badge!() }}
+                    </span>
+                  }
+                }
+              </a>
+
+              @if (item.children?.length && !isSidebarCollapsed()) {
+                <div class="ml-6 border-l border-slate-700/70 pl-3">
+                  @for (child of item.children; track child.route) {
+                    <a
+                      [routerLink]="child.route"
+                      routerLinkActive="bg-teal-500/10 text-teal-200"
+                      [routerLinkActiveOptions]="{ exact: true }"
+                      (click)="closeMobileMenuOnNav()"
+                      class="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold text-slate-400 transition hover:bg-slate-800 hover:text-white">
+                      <span class="material-icons text-base">{{ child.icon }}</span>
+                      <span class="truncate">{{ child.label }}</span>
+                    </a>
+                  }
+                </div>
+              }
+            }
           }
         </nav>
 
@@ -190,12 +215,23 @@ export class MainLayoutComponent {
 
   navItems: NavItem[] = [
     { label: 'Dashboard', route: '/dashboard', icon: 'dashboard' },
-    { label: 'Patients', route: '/patients', icon: 'people_alt', badge: () => this.store.patients().length },
-    { label: 'Appointments', route: '/appointments', icon: 'event', badge: () => this.store.appointments().length },
+    {
+      label: 'Reports',
+      route: '/reports',
+      icon: 'analytics',
+      allowedRoles: ['ADMIN', 'HR_MANAGER', 'ACCOUNTANT', 'CASHIER', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST'],
+      children: [
+        { label: 'Dashboard', route: '/reports/dashboard', icon: 'monitoring', allowedRoles: ['ADMIN', 'HR_MANAGER', 'ACCOUNTANT', 'CASHIER', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST'] },
+        { label: 'Generator', route: '/reports/generator', icon: 'assessment', allowedRoles: ['ADMIN', 'HR_MANAGER', 'ACCOUNTANT', 'CASHIER', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PHARMACIST'] },
+      ],
+    },
+    { label: 'Patients', route: '/patients', icon: 'people_alt', badge: () => this.store.roleVisiblePatients().length, allowedRoles: ['ADMIN', 'RECEPTIONIST', 'NURSE', 'DOCTOR', 'LAB_TECHNICIAN', 'PHARMACIST'] },
+    { label: 'Appointments', route: '/appointments', icon: 'event', badge: () => this.store.appointments().length, allowedRoles: ['ADMIN', 'RECEPTIONIST', 'NURSE', 'DOCTOR'] },
     { label: 'Clinical EHR', route: '/clinical-ehr', icon: 'description', allowedRoles: ['DOCTOR', 'NURSE', 'ADMIN'] },
+    { label: 'Referrals & History', route: '/referrals-history', icon: 'assignment_returned', allowedRoles: ['DOCTOR', 'NURSE', 'ADMIN', 'RECEPTIONIST', 'ACCOUNTANT', 'CASHIER', 'HR_MANAGER'] },
     { label: 'Pharmacy', route: '/pharmacy', icon: 'medication', badge: () => this.store.pendingPrescriptionsCount(), allowedRoles: ['PHARMACIST', 'DOCTOR', 'ADMIN', 'NURSE'] },
     { label: 'Laboratory', route: '/laboratory', icon: 'biotech', badge: () => this.store.pendingLabOrdersCount(), allowedRoles: ['LAB_TECHNICIAN', 'DOCTOR', 'ADMIN'] },
-    { label: 'Billing', route: '/billing', icon: 'payments', allowedRoles: ['ACCOUNTANT', 'CASHIER', 'ADMIN', 'RECEPTIONIST'] },
+    { label: 'Billing', route: '/billing', icon: 'payments', allowedRoles: ['ACCOUNTANT', 'CASHIER', 'ADMIN'] },
     { label: 'Doctor Pricing', route: '/doctor-pricing', icon: 'price_change', allowedRoles: ['ACCOUNTANT', 'ADMIN'] },
     { label: 'Wards & Beds', route: '/wards-beds', icon: 'king_bed', badge: () => `${this.store.bedOccupancyRate()}%`, allowedRoles: ['NURSE', 'DOCTOR', 'ADMIN', 'RECEPTIONIST'] },
     { label: 'Staff Directory', route: '/staff', icon: 'badge', allowedRoles: ['ADMIN', 'DOCTOR', 'RECEPTIONIST', 'HR_MANAGER'] },
@@ -209,10 +245,14 @@ export class MainLayoutComponent {
     const role = this.store.currentUser()?.role;
     if (!role) return [];
     const roleStr = role as string;
-    return this.navItems.filter(item => {
+    return this.navItems.map(item => ({
+      ...item,
+      children: item.children?.filter(child => !child.allowedRoles || child.allowedRoles.includes(roleStr) || roleStr === 'ADMIN'),
+    })).filter(item => {
       if (item.label.startsWith('──')) {
         return roleStr === 'ADMIN';
       }
+      if (item.children && item.children.length === 0) return false;
       if (!item.allowedRoles || item.allowedRoles.length === 0) return true;
       return item.allowedRoles.includes(roleStr) || roleStr === 'ADMIN';
     });
@@ -232,9 +272,16 @@ export class MainLayoutComponent {
       filter(e => e instanceof NavigationEnd)
     ).subscribe(() => {
       const url = this.router.url;
-      const item = this.navItems.find(n => n.route && url.startsWith(n.route));
+      const item = this.findRouteItem(url);
       this.currentRouteTitle.set(item?.label || 'Dashboard');
     });
+  }
+
+  private findRouteItem(url: string): NavItem | undefined {
+    const items = this.navItems.flatMap(item => [item, ...(item.children || [])]);
+    return items
+      .filter(item => item.route && url.startsWith(item.route))
+      .sort((a, b) => b.route.length - a.route.length)[0];
   }
 
   toggleSidebarCollapse() {

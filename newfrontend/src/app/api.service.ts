@@ -5,7 +5,7 @@ import { Observable } from 'rxjs';
 import type {
   ApiResponse, LoginRequest, LoginResponse,
   BackendEmployee, BackendDoctorProfile, BackendDoctorServicePrice, BackendDoctorServiceQuote, BackendPatient,
-  BackendAppointment, BackendBed, BackendPrescription,
+  BackendAppointment, BackendBed, BackendBedAdmission, BackendBedDischarge, BackendPrescription,
   BackendClinicalEncounter, BackendVitalSign, BackendDiagnosis,
   BackendLabRequest, BackendDiagnosticTest, BackendInvoice, BackendPayment,
   BackendReceipt, BackendRolePermission, BackendPermission,
@@ -186,8 +186,9 @@ export class ApiService {
   }
 
   // ── Patients ──
-  getPatients(): Observable<ApiResponse<BackendPatient[]>> {
-    return this.http.get<ApiResponse<BackendPatient[]>>(`${this.baseUrl}/api/patients`);
+  getPatients(history = false): Observable<ApiResponse<BackendPatient[]>> {
+    const query = history ? '?history=true' : '';
+    return this.http.get<ApiResponse<BackendPatient[]>>(`${this.baseUrl}/api/patients${query}`);
   }
 
   createPatient(payload: Record<string, unknown>): Observable<ApiResponse<BackendPatient>> {
@@ -233,7 +234,11 @@ export class ApiService {
     return this.http.get<ApiResponse<BackendBed[]>>(`${this.baseUrl}/api/beds`);
   }
 
-  createBed(payload: { ward: string; room: string; bedNumber: string; isAvailable: boolean }): Observable<ApiResponse<BackendBed>> {
+  getBedAdmissions(activeOnly = false): Observable<ApiResponse<BackendBedAdmission[]>> {
+    return this.http.get<ApiResponse<BackendBedAdmission[]>>(`${this.baseUrl}/api/bed-admissions?activeOnly=${activeOnly}`);
+  }
+
+  createBed(payload: { ward: string; room: string; bedNumber: string; isAvailable: boolean; category: string; dailyRate: number; currency: string }): Observable<ApiResponse<BackendBed>> {
     return this.http.post<ApiResponse<BackendBed>>(`${this.baseUrl}/api/beds`, payload);
   }
 
@@ -241,6 +246,13 @@ export class ApiService {
     return this.http.put<ApiResponse<BackendBed>>(`${this.baseUrl}/api/beds/${id}/status`, { isAvailable });
   }
 
+  assignBed(id: string, patientId: string, notes?: string): Observable<ApiResponse<BackendBedAdmission>> {
+    return this.http.post<ApiResponse<BackendBedAdmission>>(`${this.baseUrl}/api/beds/${id}/assign`, { patientId, notes });
+  }
+
+  dischargeBed(id: string, notes?: string): Observable<ApiResponse<BackendBedDischarge>> {
+    return this.http.post<ApiResponse<BackendBedDischarge>>(`${this.baseUrl}/api/beds/${id}/discharge`, { notes });
+  }
   // ── Clinical ──
   getEncounters(): Observable<ApiResponse<BackendClinicalEncounter[]>> {
     return this.http.get<ApiResponse<BackendClinicalEncounter[]>>(`${this.baseUrl}/api/clinical/encounters`);

@@ -190,9 +190,11 @@ type AppointmentDoctor = {
             <thead class="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
               <tr>
                 <th class="py-4 px-4">Time Slot</th>
+                <th class="py-4 px-4">Queue</th>
                 <th class="py-4 px-4">Patient Profile</th>
                 <th class="py-4 px-4">Assigned Doctor</th>
                 <th class="py-4 px-4">Department</th>
+                <th class="py-4 px-4">Visit</th>
                 <th class="py-4 px-4">Status</th>
                 <th class="py-4 px-4 text-right">Action</th>
               </tr>
@@ -205,6 +207,12 @@ type AppointmentDoctor = {
                     <div class="text-[10px] text-slate-400">Today</div>
                   </td>
                   <td class="py-4 px-4">
+                    <div class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <span class="font-mono text-sm font-black text-slate-900">#{{ apt.queueNumber || '-' }}</span>
+                      <span class="text-[10px] font-bold uppercase text-slate-400">{{ apt.waitingAhead || 0 }} ahead</span>
+                    </div>
+                  </td>
+                  <td class="py-4 px-4">
                     <div class="font-bold text-slate-900">{{ store.patientDisplayName(apt.patientId) }}</div>
                     <div class="text-[10px] text-slate-400 font-mono">{{ store.patientMrn(apt.patientId) }}</div>
                   </td>
@@ -212,6 +220,14 @@ type AppointmentDoctor = {
                   <td class="py-4 px-4">
                     <span class="px-2 py-1 rounded bg-teal-50 text-teal-700 font-bold text-[10px] border border-teal-100">
                       {{ apt.department }}
+                    </span>
+                  </td>
+                  <td class="py-4 px-4">
+                    <span [class]="getTypeClass(apt.type)" class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase">
+                      @if (apt.type === 'EMERGENCY') {
+                        <span class="material-icons text-[13px]">priority_high</span>
+                      }
+                      {{ apt.type.replace('_', ' ') }}
                     </span>
                   </td>
                   <td class="py-4 px-4">
@@ -253,8 +269,10 @@ export class AppointmentsComponent {
 
   filteredAppointments = computed(() => {
     const filter = this.selectedStatusFilter();
-    if (filter === 'ALL') return this.store.appointments();
-    return this.store.appointments().filter(a => a.status === filter);
+    const appointments = filter === 'ALL'
+      ? this.store.appointments()
+      : this.store.appointments().filter(a => a.status === filter);
+    return [...appointments].sort((left, right) => this.appointmentRank(left.type, left.status, left.queueNumber) - this.appointmentRank(right.type, right.status, right.queueNumber));
   });
 
   doctors = computed(() => {
@@ -409,6 +427,20 @@ export class AppointmentsComponent {
       case 'CANCELLED': return 'bg-rose-50 text-rose-700 border-rose-200';
       default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
+  }
+
+  getTypeClass(type: AppointmentType): string {
+    if (type === 'EMERGENCY') return 'bg-rose-50 text-rose-700 border-rose-200';
+    if (type === 'FOLLOW_UP') return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (type === 'LAB_TEST') return 'bg-purple-50 text-purple-700 border-purple-200';
+    if (type === 'SURGERY') return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-slate-50 text-slate-600 border-slate-200';
+  }
+
+  private appointmentRank(type: AppointmentType, status: AppointmentStatus, queueNumber: number): number {
+    const priority = type === 'EMERGENCY' ? 0 : 10;
+    const statusRank = status === 'IN_PROGRESS' ? 0 : status === 'SCHEDULED' ? 1 : status === 'COMPLETED' ? 20 : 30;
+    return priority + statusRank + ((queueNumber || 9999) / 100000);
   }
 
   private setSelectedDepartment(department: string) {

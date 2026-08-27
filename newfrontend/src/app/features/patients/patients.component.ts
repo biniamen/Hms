@@ -104,7 +104,7 @@ import { Patient, PatientStatus } from '../../core/models';
                   </div>
                   <div class="space-y-1">
                     <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Insurance</label>
-                    <select formControlName="insuranceCompanyId" [class]="inputClasses">
+                    <select formControlName="insuranceCompanyId" (change)="onInsuranceChanged()" [class]="inputClasses">
                       <option value="">Self Pay / Cash</option>
                       @for (company of store.insuranceCompanies(); track company.id) {
                         <option [value]="company.id">
@@ -114,10 +114,34 @@ import { Patient, PatientStatus } from '../../core/models';
                     </select>
                   </div>
                 </div>
-                <div class="space-y-1">
-                  <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Policy / Membership No.</label>
-                  <input type="text" formControlName="insurancePolicyNumber" placeholder="Policy number" [class]="inputClasses" />
-                </div>
+
+                @if (hasInsuranceSelected()) {
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Member Type</label>
+                      <select formControlName="insuranceMemberType" [class]="inputClasses">
+                        <option value="Employee">Employee</option>
+                        <option value="Spouse">Spouse</option>
+                        <option value="Child">Child</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Principal Member</label>
+                      <input type="text" formControlName="principalMemberName" placeholder="Employee name" [class]="inputClasses" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Employee ID</label>
+                      <input type="text" formControlName="principalEmployeeId" placeholder="Company ID" [class]="inputClasses" />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[10px] font-bold text-slate-500 ml-1 uppercase">Employer</label>
+                      <input type="text" formControlName="employerName" placeholder="Insured company" [class]="inputClasses" />
+                    </div>
+                  </div>
+                }
                 <div class="space-y-1">
                   <label class="text-[10px] font-bold text-rose-600 ml-1 uppercase">Alerts / Allergies</label>
                   <input type="text" formControlName="allergies" placeholder="e.g. Penicillin" [class]="inputClasses + ' border-rose-200 focus:border-rose-500 focus:ring-rose-500/5'" />
@@ -312,8 +336,11 @@ export class PatientsComponent {
 
   filteredPatients = computed(() => {
     const q = this.patientSearchQuery().toLowerCase().trim();
-    if (!q) return this.store.patients();
-    return this.store.patients().filter(p => p.name.toLowerCase().includes(q) || p.mrn.toLowerCase().includes(q));
+    const source = this.store.currentUser()?.role === 'DOCTOR'
+      ? this.store.roleVisiblePatients()
+      : this.store.patients();
+    if (!q) return source;
+    return source.filter(p => p.name.toLowerCase().includes(q) || p.mrn.toLowerCase().includes(q));
   });
 
   patientForm = new FormGroup({
@@ -325,11 +352,34 @@ export class PatientsComponent {
     address: new FormControl(''),
     allergies: new FormControl('None'),
     insuranceCompanyId: new FormControl(''),
-    insurancePolicyNumber: new FormControl('')
+    insuranceMemberType: new FormControl<'Employee' | 'Spouse' | 'Child' | 'Other'>('Employee'),
+    principalMemberName: new FormControl(''),
+    principalEmployeeId: new FormControl(''),
+    employerName: new FormControl('')
   });
 
   constructor() {
     this.store.loadInsuranceCompanies();
+  }
+
+  hasInsuranceSelected(): boolean {
+    return !!this.patientForm.controls.insuranceCompanyId.value;
+  }
+
+  onInsuranceChanged() {
+    const company = this.store.insuranceCompanies().find(item => item.id === this.patientForm.controls.insuranceCompanyId.value);
+    if (!company) {
+      this.patientForm.patchValue({
+        insuranceMemberType: 'Employee',
+        principalMemberName: '',
+        principalEmployeeId: '',
+        employerName: '',
+      });
+      return;
+    }
+    if (!this.patientForm.controls.employerName.value) {
+      this.patientForm.patchValue({ employerName: company.name });
+    }
   }
 
   submitRegistration() {
@@ -340,6 +390,10 @@ export class PatientsComponent {
     }
     const val = this.patientForm.value;
     const company = this.store.insuranceCompanies().find(item => item.id === val.insuranceCompanyId);
+    if (company && val.insuranceMemberType === 'Spouse' && !company.spouseCoverageAllowed) {
+      this.store.addToast('error', 'Coverage Not Allowed', `${company.name} does not cover spouse service. Register this patient as cash or choose another payer.`);
+      return;
+    }
 
     // Reject duplicate registrations before hitting the API: the same phone number,
     // or the same patient (full name + date of birth) must not be registered twice.
@@ -374,7 +428,12 @@ export class PatientsComponent {
       insuranceProvider: company?.name || 'Self Pay',
       insuranceCompanyId: company?.id,
       insuranceCompanyName: company?.name,
-      insurancePolicyNumber: val.insurancePolicyNumber ?? '',
+      insurancePolicyNumber: '',
+      insuranceMemberType: company ? (val.insuranceMemberType || 'Employee') : undefined,
+      principalMemberName: company ? val.principalMemberName || undefined : undefined,
+      principalEmployeeId: company ? val.principalEmployeeId || undefined : undefined,
+      employerName: company ? val.employerName || company.name : undefined,
+      occupation: company && val.principalEmployeeId ? `Principal employee ID: ${val.principalEmployeeId}` : '',
       allergyList: val.allergies ? [val.allergies] : [],
       status: 'IN_TRIAGE',
       emergencyContact: { name: '', relation: '', phone: val.phone ?? '' },
@@ -391,7 +450,10 @@ export class PatientsComponent {
       address: '',
       allergies: 'None',
       insuranceCompanyId: '',
-      insurancePolicyNumber: '',
+      insuranceMemberType: 'Employee',
+      principalMemberName: '',
+      principalEmployeeId: '',
+      employerName: '',
     });
   }
 

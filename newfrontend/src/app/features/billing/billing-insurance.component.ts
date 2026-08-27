@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { StoreService } from '../../core/services/store.service';
 import { ApiService } from '../../api.service';
-import { BillingInvoice } from '../../core/models';
+import { BillingInvoice, InsuranceClaim } from '../../core/models';
 
 @Component({
   selector: 'app-billing-insurance',
@@ -48,7 +48,7 @@ import { BillingInvoice } from '../../core/models';
         <div class="bg-white p-5 rounded-2xl border border-slate-200/80 subtle-shadow">
           <div class="text-xs font-semibold text-slate-500 uppercase">Outstanding Receivables</div>
           <div class="text-2xl font-black font-display text-slate-900 mt-1">
-            &#36;{{ store.unpaidInvoicesTotal().toLocaleString('en-US', { minimumFractionDigits: 2 }) }}
+            {{ money(store.unpaidInvoicesTotal()) }}
           </div>
           <div class="text-[10px] text-amber-600 font-semibold mt-1">Self-pay & Copays due</div>
         </div>
@@ -56,7 +56,7 @@ import { BillingInvoice } from '../../core/models';
         <div class="bg-white p-5 rounded-2xl border border-slate-200/80 subtle-shadow">
           <div class="text-xs font-semibold text-slate-500 uppercase">Active Insurance Claims</div>
           <div class="text-2xl font-black font-display text-slate-900 mt-1">
-            {{ store.insuranceClaims().length }}
+            {{ activeInsuranceClaims().length }}
           </div>
           <div class="text-[10px] text-blue-600 font-semibold mt-1">Claims submitted to payers</div>
         </div>
@@ -64,7 +64,7 @@ import { BillingInvoice } from '../../core/models';
         <div class="bg-white p-5 rounded-2xl border border-slate-200/80 subtle-shadow">
           <div class="text-xs font-semibold text-slate-500 uppercase">Settled This Month</div>
           <div class="text-2xl font-black font-display text-emerald-600 mt-1">
-            &#36;3,650.00
+            {{ money(settledThisMonth()) }}
           </div>
           <div class="text-[10px] text-emerald-600 font-semibold mt-1">Cleared transactions</div>
         </div>
@@ -75,7 +75,7 @@ import { BillingInvoice } from '../../core/models';
             {{ pendingLabInvoices().length }}
           </div>
           <div class="text-[10px] text-purple-600 font-semibold mt-1">
-            {{ pendingLabAmount().toLocaleString('en-US', { minimumFractionDigits: 2 }) }} awaiting clearance
+            {{ money(pendingLabAmount()) }} awaiting clearance
           </div>
         </div>
       </div>
@@ -170,24 +170,24 @@ import { BillingInvoice } from '../../core/models';
                   <td class="py-3.5 px-4">
                     <div class="text-[11px] text-slate-700">
                       @for (item of inv.items; track item.id) {
-                        <div>• {{ item.description }} ({{ item.amount.toFixed(2) }})</div>
+                        <div>• {{ item.description }} ({{ money(item.amount) }})</div>
                       }
                     </div>
                   </td>
 
                   <td class="py-3.5 px-4 font-bold text-slate-900 font-mono">
-                    &#36;{{ inv.totalAmount.toFixed(2) }}
+                    {{ money(inv.totalAmount) }}
                   </td>
 
                   <td class="py-3.5 px-4">
-                    <div class="font-bold text-blue-700 font-mono">&#36;{{ inv.insuranceCoveredAmount.toFixed(2) }}</div>
+                    <div class="font-bold text-blue-700 font-mono">{{ money(inv.insuranceCoveredAmount) }}</div>
                     @if (inv.insuranceProvider) {
                       <div class="mt-0.5 max-w-[140px] truncate text-[9px] font-black uppercase tracking-widest text-blue-500">{{ inv.insuranceProvider }}</div>
                     }
                   </td>
 
                   <td class="py-3.5 px-4 font-bold text-emerald-700 font-mono">
-                    &#36;{{ inv.patientPaidAmount.toFixed(2) }}
+                    {{ money(inv.patientPaidAmount) }}
                   </td>
 
                   <td class="py-3.5 px-4">
@@ -198,15 +198,29 @@ import { BillingInvoice } from '../../core/models';
 
                   <td class="py-3.5 px-4 text-right">
                     <div class="flex items-center justify-end gap-1.5">
-                      @if (inv.status !== 'PAID') {
+                      @if (patientPaymentRemaining(inv) > 0) {
                         <button (click)="openPayModal(inv)" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px] shadow-xs">
-                          Record Payment
+                          Record Patient Payment
                         </button>
                       }
-                      @if ((inv.status === 'UNPAID' || inv.status === 'PARTIALLY_PAID') && inv.insuranceCoveredAmount > 0) {
-                        <button (click)="store.submitInsuranceClaim(inv.id)" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] shadow-xs">
-                          Submit Claim
+                      @if (patientPaymentRemaining(inv) <= 0 && insuranceBalance(inv) > 0) {
+                        @if (!claimForInvoice(inv.id)) {
+                        <button (click)="store.prepareInsuranceClaim(inv.id)" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] shadow-xs">
+                          Prepare Claim
                         </button>
+                        } @else if (claimForInvoice(inv.id)?.status === 'PREPARED') {
+                        <button (click)="store.submitInsuranceClaim(inv.id)" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] shadow-xs">
+                          Send Claim
+                        </button>
+                        }
+                        @if (claimForInvoice(inv.id)?.status !== 'PREPARED') {
+                        <button (click)="openPayModal(inv)" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-[10px] shadow-xs">
+                          Record Insurance Payment
+                        </button>
+                        }
+                      }
+                      @if (patientPaymentRemaining(inv) <= 0 && insuranceBalance(inv) <= 0 && inv.status !== 'PAID') {
+                        <span class="px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-lg text-[10px] ring-1 ring-emerald-200">Patient Cleared</span>
                       }
                       <button (click)="printInvoice(inv)" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-700 text-white font-bold rounded-lg text-[10px] shadow-xs">
                         Print
@@ -221,37 +235,51 @@ import { BillingInvoice } from '../../core/models';
         </div>
       </div>
 
-      <!-- INSURANCE CLAIMS MONITOR PANEL -->
+      <!-- INSURANCE CLAIMS REPORT -->
       <div class="bg-white rounded-2xl border border-slate-200/80 subtle-shadow p-5 space-y-4">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
             <h3 class="text-sm font-bold text-slate-800 font-display flex items-center gap-2">
               <span class="material-icons text-blue-600 text-lg">verified_user</span>
-              Active Third-Party Insurance Claims
+              Insurance Company Claims Report
             </h3>
-            <p class="text-xs text-slate-500">Real-time claim status tracking with BlueCross, Aetna, Cigna, Medicare</p>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-500">
+              <tr>
+                <th class="px-4 py-3">Claim</th>
+                <th class="px-4 py-3">Company</th>
+                <th class="px-4 py-3">Patient</th>
+                <th class="px-4 py-3">Invoice</th>
+                <th class="px-4 py-3">Amount</th>
+                <th class="px-4 py-3">Status</th>
+                <th class="px-4 py-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
           @for (claim of store.insuranceClaims(); track claim.id) {
-            <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2 text-xs">
-              <div class="flex items-center justify-between">
-                <span class="font-bold text-slate-900 font-mono">{{ claim.claimNumber }}</span>
-                <span [class]="getClaimStatusClass(claim.status)" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase">
-                  {{ claim.status }}
-                </span>
-              </div>
-              <div class="font-semibold text-slate-800">{{ claim.patientName }} ({{ claim.patientMrn }})</div>
-              <div class="text-slate-500 text-[11px]">Provider: {{ claim.provider }} • Policy: {{ claim.policyNumber }}</div>
-              <div class="flex items-center justify-between pt-2 border-t border-slate-200/60 font-mono font-bold">
-                <span>Claimed: &#36;{{ claim.claimAmount.toFixed(2) }}</span>
-                @if (claim.approvedAmount) {
-                  <span class="text-emerald-700">Approved: &#36;{{ claim.approvedAmount.toFixed(2) }}</span>
-                }
-              </div>
-            </div>
+            <tr class="hover:bg-slate-50/70">
+              <td class="px-4 py-3 font-mono font-black text-slate-900">{{ claim.claimNumber }}</td>
+              <td class="px-4 py-3">
+                <div class="font-black text-slate-800">{{ claim.provider }}</div>
+                <div class="text-[10px] text-slate-400">{{ claim.policyNumber }}</div>
+              </td>
+              <td class="px-4 py-3">{{ claim.patientName }}<div class="font-mono text-[10px] text-slate-400">{{ claim.patientMrn }}</div></td>
+              <td class="px-4 py-3 font-mono text-[10px] text-slate-500">{{ invoiceNumberForClaim(claim) }}</td>
+              <td class="px-4 py-3 font-mono font-black text-blue-700">{{ money(claim.claimAmount) }}</td>
+              <td class="px-4 py-3"><span [class]="getClaimStatusClass(claim.status)" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase">{{ claim.status }}</span></td>
+              <td class="px-4 py-3 text-right">
+                <button type="button" (click)="printClaimInvoice(claim)" class="rounded-lg bg-slate-900 px-3 py-1.5 text-[10px] font-black text-white">Claim Invoice</button>
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="7" class="px-4 py-10 text-center text-xs font-bold text-slate-400">No insurance claim prepared yet.</td></tr>
           }
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -292,11 +320,11 @@ import { BillingInvoice } from '../../core/models';
 
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label for="inv-total" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Total Amount ($) *</label>
+                  <label for="inv-total" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Total Amount (ETB) *</label>
                   <input id="inv-total" type="number" formControlName="totalAmount" placeholder="450.00" class="w-full px-3 py-2 border rounded-xl text-xs" />
                 </div>
                 <div>
-                  <label for="inv-covered" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Insurance Covered ($)</label>
+                  <label for="inv-covered" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Insurance Covered (ETB)</label>
                   <input id="inv-covered" type="number" formControlName="insuranceCovered" placeholder="360.00" class="w-full px-3 py-2 border rounded-xl text-xs" />
                 </div>
               </div>
@@ -336,11 +364,11 @@ import { BillingInvoice } from '../../core/models';
                 </div>
                 <p class="text-xs font-semibold text-blue-900">
                   {{ selectedPaymentCoverage()?.provider }} covers {{ selectedPaymentCoverage()?.coveragePercent }}% of this charge.
-                  Insured portion: &#36;{{ (selectedPaymentCoverage()?.insuredAmount ?? 0).toFixed(2) }}
+                  Insured portion: {{ money(selectedPaymentCoverage()?.insuredAmount ?? 0) }}
                   @if (selectedPaymentCoverage()?.settleViaInsurance) {
                     <span> — patient copay already collected.</span>
                   } @else {
-                    <span> — patient copay: &#36;{{ (selectedPaymentCoverage()?.copay ?? 0).toFixed(2) }}.</span>
+                    <span> — patient copay: {{ money(selectedPaymentCoverage()?.copay ?? 0) }}.</span>
                   }
                 </p>
                 @if (selectedPaymentCoverage()?.settleViaInsurance) {
@@ -354,7 +382,7 @@ import { BillingInvoice } from '../../core/models';
             <form [formGroup]="payForm" (ngSubmit)="submitPayment()" class="space-y-4 text-xs">
               
               <div>
-                <label for="pay-amount" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Payment Amount ($) *</label>
+                <label for="pay-amount" class="block text-xs font-semibold uppercase text-slate-600 mb-1">Payment Amount (ETB) *</label>
                 <input id="pay-amount" type="number" formControlName="amount" class="w-full px-3 py-2 border rounded-xl font-bold font-mono text-sm text-emerald-700" />
               </div>
 
@@ -488,6 +516,14 @@ export class BillingInsuranceComponent {
     this.pendingLabInvoices().reduce(
       (total, invoice) => total + Math.max(0, invoice.totalAmount - invoice.patientPaidAmount),
       0));
+
+  activeInsuranceClaims = computed(() =>
+    this.store.insuranceClaims().filter(claim => claim.status !== 'PAID' && claim.status !== 'REJECTED'));
+
+  settledThisMonth = computed(() =>
+    this.store.billingInvoices()
+      .filter(invoice => invoice.status === 'PAID')
+      .reduce((total, invoice) => total + invoice.patientPaidAmount, 0));
 
   invForm = new FormGroup({
     patientId: new FormControl('', [Validators.required]),
@@ -638,23 +674,45 @@ export class BillingInsuranceComponent {
   openPayModal(inv: BillingInvoice) {
     this.selectedInvForPayment.set(inv);
 
-    // Detect the patient's insurance before processing payment: collect only the
-    // patient's copay and let the payer settle the insured portion through a claim.
-    const coverage = this.store.insuranceCoverageFor(inv.patientId);
-    const insuredAmount = coverage.isInsured
-      ? Math.round(inv.totalAmount * (coverage.coveragePercent / 100) * 100) / 100
-      : 0;
-    const paid = inv.patientPaidAmount;
-    const remainingCopay = Math.max(0, inv.totalAmount - insuredAmount - paid);
-    const due = Math.max(0, inv.totalAmount - paid);
+    const patientRemaining = this.patientPaymentRemaining(inv);
+    const insurerRemaining = this.insuranceBalance(inv);
+    const isInsuranceRemittance = patientRemaining <= 0 && insurerRemaining > 0;
 
-    const settleInsuredPortion = coverage.isInsured && remainingCopay <= 0 && due > 0;
     this.payForm.patchValue({
-      amount: coverage.isInsured ? (remainingCopay > 0 ? remainingCopay : due) : due,
-      method: settleInsuredPortion ? 'Insurance Direct' : 'Credit Card',
+      amount: isInsuranceRemittance ? insurerRemaining : patientRemaining || Math.max(0, inv.totalAmount - inv.patientPaidAmount),
+      method: isInsuranceRemittance ? 'Insurance Direct' : 'Cash',
     });
   }
 
+  patientPaymentRemaining(inv: BillingInvoice): number {
+    const patientPortion = Math.max(0, inv.totalAmount - inv.insuranceCoveredAmount);
+    return Math.max(0, patientPortion - inv.patientPaidAmount);
+  }
+
+  insuranceBalance(inv: BillingInvoice): number {
+    if (inv.insuranceCoveredAmount <= 0) return 0;
+    const patientPortion = Math.max(0, inv.totalAmount - inv.insuranceCoveredAmount);
+    if (inv.patientPaidAmount < patientPortion) return inv.insuranceCoveredAmount;
+    return Math.max(0, inv.totalAmount - inv.patientPaidAmount);
+  }
+
+  money(value: number): string {
+    return this.store.money(Number(value || 0));
+  }
+
+  claimForInvoice(invoiceId: string): InsuranceClaim | undefined {
+    return this.store.claimForInvoice(invoiceId);
+  }
+
+  invoiceNumberForClaim(claim: InsuranceClaim): string {
+    return this.store.billingInvoices().find(invoice => invoice.id === claim.invoiceId)?.invoiceNumber || 'Invoice unavailable';
+  }
+
+  displayItemCode(item: BillingInvoice['items'][number], index = 0): string {
+    const candidate = item.serviceCode || item.id || `SVC-${index + 1}`;
+    const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate);
+    return looksLikeUuid ? `SVC-${String(index + 1).padStart(3, '0')}` : candidate;
+  }
   isLabInvoice(invoice: BillingInvoice | null | undefined): boolean {
     return !!invoice && invoice.items.some(item => item.referenceType?.toUpperCase() === 'LAB_REQUEST');
   }
@@ -669,6 +727,53 @@ export class BillingInsuranceComponent {
     this.selectedInvForPayment.set(null);
   }
 
+  printClaimInvoice(claim: InsuranceClaim) {
+    const invoice = this.store.billingInvoices().find(item => item.id === claim.invoiceId);
+    const printedAt = new Date().toLocaleString();
+    const rows = invoice?.items.map((item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${this.escapeHtml(this.displayItemCode(item, index))}</td>
+        <td>${this.escapeHtml(item.description)}</td>
+        <td class="num">ETB ${item.amount.toFixed(2)}</td>
+      </tr>
+    `).join('') || '';
+    const popup = window.open('', '_blank', 'width=980,height=760');
+    if (!popup) return;
+    popup.document.write(`
+      <html>
+      <head>
+        <title>${this.escapeHtml(claim.claimNumber)}</title>
+        <style>
+          body{margin:0;background:#e5e7eb;font-family:Arial,sans-serif;color:#111827}.page{width:210mm;min-height:297mm;margin:18px auto;background:white;padding:16mm;box-shadow:0 18px 50px rgba(15,23,42,.18)}.head{display:grid;grid-template-columns:1fr 150px;border:2px solid #111827}.hospital{text-align:center;padding:12px;border-right:2px solid #111827}.hospital h2{margin:0;font-size:17px;letter-spacing:.08em}.hospital p{margin:4px 0 0;font-size:10px;color:#475569}.box{padding:10px;text-align:center;font-size:10px}.title{border:2px solid #111827;border-top:0;padding:8px 12px;font-size:12px}h1{text-align:center;font-size:18px;margin:18px 0 12px;text-transform:uppercase}.meta{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:12px 0;font-size:12px}.line{display:grid;grid-template-columns:130px 1fr;border-bottom:1px solid #94a3b8;padding:5px 0}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:14px}th,td{border:1px solid #cbd5e1;padding:7px;text-align:left}th{background:#f1f5f9;font-size:10px;text-transform:uppercase}.num{text-align:right;font-family:Consolas,monospace}.total{margin-left:auto;margin-top:14px;width:330px;font-size:12px}.total div{display:grid;grid-template-columns:1fr 130px;border-bottom:1px solid #cbd5e1;padding:6px 0}.sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:72px;font-size:12px}.sign div{border-top:1px solid #111827;padding-top:8px}@media print{body{background:white}.page{margin:0;box-shadow:none}}
+        </style>
+      </head>
+      <body><section class="page">
+        <div class="head"><div class="hospital"><h2>BETHZATHA GENERAL HOSPITAL</h2><p>Addis Ababa, Ethiopia | Tel: +251-115-535980 | info@bethzatha.com</p></div><div class="box">Claim No<br><strong>${this.escapeHtml(claim.claimNumber)}</strong></div></div>
+        <div class="title"><strong>Document Title:</strong> Insurance Claim Invoice &nbsp; | &nbsp; <strong>Printed:</strong> ${this.escapeHtml(printedAt)}</div>
+        <h1>Insurance Claim Invoice</h1>
+        <div class="meta">
+          <div>
+            <div class="line"><strong>Payer</strong><span>${this.escapeHtml(claim.provider)}</span></div>
+            <div class="line"><strong>Policy</strong><span>${this.escapeHtml(claim.policyNumber)}</span></div>
+            <div class="line"><strong>Status</strong><span>${this.escapeHtml(claim.status)}</span></div>
+          </div>
+          <div>
+            <div class="line"><strong>Patient</strong><span>${this.escapeHtml(claim.patientName)}</span></div>
+            <div class="line"><strong>MRN</strong><span>${this.escapeHtml(claim.patientMrn)}</span></div>
+            <div class="line"><strong>Invoice</strong><span>${this.escapeHtml(invoice?.invoiceNumber || 'N/A')}</span></div>
+          </div>
+        </div>
+        <table><thead><tr><th>No</th><th>Code</th><th>Description</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="total"><div><strong>Claim Amount</strong><span class="num">ETB ${claim.claimAmount.toFixed(2)}</span></div><div><strong>Patient Paid</strong><span class="num">ETB ${(invoice?.patientPaidAmount || 0).toFixed(2)}</span></div></div>
+        <div class="sign"><div>Prepared By / Accountant</div><div>Payer Receiver</div></div>
+      </section></body></html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  }
+
   printInvoice(inv: BillingInvoice) {
     const printedAt = new Date().toLocaleString();
     const documentNo = `INV-${Date.now().toString().slice(-8)}`;
@@ -677,13 +782,13 @@ export class BillingInsuranceComponent {
     const rows = inv.items.map((item, index) => `
       <tr>
         <td>${index + 1}</td>
-        <td>${this.escapeHtml(item.id)}</td>
+        <td>${this.escapeHtml(this.displayItemCode(item, index))}</td>
         <td>${this.escapeHtml(item.description)}</td>
         <td>${this.escapeHtml(item.category)}</td>
         <td>${this.escapeHtml(inv.date)}</td>
-        <td class="num">${item.amount.toFixed(2)}</td>
+        <td class="num">ETB ${item.amount.toFixed(2)}</td>
         <td class="num">1</td>
-        <td class="num">${item.amount.toFixed(2)}</td>
+        <td class="num">ETB ${item.amount.toFixed(2)}</td>
       </tr>
     `).join('');
     const balance = inv.totalAmount - inv.insuranceCoveredAmount - inv.patientPaidAmount;
@@ -754,10 +859,10 @@ export class BillingInsuranceComponent {
             <tbody>${rows}</tbody>
           </table>
           <div class="totals">
-            <div><strong>Sub Total</strong><span class="num">${inv.totalAmount.toFixed(2)}</span></div>
-            <div><strong>Insurance Covered</strong><span class="num">${inv.insuranceCoveredAmount.toFixed(2)}</span></div>
-            <div><strong>Patient Paid</strong><span class="num">${inv.patientPaidAmount.toFixed(2)}</span></div>
-            <div><strong>Balance</strong><span class="num">${Math.max(balance, 0).toFixed(2)}</span></div>
+            <div><strong>Sub Total</strong><span class="num">ETB ${inv.totalAmount.toFixed(2)}</span></div>
+            <div><strong>Insurance Covered</strong><span class="num">ETB ${inv.insuranceCoveredAmount.toFixed(2)}</span></div>
+            <div><strong>Patient Paid</strong><span class="num">ETB ${inv.patientPaidAmount.toFixed(2)}</span></div>
+            <div><strong>Balance</strong><span class="num">ETB ${Math.max(balance, 0).toFixed(2)}</span></div>
           </div>
           <div class="signatures">
             <div class="sign-line">Cashier / Billing Officer</div>
@@ -784,9 +889,11 @@ export class BillingInsuranceComponent {
 
   getClaimStatusClass(status: string): string {
     switch (status) {
+      case 'PREPARED': return 'bg-slate-50 text-slate-700 border border-slate-200';
       case 'SUBMITTED': return 'bg-blue-50 text-blue-700 border border-blue-200';
       case 'UNDER_REVIEW': return 'bg-amber-50 text-amber-700 border border-amber-200';
       case 'APPROVED': return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+      case 'PAID': return 'bg-emerald-100 text-emerald-800 border border-emerald-300';
       case 'REJECTED': return 'bg-rose-50 text-rose-700 border border-rose-200';
       default: return 'bg-slate-100 text-slate-700 border border-slate-200';
     }
