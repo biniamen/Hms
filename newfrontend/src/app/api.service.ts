@@ -195,6 +195,29 @@ export class ApiService {
     return this.http.post<ApiResponse<BackendPatient>>(`${this.baseUrl}/api/patients`, payload);
   }
 
+  updatePatient(id: string, payload: Record<string, unknown>): Observable<ApiResponse<BackendPatient>> {
+    return this.http.put<ApiResponse<BackendPatient>>(`${this.baseUrl}/api/patients/${id}`, payload);
+  }
+
+  createUnknownEmergencyPatient(payload: {
+    gender?: string;
+    estimatedAgeYears?: number;
+    broughtBy: string;
+    incidentType: string;
+    incidentLocation: string;
+    triageLevel: string;
+    doctorId: string;
+    department?: string;
+    emergencyNotes?: string;
+    medicoLegalCase: boolean;
+    photoDataUrl?: string;
+  }): Observable<ApiResponse<{ patient: BackendPatient; appointment: BackendAppointment }>> {
+    return this.http.post<ApiResponse<{ patient: BackendPatient; appointment: BackendAppointment }>>(
+      `${this.baseUrl}/api/patients/unknown-emergency`,
+      payload
+    );
+  }
+
   // ── Insurance Companies ──
   getInsuranceCompanies(): Observable<ApiResponse<BackendInsuranceCompany[]>> {
     return this.http.get<ApiResponse<BackendInsuranceCompany[]>>(`${this.baseUrl}/api/insurance-companies`);

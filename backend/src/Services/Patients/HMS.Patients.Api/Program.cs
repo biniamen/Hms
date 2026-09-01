@@ -242,6 +242,93 @@ app.MapPost("/api/patients", async (CreatePatientRequest request, PatientsDbCont
     return Results.Created($"/api/patients/{patient.Id}", ApiResponse<PatientDto>.Ok(dto, "Patient registered."));
 }).WithValidation<CreatePatientRequest>();
 
+app.MapPost("/api/patients/unknown-emergency", async (CreateUnknownEmergencyPatientRequest request, PatientsDbContext db) =>
+{
+    if (request.DoctorId == Guid.Empty ||
+        string.IsNullOrWhiteSpace(request.BroughtBy) ||
+        string.IsNullOrWhiteSpace(request.IncidentType) ||
+        string.IsNullOrWhiteSpace(request.IncidentLocation) ||
+        string.IsNullOrWhiteSpace(request.TriageLevel))
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Doctor, brought by, incident type, incident location, and triage level are required."));
+    }
+
+    var gender = Clean(request.Gender, "Unknown");
+    var estimatedAge = Math.Clamp(request.EstimatedAgeYears ?? 35, 0, 120);
+    var mrn = await NextEmergencyMrnAsync(db);
+    var (photoContentType, photoData) = ParsePhoto(request.PhotoDataUrl);
+    var incidentType = Clean(request.IncidentType, "Emergency");
+    var triageLevel = NormalizeEmergencyTriage(request.TriageLevel);
+    var department = Clean(request.Department, "Emergency");
+
+    await using var transaction = await db.Database.BeginTransactionAsync();
+
+    var patient = new Patient
+    {
+        Id = Guid.NewGuid(),
+        Mrn = mrn,
+        FirstName = "Unknown",
+        LastName = gender.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ? "Emergency Patient" : gender,
+        Email = null,
+        Phone = $"UNKNOWN-{mrn}",
+        Gender = gender,
+        DateOfBirth = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(-estimatedAge)),
+        NationalId = null,
+        MaritalStatus = null,
+        Occupation = "Unknown emergency patient",
+        Address = CleanOrNull(request.IncidentLocation),
+        BloodType = null,
+        InsuranceCompanyId = null,
+        EmployerName = null,
+        InsurancePlan = "Identity Pending",
+        InsuranceProvider = "Self Pay",
+        InsurancePolicyNumber = null,
+        EmergencyContactName = CleanOrNull(request.BroughtBy),
+        EmergencyContactPhone = "",
+        PhotoContentType = photoContentType,
+        PhotoData = photoData,
+        IdentityStatus = "Identity Pending",
+        IsIdentityPending = true,
+        TemporaryName = $"Unknown {gender}",
+        EstimatedAgeYears = estimatedAge,
+        BroughtBy = request.BroughtBy.Trim(),
+        IncidentType = incidentType,
+        IncidentLocation = request.IncidentLocation.Trim(),
+        TriageLevel = triageLevel,
+        MedicoLegalCase = request.MedicoLegalCase,
+        EmergencyNotes = CleanOrNull(request.EmergencyNotes),
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    var appointment = new Appointment
+    {
+        Id = Guid.NewGuid(),
+        PatientId = patient.Id,
+        DoctorId = request.DoctorId,
+        StartsAtUtc = DateTime.UtcNow,
+        Status = "Waiting",
+        Reason = $"{incidentType}; identity pending",
+        Department = department,
+        AppointmentType = "Emergency",
+        Priority = "Emergency",
+        Notes = BuildUnknownEmergencyNotes(request, mrn, triageLevel),
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    db.Patients.Add(patient);
+    db.Appointments.Add(appointment);
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
+
+    var patientDto = ToPatientDto(patient);
+    await PublishPatientRegisteredAsync(app.Configuration, patientDto);
+    var appointmentDto = ToAppointmentDtos(await db.Appointments.AsNoTracking().Where(item => item.Id == appointment.Id).ToListAsync()).First();
+
+    return Results.Created($"/api/patients/{patient.Id}", ApiResponse<UnknownEmergencyPatientDto>.Ok(
+        new UnknownEmergencyPatientDto(patientDto, appointmentDto),
+        "Unknown emergency patient registered and placed in the emergency queue."));
+}).WithValidation<CreateUnknownEmergencyPatientRequest>();
+
 app.MapPut("/api/patients/{id:guid}", async (Guid id, UpdatePatientRequest request, PatientsDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(request.FirstName) ||
@@ -285,6 +372,12 @@ app.MapPut("/api/patients/{id:guid}", async (Guid id, UpdatePatientRequest reque
     patient.InsurancePolicyNumber = CleanOrNull(request.InsurancePolicyNumber);
     patient.EmergencyContactName = CleanOrNull(request.EmergencyContactName);
     patient.EmergencyContactPhone = CleanOrNull(request.EmergencyContactPhone);
+    if (patient.IsIdentityPending)
+    {
+        patient.IsIdentityPending = false;
+        patient.IdentityStatus = "Verified";
+        patient.IdentityResolvedAtUtc = DateTime.UtcNow;
+    }
 
     if (request.PhotoDataUrl is not null)
     {
@@ -746,7 +839,17 @@ static PatientDto ToPatientDto(Patient patient)
         patient.EmergencyContactName,
         patient.EmergencyContactPhone,
         photoDataUrl,
-        patient.InsuranceCompany?.CoveragePercent);
+        patient.InsuranceCompany?.CoveragePercent,
+        patient.IdentityStatus,
+        patient.IsIdentityPending,
+        patient.TemporaryName,
+        patient.EstimatedAgeYears,
+        patient.BroughtBy,
+        patient.IncidentType,
+        patient.IncidentLocation,
+        patient.TriageLevel,
+        patient.MedicoLegalCase,
+        patient.EmergencyNotes);
 }
 
 static BedDto ToBedDto(Bed bed) => new(
@@ -886,6 +989,22 @@ static string NormalizeAppointmentType(string? value)
     };
 }
 
+static string NormalizeEmergencyTriage(string? value)
+{
+    var clean = Clean(value, "Emergency").Trim();
+    return clean.ToUpperInvariant() switch
+    {
+        "RED" => "Critical",
+        "CRITICAL" => "Critical",
+        "RESUSCITATION" => "Critical",
+        "ORANGE" => "Emergency",
+        "EMERGENCY" => "Emergency",
+        "YELLOW" => "Urgent",
+        "URGENT" => "Urgent",
+        _ => clean
+    };
+}
+
 static string NormalizeBedCategory(string? value)
 {
     var clean = Clean(value, "Normal").Trim();
@@ -921,6 +1040,44 @@ static async Task<string> NextMrnAsync(PatientsDbContext db)
         .Max() + 1;
 
     return $"MRN-{next:0000}";
+}
+
+static async Task<string> NextEmergencyMrnAsync(PatientsDbContext db)
+{
+    var prefix = $"EMR-{DateTime.UtcNow:yyyy}-";
+    var existingMrns = await db.Patients
+        .AsNoTracking()
+        .Where(patient => patient.Mrn.StartsWith(prefix))
+        .Select(patient => patient.Mrn)
+        .ToListAsync();
+
+    var next = existingMrns
+        .Select(value => value[prefix.Length..])
+        .Select(segment => int.TryParse(segment, out var number) ? number : 0)
+        .DefaultIfEmpty(0)
+        .Max() + 1;
+
+    return $"{prefix}{next:0000}";
+}
+
+static string BuildUnknownEmergencyNotes(CreateUnknownEmergencyPatientRequest request, string mrn, string triageLevel)
+{
+    var lines = new List<string>
+    {
+        $"Temporary MRN: {mrn}",
+        $"Identity status: pending",
+        $"Triage level: {triageLevel}",
+        $"Brought by: {request.BroughtBy.Trim()}",
+        $"Incident location: {request.IncidentLocation.Trim()}",
+        $"Medico-legal case: {(request.MedicoLegalCase ? "Yes" : "No")}"
+    };
+
+    if (!string.IsNullOrWhiteSpace(request.EmergencyNotes))
+    {
+        lines.Add($"Initial notes: {request.EmergencyNotes.Trim()}");
+    }
+
+    return string.Join(Environment.NewLine, lines);
 }
 
 static async Task EnsureRabbitMqAsync(IConfiguration configuration)

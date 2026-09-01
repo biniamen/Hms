@@ -58,6 +58,17 @@ public sealed class PatientsDbContext(DbContextOptions<PatientsDbContext> option
             entity.Property(patient => patient.EmergencyContactPhone).HasColumnName("emergency_contact_phone").HasMaxLength(32);
             entity.Property(patient => patient.PhotoContentType).HasColumnName("photo_content_type").HasMaxLength(80);
             entity.Property(patient => patient.PhotoData).HasColumnName("photo_data");
+            entity.Property(patient => patient.IdentityStatus).HasColumnName("identity_status").HasMaxLength(40).HasDefaultValue("Verified");
+            entity.Property(patient => patient.IsIdentityPending).HasColumnName("is_identity_pending");
+            entity.Property(patient => patient.TemporaryName).HasColumnName("temporary_name").HasMaxLength(160);
+            entity.Property(patient => patient.EstimatedAgeYears).HasColumnName("estimated_age_years");
+            entity.Property(patient => patient.BroughtBy).HasColumnName("brought_by").HasMaxLength(120);
+            entity.Property(patient => patient.IncidentType).HasColumnName("incident_type").HasMaxLength(120);
+            entity.Property(patient => patient.IncidentLocation).HasColumnName("incident_location").HasMaxLength(240);
+            entity.Property(patient => patient.TriageLevel).HasColumnName("triage_level").HasMaxLength(40);
+            entity.Property(patient => patient.MedicoLegalCase).HasColumnName("medico_legal_case");
+            entity.Property(patient => patient.EmergencyNotes).HasColumnName("emergency_notes");
+            entity.Property(patient => patient.IdentityResolvedAtUtc).HasColumnName("identity_resolved_at_utc");
             entity.Property(patient => patient.CreatedAtUtc).HasColumnName("created_at").HasDefaultValueSql("now()");
             entity.HasOne(patient => patient.InsuranceCompany)
                 .WithMany(company => company.Patients)
@@ -164,6 +175,17 @@ public sealed class Patient : Entity
     public string? EmergencyContactPhone { get; set; }
     public string? PhotoContentType { get; set; }
     public byte[]? PhotoData { get; set; }
+    public string IdentityStatus { get; set; } = "Verified";
+    public bool IsIdentityPending { get; set; }
+    public string? TemporaryName { get; set; }
+    public int? EstimatedAgeYears { get; set; }
+    public string? BroughtBy { get; set; }
+    public string? IncidentType { get; set; }
+    public string? IncidentLocation { get; set; }
+    public string? TriageLevel { get; set; }
+    public bool MedicoLegalCase { get; set; }
+    public string? EmergencyNotes { get; set; }
+    public DateTime? IdentityResolvedAtUtc { get; set; }
     public InsuranceCompany? InsuranceCompany { get; set; }
     public List<Appointment> Appointments { get; set; } = [];
     public List<BedAdmission> BedAdmissions { get; set; } = [];
@@ -290,7 +312,8 @@ public static class PatientsSeedData
             new Patient { Id = Guid.Parse("d5c6bf11-de68-4c3f-97d2-6d7fd12f8e80"), Mrn = "MRN-0002", FirstName = "Dawit", LastName = "Alemu", Email = "dawit.alemu@example.com", Phone = "0920000002", Gender = "Male", DateOfBirth = new DateOnly(1988, 2, 20), NationalId = "ET-10002", MaritalStatus = "Married", Occupation = "Driver", Address = "CMC, Addis Ababa", BloodType = "A+", InsuranceCompanyId = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), EmployerName = "Ethio Logistics PLC", InsurancePlan = "Corporate Gold", InsuranceProvider = "EthioLife Corporate Insurance", InsurancePolicyNumber = "INS-0002", EmergencyContactName = "Alem Alemu", EmergencyContactPhone = "0921000002" },
             new Patient { Id = Guid.Parse("55d16cd5-e42f-4bb0-b1ef-02f4e6284a03"), Mrn = "MRN-0003", FirstName = "Amen", LastName = "Biniyam", Email = "amen.biniyam@example.com", Phone = "0920000003", Gender = "Male", DateOfBirth = new DateOnly(1979, 9, 14), NationalId = "ET-10003", MaritalStatus = "Married", Occupation = "Bank Officer", Address = "Kazanchis, Addis Ababa", BloodType = "B+", InsuranceCompanyId = Guid.Parse("9c864a76-f3f1-4b1c-98ce-14034e7f8e67"), EmployerName = "Unity Bank", InsurancePlan = "Employer Fund", InsuranceProvider = "Unity Staff Medical Fund", InsurancePolicyNumber = "UNITY-0003", EmergencyContactName = "Tigist Hailu", EmergencyContactPhone = "0921000003" },
             new Patient { Id = Guid.Parse("f857a7b1-9689-480d-a110-111226b77104"), Mrn = "MRN-0004", FirstName = "Meron", LastName = "Kassa", Email = "meron.kassa@example.com", Phone = "0920000004", Gender = "Female", DateOfBirth = new DateOnly(2001, 12, 3), NationalId = "ET-10004", MaritalStatus = "Single", Occupation = "Student", Address = "Piassa, Addis Ababa", BloodType = "AB+", EmployerName = "Self", InsurancePlan = "Self Pay", InsuranceProvider = "", InsurancePolicyNumber = "", EmergencyContactName = "Kassa Gemechu", EmergencyContactPhone = "0921000004" },
-            new Patient { Id = Guid.Parse("0ef7e12a-1017-4039-83c4-d90301515f05"), Mrn = "MRN-0005", FirstName = "Hirut", LastName = "Tola", Email = "hirut.tola@example.com", Phone = "0920000005", Gender = "Female", DateOfBirth = new DateOnly(1991, 7, 27), NationalId = "ET-10005", MaritalStatus = "Married", Occupation = "Merchant", Address = "Megenagna, Addis Ababa", BloodType = "O-", InsuranceCompanyId = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), EmployerName = "Hirut Trading", InsurancePlan = "Corporate Gold", InsuranceProvider = "EthioLife Corporate Insurance", InsurancePolicyNumber = "INS-0005", EmergencyContactName = "Tola Bekele", EmergencyContactPhone = "0921000005" }
+            new Patient { Id = Guid.Parse("0ef7e12a-1017-4039-83c4-d90301515f05"), Mrn = "MRN-0005", FirstName = "Hirut", LastName = "Tola", Email = "hirut.tola@example.com", Phone = "0920000005", Gender = "Female", DateOfBirth = new DateOnly(1991, 7, 27), NationalId = "ET-10005", MaritalStatus = "Married", Occupation = "Merchant", Address = "Megenagna, Addis Ababa", BloodType = "O-", InsuranceCompanyId = Guid.Parse("7d910412-70b0-47f6-8f81-9ee8d59a5fd0"), EmployerName = "Hirut Trading", InsurancePlan = "Corporate Gold", InsuranceProvider = "EthioLife Corporate Insurance", InsurancePolicyNumber = "INS-0005", EmergencyContactName = "Tola Bekele", EmergencyContactPhone = "0921000005" },
+            new Patient { Id = Guid.Parse("b34df4a2-fb6b-43ed-8421-e8eb59fd02f8"), Mrn = $"EMR-{DateTime.UtcNow.Year}-0001", FirstName = "Unknown", LastName = "Male", Email = null, Phone = $"UNKNOWN-EMR-{DateTime.UtcNow.Year}-0001", Gender = "Male", DateOfBirth = new DateOnly(DateTime.UtcNow.Year - 35, 1, 1), NationalId = null, MaritalStatus = null, Occupation = "Unknown emergency patient", Address = "Brought from accident scene", BloodType = null, EmployerName = null, InsurancePlan = "Identity Pending", InsuranceProvider = "Self Pay", InsurancePolicyNumber = null, EmergencyContactName = "Police / Ambulance", EmergencyContactPhone = "", IdentityStatus = "Identity Pending", IsIdentityPending = true, TemporaryName = "Unknown Male", EstimatedAgeYears = 35, BroughtBy = "Ambulance", IncidentType = "Road traffic accident", IncidentLocation = "Unconfirmed accident location", TriageLevel = "Critical", MedicoLegalCase = true, EmergencyNotes = "Sample unknown emergency case for treatment-first workflow review." }
         };
 
         foreach (var patient in patients)
@@ -327,6 +350,17 @@ public static class PatientsSeedData
                 existing.InsurancePolicyNumber = patient.InsurancePolicyNumber;
                 existing.EmergencyContactName = patient.EmergencyContactName;
                 existing.EmergencyContactPhone = patient.EmergencyContactPhone;
+                existing.IdentityStatus = patient.IdentityStatus;
+                existing.IsIdentityPending = patient.IsIdentityPending;
+                existing.TemporaryName = patient.TemporaryName;
+                existing.EstimatedAgeYears = patient.EstimatedAgeYears;
+                existing.BroughtBy = patient.BroughtBy;
+                existing.IncidentType = patient.IncidentType;
+                existing.IncidentLocation = patient.IncidentLocation;
+                existing.TriageLevel = patient.TriageLevel;
+                existing.MedicoLegalCase = patient.MedicoLegalCase;
+                existing.EmergencyNotes = patient.EmergencyNotes;
+                existing.IdentityResolvedAtUtc = patient.IdentityResolvedAtUtc;
             }
         }
     }
@@ -427,6 +461,7 @@ public static class PatientsSeedData
             new AppointmentSeed("aac7edfa-e8d7-4646-a223-8ad0d20c3103", "MRN-0003", Guid.Parse("d7f768c4-e28c-4b46-94d8-68ed9a325404"), DateTime.UtcNow.AddHours(4), "In Service", "Hypertension follow-up", "Cardiology", "Follow-up", "Normal", "Bring previous ECG result."),
             new AppointmentSeed("d19846d8-e394-4a91-ae2f-d2d7ea535804", "MRN-0004", Guid.Parse("cd8bfaf4-1afa-43e0-a2c4-a813da015202"), DateTime.UtcNow.AddDays(1).AddHours(3), "Scheduled", "Child fever review", "Pediatrics", "Consultation", "Normal", "First pediatric visit."),
             new AppointmentSeed("4798ef98-7514-430f-a49a-48c7a2b26d05", "MRN-0005", Guid.Parse("a6303a4a-e409-409f-a21c-8abb44ea5303"), DateTime.UtcNow.AddDays(-1), "Completed", "Antenatal check", "Maternity", "Follow-up", "Normal", "Vitals stable, follow-up booked."),
+            new AppointmentSeed("c8e7c140-a061-4ea0-95e5-28dc854c1ea6", $"EMR-{DateTime.UtcNow.Year}-0001", Guid.Parse("47c3095d-adcc-4e1d-bfc0-b16d70c15201"), DateTime.UtcNow, "Waiting", "Unknown road traffic accident patient; identity pending.", "Emergency", "Emergency", "Emergency", "Medico-legal emergency case. Treat first, identify and bill later."),
         };
 
         foreach (var appointment in appointments)

@@ -102,6 +102,17 @@ export interface BackendPatient {
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   photoDataUrl?: string;
+  insuranceCoveragePercent?: number;
+  identityStatus?: string;
+  isIdentityPending?: boolean;
+  temporaryName?: string;
+  estimatedAgeYears?: number;
+  broughtBy?: string;
+  incidentType?: string;
+  incidentLocation?: string;
+  triageLevel?: string;
+  medicoLegalCase?: boolean;
+  emergencyNotes?: string;
 }
 
 export interface BackendAppointment {
@@ -453,6 +464,16 @@ export interface Patient {
   assignedBedNumber?: string;
   assignedWard?: string;
   primaryCondition: string;
+  identityStatus?: string;
+  isIdentityPending?: boolean;
+  temporaryName?: string;
+  estimatedAgeYears?: number;
+  broughtBy?: string;
+  incidentType?: string;
+  incidentLocation?: string;
+  triageLevel?: string;
+  medicoLegalCase?: boolean;
+  emergencyNotes?: string;
   vitals: VitalSigns;
   allergyList: string[];
   registeredDate: string;

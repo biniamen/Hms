@@ -25,7 +25,17 @@ public sealed record PatientDto(
     string? EmergencyContactName,
     string? EmergencyContactPhone,
     string? PhotoDataUrl,
-    decimal? InsuranceCoveragePercent);
+    decimal? InsuranceCoveragePercent,
+    string IdentityStatus,
+    bool IsIdentityPending,
+    string? TemporaryName,
+    int? EstimatedAgeYears,
+    string? BroughtBy,
+    string? IncidentType,
+    string? IncidentLocation,
+    string? TriageLevel,
+    bool MedicoLegalCase,
+    string? EmergencyNotes);
 
 public sealed record CreatePatientRequest(
     [Required(ErrorMessage = "First name is required")]
@@ -74,6 +84,24 @@ public sealed record UpdatePatientRequest(
     string? EmergencyContactName,
     string? EmergencyContactPhone,
     string? PhotoDataUrl);
+
+public sealed record CreateUnknownEmergencyPatientRequest(
+    string? Gender,
+    [Range(0, 120, ErrorMessage = "Estimated age must be between 0 and 120")]
+    int? EstimatedAgeYears,
+    [Required(ErrorMessage = "Brought by is required")] string BroughtBy,
+    [Required(ErrorMessage = "Incident type is required")] string IncidentType,
+    [Required(ErrorMessage = "Incident location is required")] string IncidentLocation,
+    [Required(ErrorMessage = "Triage level is required")] string TriageLevel,
+    Guid DoctorId,
+    string? Department,
+    string? EmergencyNotes,
+    bool MedicoLegalCase,
+    string? PhotoDataUrl);
+
+public sealed record UnknownEmergencyPatientDto(
+    PatientDto Patient,
+    AppointmentDto Appointment);
 
 public sealed record InsuranceCompanyDto(
     Guid Id,

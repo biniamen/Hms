@@ -491,10 +491,20 @@ export class StoreService {
         relation: 'Emergency Contact',
         phone: bp.emergencyContactPhone || '',
       },
-      status: 'OUTPATIENT',
+      status: bp.isIdentityPending ? 'IN_TRIAGE' : 'OUTPATIENT',
       assignedDoctorId: undefined,
       assignedDoctorName: undefined,
-      primaryCondition: 'General Consultation',
+      primaryCondition: bp.incidentType || 'General Consultation',
+      identityStatus: bp.identityStatus || (bp.isIdentityPending ? 'Identity Pending' : 'Verified'),
+      isIdentityPending: !!bp.isIdentityPending,
+      temporaryName: bp.temporaryName,
+      estimatedAgeYears: bp.estimatedAgeYears,
+      broughtBy: bp.broughtBy,
+      incidentType: bp.incidentType,
+      incidentLocation: bp.incidentLocation,
+      triageLevel: bp.triageLevel,
+      medicoLegalCase: !!bp.medicoLegalCase,
+      emergencyNotes: bp.emergencyNotes,
       vitals: {
         bp: '120/80', hr: 72, temp: 37.0, spo2: 98, respiratoryRate: 16, updatedAt: 'N/A',
       },
@@ -1117,6 +1127,102 @@ export class StoreService {
         }
         this.addToast('error', 'Patient Not Registered', 'The patient was not saved because the Patient Management API is unavailable. Start the service and try again.');
       },
+    });
+  }
+
+  registerUnknownEmergencyCase(payload: {
+    gender: string;
+    estimatedAgeYears: number;
+    broughtBy: string;
+    incidentType: string;
+    incidentLocation: string;
+    triageLevel: string;
+    doctorId: string;
+    department: string;
+    emergencyNotes?: string;
+    medicoLegalCase: boolean;
+    photoDataUrl?: string;
+  }) {
+    this.api.createUnknownEmergencyPatient(payload).subscribe({
+      next: (res) => {
+        if (!res.data) return;
+        const patient = this.mapBackendPatient(res.data.patient);
+        this.patients.update(current => [patient, ...current.filter(item => item.id !== patient.id)]);
+        const appointment = this.mapBackendAppointment(res.data.appointment);
+        this.appointments.update(current => this.sortAppointmentsForQueue([appointment, ...current.filter(item => item.id !== appointment.id)]));
+        this.refreshQueueSummary();
+        this.createAppointmentConsultationInvoice(appointment);
+        this.addToast(
+          'success',
+          'Emergency Case Registered',
+          `${patient.mrn} is in the emergency queue. Treatment can continue while identity and payment are completed later.`
+        );
+      },
+      error: (error) => this.addToast(
+        'error',
+        'Emergency Case Not Registered',
+        error?.error?.message || 'The unknown emergency case was not saved. Check Patient Management API and try again.'
+      ),
+    });
+  }
+
+  resolveEmergencyPatientIdentity(patientId: string, payload: {
+    name: string;
+    dob: string;
+    gender: string;
+    bloodType: string;
+    phone: string;
+    address?: string;
+    email?: string;
+    insuranceCompanyId?: string;
+    insuranceProvider?: string;
+    insuranceMemberType?: Patient['insuranceMemberType'];
+    principalMemberName?: string;
+    principalEmployeeId?: string;
+    employerName?: string;
+    emergencyContactName?: string;
+    emergencyContactPhone?: string;
+  }) {
+    const spaceIdx = payload.name.trim().indexOf(' ');
+    const firstName = spaceIdx > 0 ? payload.name.trim().slice(0, spaceIdx) : payload.name.trim();
+    const lastName = spaceIdx > 0 ? payload.name.trim().slice(spaceIdx + 1) : 'Patient';
+    const apiPayload = {
+      firstName,
+      lastName,
+      phone: payload.phone,
+      gender: payload.gender,
+      dateOfBirth: payload.dob,
+      email: payload.email || undefined,
+      address: payload.address || undefined,
+      bloodType: payload.bloodType || undefined,
+      insuranceCompanyId: payload.insuranceCompanyId || undefined,
+      employerName: payload.employerName || undefined,
+      occupation: payload.principalEmployeeId ? `Principal employee ID: ${payload.principalEmployeeId}` : undefined,
+      insurancePlan: payload.insuranceMemberType
+        ? `${payload.insuranceMemberType}${payload.principalMemberName ? ` of ${payload.principalMemberName}` : ''}`
+        : undefined,
+      insuranceProvider: payload.insuranceProvider || undefined,
+      insurancePolicyNumber: '',
+      emergencyContactName: payload.emergencyContactName || undefined,
+      emergencyContactPhone: payload.emergencyContactPhone || undefined,
+      photoDataUrl: undefined,
+    };
+
+    this.api.updatePatient(patientId, apiPayload).subscribe({
+      next: (res) => {
+        if (res.data) {
+          const updated = this.mapBackendPatient(res.data);
+          this.patients.update(current => current.map(item => item.id === patientId ? updated : item));
+          this.allClinicalHistoryPatients.update(current => current.map(item => item.id === patientId ? updated : item));
+          this.refreshResolvedDisplayValues();
+          this.addToast('success', 'Identity Resolved', `${updated.mrn} is now linked to ${updated.name}.`);
+        }
+      },
+      error: (error) => this.addToast(
+        'error',
+        'Identity Not Updated',
+        error?.error?.message || 'The identity update was not saved. Check the Patient Management API and try again.'
+      ),
     });
   }
 
