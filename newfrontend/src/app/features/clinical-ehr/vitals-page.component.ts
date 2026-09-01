@@ -190,7 +190,7 @@ export class VitalsPageComponent {
     temperatureC: new FormControl<number | null>(null, [Validators.required, Validators.min(30), Validators.max(45)]),
     pulse: new FormControl<number | null>(null, [Validators.required, Validators.min(20), Validators.max(240)]),
     respiratoryRate: new FormControl<number | null>(null, [Validators.required, Validators.min(5), Validators.max(80)]),
-    bloodPressure: new FormControl('', [Validators.required]),
+    bloodPressure: new FormControl('', [Validators.required, Validators.pattern(/^\d{2,3}\/\d{2,3}$/)]),
     weightKg: new FormControl<number | null>(null, [Validators.required, Validators.min(1), Validators.max(350)]),
     heightCm: new FormControl<number | null>(null, [Validators.required, Validators.min(30), Validators.max(250)]),
   });
@@ -239,7 +239,7 @@ export class VitalsPageComponent {
   submitVitals() {
     if (this.vitalsForm.invalid) {
       this.vitalsForm.markAllAsTouched();
-      this.store.addToast('error', 'Vitals Validation', 'All vital sign fields are required — temperature, pulse, respiratory rate, blood pressure, weight, and height.');
+      this.store.addToast('error', 'Vitals Validation', 'Enter complete vital signs. Blood pressure must use a format such as 120/80.');
       return;
     }
     const value = this.vitalsForm.getRawValue();

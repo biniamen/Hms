@@ -293,6 +293,8 @@ export class LabOrderPageComponent {
   }
 
   submitLabOrder() {
+    if (!this.ensureDoctorRole()) return;
+
     if (this.labForm.invalid) {
       this.labForm.markAllAsTouched();
       return;
@@ -334,11 +336,21 @@ export class LabOrderPageComponent {
     return patient;
   }
 
+  private ensureDoctorRole(): boolean {
+    if (this.store.currentUser()?.role !== 'DOCTOR') {
+      this.store.addToast('error', 'Doctor Role Required', 'Only the assigned doctor can request laboratory or imaging services.');
+      return false;
+    }
+    return true;
+  }
+
   private currentDoctorId(): string {
-    return this.store.currentUser()?.id || 'current-doctor';
+    const user = this.store.currentUser();
+    return user?.role === 'DOCTOR' ? user.id : '';
   }
 
   private currentDoctorName(): string {
-    return this.store.currentUser()?.name || 'Current Clinician';
+    const user = this.store.currentUser();
+    return user?.role === 'DOCTOR' ? user.name : 'Assigned Doctor';
   }
 }

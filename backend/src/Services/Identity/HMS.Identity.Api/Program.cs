@@ -72,19 +72,22 @@ app.MapPost("/api/auth/login", async (LoginRequest request, IdentityDbContext db
     return Results.Ok(ApiResponse<LoginResponse>.Ok(response, "Login successful."));
 }).WithValidation<LoginRequest>();
 
-app.MapGet("/api/employees", async (IdentityDbContext db) =>
+app.MapGet("/api/employees", async (
+    IdentityDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var employees = await db.Employees
+    var employees = await ToPagedListAsync(db.Employees
         .AsNoTracking()
         .OrderByDescending(employee => employee.CreatedAtUtc)
-        .ThenBy(employee => employee.EmployeeNo)
-        .ToListAsync();
+        .ThenBy(employee => employee.EmployeeNo), httpContext, page, pageSize);
 
     var permissionsByRole = await PermissionsByRoleAsync(db);
     var latestTokens = await LatestOpenTokensByEmployeeAsync(db);
     var response = employees.Select(employee => ToEmployeeDto(employee, PermissionText(permissionsByRole, employee.RoleCode), latestTokens.GetValueOrDefault(employee.Id)));
     return Results.Ok(ApiResponse<IEnumerable<EmployeeDto>>.Ok(response));
-});
+}).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
 app.MapGet("/api/employees/{id:guid}", async (Guid id, IdentityDbContext db) =>
 {
@@ -376,7 +379,12 @@ app.MapPost("/api/auth/setup-password", async (SetupPasswordRequest request, Ide
     return Results.Ok(ApiResponse<object>.Ok(new { employeeId = setupToken.EmployeeId }, "Password setup completed. You can now sign in."));
 });
 
-app.MapGet("/api/auth/email-outbox", async (string? recipient, IdentityDbContext db) =>
+app.MapGet("/api/auth/email-outbox", async (
+    string? recipient,
+    IdentityDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 25) =>
 {
     var query = db.EmailOutbox.AsNoTracking();
     if (!string.IsNullOrWhiteSpace(recipient))
@@ -385,10 +393,8 @@ app.MapGet("/api/auth/email-outbox", async (string? recipient, IdentityDbContext
         query = query.Where(message => message.Recipient.ToLower() == filter);
     }
 
-    var messages = await query
-        .OrderByDescending(message => message.CreatedAtUtc)
-        .Take(25)
-        .ToListAsync();
+    var messages = await ToPagedListAsync(query
+        .OrderByDescending(message => message.CreatedAtUtc), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<EmailOutboxDto>>.Ok(messages.Select(message => new EmailOutboxDto(
         message.Id,
@@ -416,12 +422,15 @@ app.MapGet("/api/auth/email-outbox/latest-link", async (string recipient, Identi
         : Results.Ok(ApiResponse<object>.Ok(new { setupUrl }));
 }).RequireHmsRoles(HmsRoles.Admin, HmsRoles.HRManager);
 
-app.MapGet("/api/roles", async (IdentityDbContext db) =>
+app.MapGet("/api/roles", async (
+    IdentityDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var roles = await db.Roles
+    var roles = await ToPagedListAsync(db.Roles
         .AsNoTracking()
-        .OrderBy(role => role.RoleCode)
-        .ToListAsync();
+        .OrderBy(role => role.RoleCode), httpContext, page, pageSize);
 
     var rolePermissions = await db.RolePermissions.AsNoTracking().ToListAsync();
     var userCounts = await db.Employees
@@ -441,7 +450,7 @@ app.MapGet("/api/roles", async (IdentityDbContext db) =>
         userCounts.GetValueOrDefault(role.RoleCode)));
 
     return Results.Ok(ApiResponse<IEnumerable<RolePermissionDto>>.Ok(response));
-});
+}).RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPost("/api/roles", async (CreateRoleRequest request, IdentityDbContext db) =>
 {
@@ -481,17 +490,20 @@ app.MapPut("/api/roles/{roleCode}", async (string roleCode, UpdateRolePermission
     return Results.Ok(ApiResponse<object>.Ok(new { role = normalizedRole }, "Role permissions updated."));
 }).RequireHmsRoles(HmsRoles.Admin);
 
-app.MapGet("/api/permissions", async (IdentityDbContext db) =>
+app.MapGet("/api/permissions", async (
+    IdentityDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var permissions = await db.Permissions
+    var permissions = await ToPagedListAsync(db.Permissions
         .AsNoTracking()
         .OrderBy(permission => permission.Module)
         .ThenBy(permission => permission.Key)
-        .Select(permission => new PermissionDto(permission.Key, permission.Description, permission.Module))
-        .ToListAsync();
+        .Select(permission => new PermissionDto(permission.Key, permission.Description, permission.Module)), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<PermissionDto>>.Ok(permissions));
-});
+}).RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPost("/api/permissions", async (CreatePermissionRequest request, IdentityDbContext db) =>
 {
@@ -515,12 +527,15 @@ app.MapPost("/api/permissions", async (CreatePermissionRequest request, Identity
     return Results.Created($"/api/permissions/{key}", ApiResponse<PermissionDto>.Ok(new PermissionDto(permission.Key, permission.Description, permission.Module), "Permission saved."));
 }).RequireHmsRoles(HmsRoles.Admin);
 
-app.MapGet("/api/departments", async (IdentityDbContext db) =>
+app.MapGet("/api/departments", async (
+    IdentityDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var departmentEntities = await db.Departments
+    var departmentEntities = await ToPagedListAsync(db.Departments
         .AsNoTracking()
-        .OrderBy(department => department.Name)
-        .ToListAsync();
+        .OrderBy(department => department.Name), httpContext, page, pageSize);
     var departments = departmentEntities
         .Select(department => new DepartmentDto(department.Id, department.Code, department.Name, department.Type, department.Location, ParseSpecializations(department.Specializations)))
         .ToList();
@@ -554,20 +569,57 @@ app.MapPost("/api/departments", async (CreateDepartmentRequest request, Identity
         "Department saved."));
 }).RequireHmsRoles(HmsRoles.Admin);
 
-app.MapGet("/api/doctors", async (IdentityDbContext db) =>
+app.MapGet("/api/doctors", async (
+    IdentityDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var doctors = await db.Employees
+    var doctors = await ToPagedListAsync(db.Employees
         .AsNoTracking()
         .Where(employee => employee.RoleCode == HmsRoles.Doctor && employee.IsActive)
         .OrderBy(employee => employee.FirstName)
         .ThenBy(employee => employee.LastName)
-        .Select(employee => new DoctorProfileDto(employee.Id, employee.FirstName, employee.LastName, employee.EmailAddress, employee.Department, employee.Specialization, 0, employee.IsActive))
-        .ToListAsync();
+        .Select(employee => new DoctorProfileDto(employee.Id, employee.FirstName, employee.LastName, employee.EmailAddress, employee.Department, employee.Specialization, 0, employee.IsActive)), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<DoctorProfileDto>>.Ok(doctors));
 });
 
 app.Run();
+
+static async Task<List<T>> ToPagedListAsync<T>(
+    IQueryable<T> query,
+    HttpContext httpContext,
+    int page,
+    int pageSize)
+{
+    var (normalizedPage, normalizedPageSize) = NormalizePaging(page, pageSize);
+    var totalCount = await query.CountAsync();
+    WritePaginationHeaders(httpContext, totalCount, normalizedPage, normalizedPageSize);
+    return await query
+        .Skip((normalizedPage - 1) * normalizedPageSize)
+        .Take(normalizedPageSize)
+        .ToListAsync();
+}
+
+static (int Page, int PageSize) NormalizePaging(int page, int pageSize)
+{
+    var normalizedPage = Math.Max(1, page);
+    var normalizedPageSize = Math.Clamp(pageSize, 1, 500);
+    return (normalizedPage, normalizedPageSize);
+}
+
+static void WritePaginationHeaders(
+    HttpContext httpContext,
+    int totalCount,
+    int page,
+    int pageSize)
+{
+    httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString();
+    httpContext.Response.Headers["X-Page"] = page.ToString();
+    httpContext.Response.Headers["X-Page-Size"] = pageSize.ToString();
+    httpContext.Response.Headers["X-Total-Pages"] = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize)).ToString();
+}
 
 static EmployeeDto ToEmployeeDto(Employee employee, string permission, PasswordSetupToken? latestToken) =>
     new(

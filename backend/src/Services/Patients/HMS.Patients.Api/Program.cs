@@ -46,7 +46,12 @@ await EnsureRabbitMqAsync(app.Configuration);
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "patient-management", status = "healthy" })));
 
-app.MapGet("/api/patients", async (bool history, PatientsDbContext db, HttpContext httpContext) =>
+app.MapGet("/api/patients", async (
+    PatientsDbContext db,
+    HttpContext httpContext,
+    bool history = false,
+    int page = 1,
+    int pageSize = 100) =>
 {
     IQueryable<Patient> query = db.Patients
         .AsNoTracking()
@@ -64,10 +69,9 @@ app.MapGet("/api/patients", async (bool history, PatientsDbContext db, HttpConte
             appointment.Status != "No Show"));
     }
 
-    var patients = await query
+    var patients = await ToPagedListAsync(query
         .OrderByDescending(patient => patient.CreatedAtUtc)
-        .ThenBy(patient => patient.Mrn)
-        .ToListAsync();
+        .ThenBy(patient => patient.Mrn), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<PatientDto>>.Ok(patients.Select(ToPatientDto)));
 });
@@ -93,9 +97,13 @@ app.MapGet("/api/patients/{id:guid}", async (Guid id, PatientsDbContext db, Http
     return Results.Ok(ApiResponse<PatientDto>.Ok(ToPatientDto(patient)));
 });
 
-app.MapGet("/api/insurance-companies", async (PatientsDbContext db) =>
+app.MapGet("/api/insurance-companies", async (
+    PatientsDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var companies = await db.InsuranceCompanies
+    var companies = await ToPagedListAsync(db.InsuranceCompanies
         .AsNoTracking()
         .OrderBy(company => company.Name)
         .Select(company => new InsuranceCompanyDto(
@@ -109,8 +117,7 @@ app.MapGet("/api/insurance-companies", async (PatientsDbContext db) =>
             company.CoverageType,
             company.CoveragePercent,
             company.SpouseCoverageAllowed,
-            company.IsActive))
-        .ToListAsync();
+            company.IsActive)), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<InsuranceCompanyDto>>.Ok(companies));
 });
@@ -292,7 +299,11 @@ app.MapPut("/api/patients/{id:guid}", async (Guid id, UpdatePatientRequest reque
     return Results.Ok(ApiResponse<PatientDto>.Ok(ToPatientDto(patient), "Patient updated."));
 });
 
-app.MapGet("/api/appointments", async (PatientsDbContext db, HttpContext httpContext) =>
+app.MapGet("/api/appointments", async (
+    PatientsDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
     var query = db.Appointments.AsNoTracking();
     if (TryGetDoctorId(httpContext, out var doctorId))
@@ -300,7 +311,18 @@ app.MapGet("/api/appointments", async (PatientsDbContext db, HttpContext httpCon
         query = query.Where(appointment => appointment.DoctorId == doctorId);
     }
 
-    var appointments = await query.ToListAsync();
+    var appointments = await ToPagedListAsync(query
+        .OrderBy(appointment =>
+            appointment.Priority == "Emergency" || appointment.AppointmentType == "Emergency" ? 0 :
+            appointment.Priority == "Urgent" || appointment.Priority == "Critical" || appointment.Priority == "High" ? 1 :
+            2)
+        .ThenBy(appointment =>
+            appointment.Status == "In Service" || appointment.Status == "In Progress" ? 0 :
+            appointment.Status == "Waiting" || appointment.Status == "Scheduled" ? 1 :
+            appointment.Status == "Completed" ? 2 :
+            3)
+        .ThenBy(appointment => appointment.StartsAtUtc)
+        .ThenBy(appointment => appointment.CreatedAtUtc), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<AppointmentDto>>.Ok(ToAppointmentDtos(appointments)));
 });
@@ -309,7 +331,9 @@ app.MapGet("/api/appointments/queue", async (
     PatientsDbContext db,
     HttpContext httpContext,
     IHttpClientFactory httpClientFactory,
-    IConfiguration configuration) =>
+    IConfiguration configuration,
+    int page = 1,
+    int pageSize = 100) =>
 {
     var today = DateTime.UtcNow.Date;
     var tomorrow = today.AddDays(1);
@@ -344,7 +368,7 @@ app.MapGet("/api/appointments/queue", async (
             group.Count(item => item.Status == "Completed")))
         .ToList();
 
-    return Results.Ok(ApiResponse<IEnumerable<QueueSummaryDto>>.Ok(summaries));
+    return Results.Ok(ApiResponse<IEnumerable<QueueSummaryDto>>.Ok(PageList(summaries, httpContext, page, pageSize)));
 });
 
 app.MapPost("/api/appointments", async (CreateAppointmentRequest request, PatientsDbContext db) =>
@@ -414,19 +438,27 @@ app.MapPut("/api/appointments/{id:guid}/status", async (Guid id, AppointmentStat
     return Results.Ok(ApiResponse<AppointmentDto>.Ok(dto, "Queue status updated."));
 });
 
-app.MapGet("/api/beds", async (PatientsDbContext db) =>
+app.MapGet("/api/beds", async (
+    PatientsDbContext db,
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
-    var beds = await db.Beds
+    var beds = await ToPagedListAsync(db.Beds
         .AsNoTracking()
         .OrderBy(bed => bed.Ward)
         .ThenBy(bed => bed.Room)
-        .ThenBy(bed => bed.BedNumber)
-        .ToListAsync();
+        .ThenBy(bed => bed.BedNumber), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<BedDto>>.Ok(beds.Select(ToBedDto)));
 });
 
-app.MapGet("/api/bed-admissions", async (bool activeOnly, PatientsDbContext db) =>
+app.MapGet("/api/bed-admissions", async (
+    PatientsDbContext db,
+    HttpContext httpContext,
+    bool activeOnly = false,
+    int page = 1,
+    int pageSize = 100) =>
 {
     var query = db.BedAdmissions.AsNoTracking();
     if (activeOnly)
@@ -434,10 +466,9 @@ app.MapGet("/api/bed-admissions", async (bool activeOnly, PatientsDbContext db) 
         query = query.Where(admission => admission.Status == "Admitted");
     }
 
-    var admissions = await query
+    var admissions = await ToPagedListAsync(query
         .OrderByDescending(admission => admission.AdmittedAtUtc)
-        .ThenBy(admission => admission.PatientMrn)
-        .ToListAsync();
+        .ThenBy(admission => admission.PatientMrn), httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<BedAdmissionDto>>.Ok(admissions.Select(ToBedAdmissionDto)));
 });
@@ -624,6 +655,54 @@ app.MapPost("/api/beds/{id:guid}/discharge", async (Guid id, DischargeBedRequest
 });
 
 app.Run();
+
+static async Task<List<T>> ToPagedListAsync<T>(
+    IQueryable<T> query,
+    HttpContext httpContext,
+    int page,
+    int pageSize)
+{
+    var (normalizedPage, normalizedPageSize) = NormalizePaging(page, pageSize);
+    var totalCount = await query.CountAsync();
+    WritePaginationHeaders(httpContext, totalCount, normalizedPage, normalizedPageSize);
+    return await query
+        .Skip((normalizedPage - 1) * normalizedPageSize)
+        .Take(normalizedPageSize)
+        .ToListAsync();
+}
+
+static List<T> PageList<T>(
+    IReadOnlyList<T> items,
+    HttpContext httpContext,
+    int page,
+    int pageSize)
+{
+    var (normalizedPage, normalizedPageSize) = NormalizePaging(page, pageSize);
+    WritePaginationHeaders(httpContext, items.Count, normalizedPage, normalizedPageSize);
+    return items
+        .Skip((normalizedPage - 1) * normalizedPageSize)
+        .Take(normalizedPageSize)
+        .ToList();
+}
+
+static (int Page, int PageSize) NormalizePaging(int page, int pageSize)
+{
+    var normalizedPage = Math.Max(1, page);
+    var normalizedPageSize = Math.Clamp(pageSize, 1, 500);
+    return (normalizedPage, normalizedPageSize);
+}
+
+static void WritePaginationHeaders(
+    HttpContext httpContext,
+    int totalCount,
+    int page,
+    int pageSize)
+{
+    httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString();
+    httpContext.Response.Headers["X-Page"] = page.ToString();
+    httpContext.Response.Headers["X-Page-Size"] = pageSize.ToString();
+    httpContext.Response.Headers["X-Total-Pages"] = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize)).ToString();
+}
 
 static bool TryGetDoctorId(HttpContext httpContext, out Guid doctorId)
 {

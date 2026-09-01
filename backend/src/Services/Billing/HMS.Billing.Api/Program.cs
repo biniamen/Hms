@@ -41,7 +41,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "billing", status = "healthy" })));
 
-app.MapGet("/api/billing/doctor-prices", async (BillingDbContext db, Guid? doctorId, bool activeOnly = false) =>
+app.MapGet("/api/billing/doctor-prices", async (BillingDbContext db, HttpContext httpContext, Guid? doctorId, bool activeOnly = false, int page = 1, int pageSize = 100) =>
 {
     var query = db.DoctorServicePrices
         .AsNoTracking()
@@ -57,10 +57,9 @@ app.MapGet("/api/billing/doctor-prices", async (BillingDbContext db, Guid? docto
         query = query.Where(price => price.IsActive);
     }
 
-    var priceEntities = await query
+    var priceEntities = await ToPagedListAsync(query
         .OrderBy(price => price.DoctorId)
-        .ThenBy(price => price.ServiceName)
-        .ToListAsync();
+        .ThenBy(price => price.ServiceName), httpContext, page, pageSize);
     var prices = priceEntities.Select(ToDoctorServicePriceDto).ToList();
 
     return Results.Ok(ApiResponse<IEnumerable<DoctorServicePriceDto>>.Ok(prices));
@@ -172,13 +171,13 @@ app.MapPut("/api/billing/doctor-prices/{id:guid}/status", async (
 })
 .RequireHmsRoles(HmsRoles.Admin, HmsRoles.Accountant);
 
-app.MapGet("/api/billing/invoices", async (BillingDbContext db) =>
+app.MapGet("/api/billing/invoices", async (BillingDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var invoiceEntities = await db.Invoices
+    var query = db.Invoices
         .AsNoTracking()
         .Include(invoice => invoice.Items)
-        .OrderByDescending(invoice => invoice.CreatedAtUtc)
-        .ToListAsync();
+        .OrderByDescending(invoice => invoice.CreatedAtUtc);
+    var invoiceEntities = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     var invoices = invoiceEntities.Select(ToInvoiceDto).ToList();
     return Results.Ok(ApiResponse<IEnumerable<InvoiceDto>>.Ok(invoices));
@@ -341,9 +340,9 @@ app.MapPut("/api/billing/invoices/{id:guid}/status", async (Guid id, UpdateInvoi
     return Results.Ok(ApiResponse<InvoiceDto>.Ok(ToInvoiceDto(invoice), "Invoice status updated."));
 });
 
-app.MapGet("/api/billing/payments", async (BillingDbContext db) =>
+app.MapGet("/api/billing/payments", async (BillingDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var payments = await db.Payments
+    var query = db.Payments
         .AsNoTracking()
         .OrderByDescending(payment => payment.PaidAtUtc)
         .Select(payment => new PaymentDto(
@@ -354,8 +353,8 @@ app.MapGet("/api/billing/payments", async (BillingDbContext db) =>
             payment.Method,
             payment.Reference,
             payment.ReceivedBy,
-            payment.PaidAtUtc))
-        .ToListAsync();
+            payment.PaidAtUtc));
+    var payments = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<PaymentDto>>.Ok(payments));
 });
@@ -431,13 +430,13 @@ app.MapPost("/api/billing/payments", async (PaymentRequest request, BillingDbCon
     return Results.Ok(ApiResponse<ReceiptDto>.Ok(ToReceiptDto(payment), "Payment recorded and receipt prepared."));
 }).WithValidation<PaymentRequest>();
 
-app.MapGet("/api/billing/receipts", async (BillingDbContext db) =>
+app.MapGet("/api/billing/receipts", async (BillingDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var paymentEntities = await db.Payments
+    var query = db.Payments
         .AsNoTracking()
         .Include(payment => payment.Invoice)
-        .OrderByDescending(payment => payment.PaidAtUtc)
-        .ToListAsync();
+        .OrderByDescending(payment => payment.PaidAtUtc);
+    var paymentEntities = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     var receipts = paymentEntities.Select(ToReceiptDto).ToList();
     return Results.Ok(ApiResponse<IEnumerable<ReceiptDto>>.Ok(receipts));
@@ -456,6 +455,39 @@ app.MapGet("/api/billing/receipts/{id:guid}", async (Guid id, BillingDbContext d
 });
 
 app.Run();
+
+static async Task<List<T>> ToPagedListAsync<T>(
+    IQueryable<T> query,
+    HttpContext httpContext,
+    int page,
+    int pageSize)
+{
+    var paging = NormalizePaging(page, pageSize);
+    var totalCount = await query.CountAsync();
+    WritePaginationHeaders(httpContext, totalCount, paging.Page, paging.PageSize);
+
+    return await query
+        .Skip((paging.Page - 1) * paging.PageSize)
+        .Take(paging.PageSize)
+        .ToListAsync();
+}
+
+static (int Page, int PageSize) NormalizePaging(int page, int pageSize)
+{
+    const int defaultPageSize = 100;
+    const int maxPageSize = 500;
+    return (
+        Math.Max(1, page),
+        Math.Clamp(pageSize <= 0 ? defaultPageSize : pageSize, 1, maxPageSize));
+}
+
+static void WritePaginationHeaders(HttpContext httpContext, int totalCount, int page, int pageSize)
+{
+    httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString();
+    httpContext.Response.Headers["X-Page"] = page.ToString();
+    httpContext.Response.Headers["X-Page-Size"] = pageSize.ToString();
+    httpContext.Response.Headers["X-Total-Pages"] = Math.Max(1, (int)Math.Ceiling(totalCount / (double)Math.Max(1, pageSize))).ToString();
+}
 
 static DoctorServicePriceDto ToDoctorServicePriceDto(DoctorServicePrice price) =>
     new(

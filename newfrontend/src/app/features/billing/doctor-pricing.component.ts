@@ -152,8 +152,7 @@ interface DoctorServiceType {
               <div>
                 <label for="doctor-price-currency" class="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-600">Currency *</label>
                 <select id="doctor-price-currency" formControlName="currency" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100">
-                  <option value="ETB">ETB — Ethiopian Birr</option>
-                  <option value="USD">USD — US Dollar</option>
+                  <option value="ETB">ETB - Ethiopian Birr</option>
                 </select>
               </div>
 

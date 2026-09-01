@@ -279,6 +279,12 @@ export class PharmacyComponent {
   }
 
   submitPrescription() {
+    const user = this.store.currentUser();
+    if (user?.role !== 'DOCTOR') {
+      this.store.addToast('error', 'Doctor Role Required', 'Pharmacy can dispense approved prescriptions. New prescriptions must be entered by a doctor.');
+      return;
+    }
+
     if (this.rxForm.invalid) {
       this.rxForm.markAllAsTouched();
       return;
@@ -292,8 +298,8 @@ export class PharmacyComponent {
         patientId: patient.id,
         patientName: patient.name,
         patientMrn: patient.mrn,
-        doctorId: this.store.currentUser()?.id || '',
-        doctorName: this.store.currentUser()?.name || 'Doctor record unavailable',
+        doctorId: user.id,
+        doctorName: user.name,
         medications: [{
           name: val.medName!,
           dosage: val.dosage!,

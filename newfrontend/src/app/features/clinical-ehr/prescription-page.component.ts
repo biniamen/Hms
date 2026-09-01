@@ -341,6 +341,8 @@ export class PrescriptionPageComponent {
   }
 
   submitPrescription() {
+    if (!this.ensureDoctorRole()) return;
+
     const medications = this.prescriptionBasket().length > 0
       ? this.prescriptionBasket()
       : [this.medicationFromPrescriptionForm()];
@@ -436,11 +438,21 @@ export class PrescriptionPageComponent {
     return patient;
   }
 
+  private ensureDoctorRole(): boolean {
+    if (this.store.currentUser()?.role !== 'DOCTOR') {
+      this.store.addToast('error', 'Doctor Role Required', 'Only the assigned doctor can create prescriptions.');
+      return false;
+    }
+    return true;
+  }
+
   private currentDoctorId(): string {
-    return this.store.currentUser()?.id || 'current-doctor';
+    const user = this.store.currentUser();
+    return user?.role === 'DOCTOR' ? user.id : '';
   }
 
   private currentDoctorName(): string {
-    return this.store.currentUser()?.name || 'Current Clinician';
+    const user = this.store.currentUser();
+    return user?.role === 'DOCTOR' ? user.name : 'Assigned Doctor';
   }
 }

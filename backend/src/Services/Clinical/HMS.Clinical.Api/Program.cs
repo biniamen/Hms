@@ -53,19 +53,26 @@ await using (var scope = app.Services.CreateAsyncScope())
 
 app.MapGet("/health", () => Results.Ok(ApiResponse<object>.Ok(new { service = "clinical", status = "healthy" })));
 
-app.MapGet("/api/clinical/encounters", async (ClinicalDbContext db) =>
+app.MapGet("/api/clinical/encounters", async (ClinicalDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var encounters = await db.Encounters
+    var query = db.Encounters
         .AsNoTracking()
         .OrderByDescending(encounter => encounter.EncounterAtUtc)
-        .Select(encounter => new ClinicalEncounterDto(encounter.Id, encounter.PatientId, encounter.DoctorId, encounter.VisitType, encounter.ChiefComplaint, encounter.Assessment, encounter.Plan, encounter.EncounterAtUtc))
-        .ToListAsync();
+        .Select(encounter => new ClinicalEncounterDto(encounter.Id, encounter.PatientId, encounter.DoctorId, encounter.VisitType, encounter.ChiefComplaint, encounter.Assessment, encounter.Plan, encounter.EncounterAtUtc));
+    var encounters = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<ClinicalEncounterDto>>.Ok(encounters));
-});
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Nurse, HmsRoles.Admin);
 
-app.MapPost("/api/clinical/encounters", async (CreateClinicalEncounterRequest request, ClinicalDbContext db) =>
+app.MapPost("/api/clinical/encounters", async (CreateClinicalEncounterRequest request, ClinicalDbContext db, HttpContext httpContext) =>
 {
+    var accessError = ValidateDoctorWriteAccess(httpContext, request.PatientId, request.DoctorId);
+    if (accessError is not null)
+    {
+        return accessError;
+    }
+
     var encounter = new ClinicalEncounter
     {
         Id = Guid.NewGuid(),
@@ -84,21 +91,29 @@ app.MapPost("/api/clinical/encounters", async (CreateClinicalEncounterRequest re
     return Results.Created($"/api/clinical/encounters/{encounter.Id}", ApiResponse<ClinicalEncounterDto>.Ok(
         new ClinicalEncounterDto(encounter.Id, encounter.PatientId, encounter.DoctorId, encounter.VisitType, encounter.ChiefComplaint, encounter.Assessment, encounter.Plan, encounter.EncounterAtUtc),
         "Clinical encounter saved."));
-});
+})
+.WithValidation<CreateClinicalEncounterRequest>()
+.RequireHmsRoles(HmsRoles.Doctor);
 
-app.MapGet("/api/clinical/vitals", async (ClinicalDbContext db) =>
+app.MapGet("/api/clinical/vitals", async (ClinicalDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var vitals = await db.VitalSigns
+    var query = db.VitalSigns
         .AsNoTracking()
         .OrderByDescending(vital => vital.RecordedAtUtc)
-        .Select(vital => new VitalSignDto(vital.Id, vital.PatientId, vital.TemperatureC, vital.Pulse, vital.RespiratoryRate, vital.BloodPressure, vital.WeightKg, vital.HeightCm, vital.RecordedAtUtc))
-        .ToListAsync();
+        .Select(vital => new VitalSignDto(vital.Id, vital.PatientId, vital.TemperatureC, vital.Pulse, vital.RespiratoryRate, vital.BloodPressure, vital.WeightKg, vital.HeightCm, vital.RecordedAtUtc));
+    var vitals = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<VitalSignDto>>.Ok(vitals));
-});
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Nurse, HmsRoles.Admin);
 
 app.MapPost("/api/clinical/vitals", async (CreateVitalSignRequest request, ClinicalDbContext db) =>
 {
+    if (request.PatientId == Guid.Empty)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Patient is required."));
+    }
+
     var vital = new VitalSign
     {
         Id = Guid.NewGuid(),
@@ -118,21 +133,30 @@ app.MapPost("/api/clinical/vitals", async (CreateVitalSignRequest request, Clini
     return Results.Created($"/api/clinical/vitals/{vital.Id}", ApiResponse<VitalSignDto>.Ok(
         new VitalSignDto(vital.Id, vital.PatientId, vital.TemperatureC, vital.Pulse, vital.RespiratoryRate, vital.BloodPressure, vital.WeightKg, vital.HeightCm, vital.RecordedAtUtc),
         "Vitals recorded."));
-});
+})
+.WithValidation<CreateVitalSignRequest>()
+.RequireHmsRoles(HmsRoles.Nurse, HmsRoles.Doctor);
 
-app.MapGet("/api/clinical/diagnoses", async (ClinicalDbContext db) =>
+app.MapGet("/api/clinical/diagnoses", async (ClinicalDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var diagnoses = await db.Diagnoses
+    var query = db.Diagnoses
         .AsNoTracking()
         .OrderByDescending(diagnosis => diagnosis.DiagnosedAtUtc)
-        .Select(diagnosis => new DiagnosisDto(diagnosis.Id, diagnosis.PatientId, diagnosis.DoctorId, diagnosis.Code, diagnosis.Description, diagnosis.Severity, diagnosis.DiagnosedAtUtc))
-        .ToListAsync();
+        .Select(diagnosis => new DiagnosisDto(diagnosis.Id, diagnosis.PatientId, diagnosis.DoctorId, diagnosis.Code, diagnosis.Description, diagnosis.Severity, diagnosis.DiagnosedAtUtc));
+    var diagnoses = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<DiagnosisDto>>.Ok(diagnoses));
-});
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Nurse, HmsRoles.Admin);
 
-app.MapPost("/api/clinical/diagnoses", async (CreateDiagnosisRequest request, ClinicalDbContext db) =>
+app.MapPost("/api/clinical/diagnoses", async (CreateDiagnosisRequest request, ClinicalDbContext db, HttpContext httpContext) =>
 {
+    var accessError = ValidateDoctorWriteAccess(httpContext, request.PatientId, request.DoctorId);
+    if (accessError is not null)
+    {
+        return accessError;
+    }
+
     var diagnosis = new Diagnosis
     {
         Id = Guid.NewGuid(),
@@ -150,21 +174,30 @@ app.MapPost("/api/clinical/diagnoses", async (CreateDiagnosisRequest request, Cl
     return Results.Created($"/api/clinical/diagnoses/{diagnosis.Id}", ApiResponse<DiagnosisDto>.Ok(
         new DiagnosisDto(diagnosis.Id, diagnosis.PatientId, diagnosis.DoctorId, diagnosis.Code, diagnosis.Description, diagnosis.Severity, diagnosis.DiagnosedAtUtc),
         "Diagnosis added."));
-});
+})
+.WithValidation<CreateDiagnosisRequest>()
+.RequireHmsRoles(HmsRoles.Doctor);
 
-app.MapGet("/api/clinical/prescriptions", async (ClinicalDbContext db) =>
+app.MapGet("/api/clinical/prescriptions", async (ClinicalDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var prescriptions = await db.Prescriptions
+    var query = db.Prescriptions
         .AsNoTracking()
         .OrderByDescending(prescription => prescription.OrderedAtUtc)
-        .Select(prescription => new PrescriptionDto(prescription.Id, prescription.PatientId, prescription.DoctorId, prescription.Medication, prescription.Instructions, prescription.OrderedAtUtc))
-        .ToListAsync();
+        .Select(prescription => new PrescriptionDto(prescription.Id, prescription.PatientId, prescription.DoctorId, prescription.Medication, prescription.Instructions, prescription.OrderedAtUtc));
+    var prescriptions = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<PrescriptionDto>>.Ok(prescriptions));
-});
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Nurse, HmsRoles.Pharmacist, HmsRoles.Admin);
 
-app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest request, ClinicalDbContext db) =>
+app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest request, ClinicalDbContext db, HttpContext httpContext) =>
 {
+    var accessError = ValidateDoctorWriteAccess(httpContext, request.PatientId, request.DoctorId);
+    if (accessError is not null)
+    {
+        return accessError;
+    }
+
     var prescription = new Prescription
     {
         Id = Guid.NewGuid(),
@@ -181,21 +214,24 @@ app.MapPost("/api/clinical/prescriptions", async (CreatePrescriptionRequest requ
     return Results.Created($"/api/clinical/prescriptions/{prescription.Id}", ApiResponse<PrescriptionDto>.Ok(
         new PrescriptionDto(prescription.Id, prescription.PatientId, prescription.DoctorId, prescription.Medication, prescription.Instructions, prescription.OrderedAtUtc),
         "Prescription created."));
-}).WithValidation<CreatePrescriptionRequest>();
+})
+.WithValidation<CreatePrescriptionRequest>()
+.RequireHmsRoles(HmsRoles.Doctor);
 
-app.MapGet("/api/clinical/diagnostic-tests", async (ClinicalDbContext db) =>
+app.MapGet("/api/clinical/diagnostic-tests", async (ClinicalDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
-    var tests = await db.DiagnosticTests
+    var query = db.DiagnosticTests
         .AsNoTracking()
         .OrderBy(test => test.GroupName)
         .ThenBy(test => test.SubGroup)
         .ThenBy(test => test.SortOrder)
         .ThenBy(test => test.TestName)
-        .Select(test => new DiagnosticTestDto(test.Id, test.GroupName, test.SubGroup, test.TestName, test.SpecimenType, test.Unit, test.ReferenceRange, test.SortOrder, test.Price, test.Currency, test.IsActive))
-        .ToListAsync();
+        .Select(test => new DiagnosticTestDto(test.Id, test.GroupName, test.SubGroup, test.TestName, test.SpecimenType, test.Unit, test.ReferenceRange, test.SortOrder, test.Price, test.Currency, test.IsActive));
+    var tests = await ToPagedListAsync(query, httpContext, page, pageSize);
 
     return Results.Ok(ApiResponse<IEnumerable<DiagnosticTestDto>>.Ok(tests));
-});
+})
+.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Nurse, HmsRoles.LabTechnician, HmsRoles.Admin);
 
 app.MapPost("/api/clinical/diagnostic-tests", async (CreateDiagnosticTestRequest request, ClinicalDbContext db) =>
 {
@@ -240,7 +276,9 @@ app.MapPost("/api/clinical/diagnostic-tests", async (CreateDiagnosticTestRequest
     return Results.Created($"/api/clinical/diagnostic-tests/{test.Id}", ApiResponse<DiagnosticTestDto>.Ok(
         ToDiagnosticTestDto(test),
         "Diagnostic catalog item saved."));
-}).WithValidation<CreateDiagnosticTestRequest>();
+})
+.WithValidation<CreateDiagnosticTestRequest>()
+.RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPut("/api/clinical/diagnostic-tests/{id:guid}", async (Guid id, CreateDiagnosticTestRequest request, ClinicalDbContext db) =>
 {
@@ -270,13 +308,17 @@ app.MapPut("/api/clinical/diagnostic-tests/{id:guid}", async (Guid id, CreateDia
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<DiagnosticTestDto>.Ok(ToDiagnosticTestDto(test), "Diagnostic catalog item updated."));
-}).WithValidation<CreateDiagnosticTestRequest>();
+})
+.WithValidation<CreateDiagnosticTestRequest>()
+.RequireHmsRoles(HmsRoles.Admin);
 
 app.MapGet("/api/clinical/lab-requests", async (
     ClinicalDbContext db,
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
-    HttpContext httpContext) =>
+    HttpContext httpContext,
+    int page = 1,
+    int pageSize = 100) =>
 {
     var records = await db.LabRequests
         .AsNoTracking()
@@ -302,7 +344,8 @@ app.MapGet("/api/clinical/lab-requests", async (
                 title: "Billing verification unavailable");
         }
 
-        return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(emergencyRequests));
+        var emergencyPage = PageList(emergencyRequests, httpContext, page, pageSize);
+        return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(emergencyPage));
     }
 
     var visibleRecords = isLabTechnician
@@ -320,7 +363,8 @@ app.MapGet("/api/clinical/lab-requests", async (
         })
         .ToList();
 
-    return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(labRequests));
+    var pageItems = PageList(labRequests, httpContext, page, pageSize);
+    return Results.Ok(ApiResponse<IEnumerable<LabRequestDto>>.Ok(pageItems));
 })
 .RequireHmsRoles(HmsRoles.Doctor, HmsRoles.LabTechnician, HmsRoles.Admin);
 
@@ -331,6 +375,12 @@ app.MapPost("/api/clinical/lab-requests", async (
     IConfiguration configuration,
     HttpContext httpContext) =>
 {
+    var accessError = ValidateDoctorWriteAccess(httpContext, request.PatientId, request.DoctorId);
+    if (accessError is not null)
+    {
+        return accessError;
+    }
+
     if (string.IsNullOrWhiteSpace(request.TestName))
     {
         return Results.BadRequest(ApiResponse<object>.Fail("At least one diagnostic test is required."));
@@ -391,11 +441,14 @@ app.MapPost("/api/clinical/lab-requests", async (
         UpdatedAtUtc = DateTime.UtcNow
     };
 
+    await using var transaction = await db.Database.BeginTransactionAsync();
     db.LabRequests.Add(labRequest);
     await db.SaveChangesAsync();
 
-    // Payment collection must first detect whether the patient has insurance so the
-    // laboratory charge is routed through the payer (claim) instead of a cash sale.
+    // Cross-service writes cannot share one ACID transaction. This endpoint uses a
+    // small saga: keep the lab row uncommitted until Billing accepts the invoice,
+    // then commit; if the local commit fails after Billing succeeds, cancel that
+    // invoice so the two services do not silently drift.
     var coverage = await GetPatientInsuranceAsync(httpClientFactory, configuration, httpContext, labRequest.PatientId);
     var paymentType = coverage.HasInsurance ? "Insurance" : "Cash";
     var insuranceProvider = coverage.HasInsurance ? coverage.Provider : null;
@@ -426,12 +479,25 @@ app.MapPost("/api/clinical/lab-requests", async (
 
     if (!invoiceResult.Success)
     {
-        db.LabRequests.Remove(labRequest);
-        await db.SaveChangesAsync();
+        await transaction.RollbackAsync();
         return Results.Problem(
             detail: invoiceResult.Message,
             statusCode: StatusCodes.Status502BadGateway,
             title: "Laboratory invoice could not be created");
+    }
+
+    try
+    {
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        if (invoiceResult.InvoiceId is Guid invoiceId)
+        {
+            await CancelInvoiceAsync(invoiceId, httpClientFactory, configuration, httpContext);
+        }
+
+        throw;
     }
 
     var releaseMessage = isEmergencyOrder
@@ -444,7 +510,8 @@ app.MapPost("/api/clinical/lab-requests", async (
         ToLabRequestDto(labRequest),
         releaseMessage));
 })
-.RequireHmsRoles(HmsRoles.Doctor, HmsRoles.Admin);
+.WithValidation<CreateLabRequestRequest>()
+.RequireHmsRoles(HmsRoles.Doctor);
 
 app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (
     Guid id,
@@ -536,7 +603,7 @@ app.MapPut("/api/clinical/lab-requests/{id:guid}/result", async (
 })
 .RequireHmsRoles(HmsRoles.LabTechnician, HmsRoles.Admin);
 
-app.MapGet("/api/clinical/enterprise-records", async (string? area, ClinicalDbContext db) =>
+app.MapGet("/api/clinical/enterprise-records", async (string? area, ClinicalDbContext db, HttpContext httpContext, int page = 1, int pageSize = 100) =>
 {
     var query = db.EnterpriseRecords.AsNoTracking();
     if (!string.IsNullOrWhiteSpace(area))
@@ -545,15 +612,40 @@ app.MapGet("/api/clinical/enterprise-records", async (string? area, ClinicalDbCo
         query = query.Where(record => record.Area == areaFilter);
     }
 
-    var records = (await query.ToListAsync())
-        .OrderBy(record => StatusOrder(record.Status))
+    var totalCount = await query.CountAsync();
+    var paging = NormalizePaging(page, pageSize);
+    WritePaginationHeaders(httpContext, totalCount, paging.Page, paging.PageSize);
+    var records = await query
+        .OrderBy(record =>
+            record.Status == "Open" ? 1 :
+            record.Status == "In Progress" ? 2 :
+            record.Status == "Under Review" ? 3 :
+            record.Status == "Completed" ? 4 :
+            5)
         .ThenBy(record => record.DueAtUtc ?? DateTime.MaxValue)
         .ThenByDescending(record => record.CreatedAtUtc)
-        .Select(ToEnterpriseRecordDto)
-        .ToList();
+        .Skip((paging.Page - 1) * paging.PageSize)
+        .Take(paging.PageSize)
+        .Select(record => new EnterpriseRecordDto(
+            record.Id,
+            record.Area,
+            record.RecordNumber,
+            record.PatientId,
+            record.Title,
+            record.Department,
+            record.Owner,
+            record.Priority,
+            record.Status,
+            record.Amount,
+            record.DueAtUtc,
+            record.Details,
+            record.CreatedAtUtc,
+            record.UpdatedAtUtc))
+        .ToListAsync();
 
     return Results.Ok(ApiResponse<IEnumerable<EnterpriseRecordDto>>.Ok(records));
-});
+})
+.RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPost("/api/clinical/enterprise-records", async (CreateEnterpriseRecordRequest request, ClinicalDbContext db) =>
 {
@@ -584,7 +676,8 @@ app.MapPost("/api/clinical/enterprise-records", async (CreateEnterpriseRecordReq
     await db.SaveChangesAsync();
 
     return Results.Created($"/api/clinical/enterprise-records/{record.Id}", ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Record saved."));
-});
+})
+.RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPut("/api/clinical/enterprise-records/{id:guid}", async (Guid id, CreateEnterpriseRecordRequest request, ClinicalDbContext db) =>
 {
@@ -614,7 +707,8 @@ app.MapPut("/api/clinical/enterprise-records/{id:guid}", async (Guid id, CreateE
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Record updated."));
-});
+})
+.RequireHmsRoles(HmsRoles.Admin);
 
 app.MapPut("/api/clinical/enterprise-records/{id:guid}/status", async (Guid id, EnterpriseStatusRequest request, ClinicalDbContext db) =>
 {
@@ -634,7 +728,8 @@ app.MapPut("/api/clinical/enterprise-records/{id:guid}/status", async (Guid id, 
     await db.SaveChangesAsync();
 
     return Results.Ok(ApiResponse<EnterpriseRecordDto>.Ok(ToEnterpriseRecordDto(record), "Status updated."));
-});
+})
+.RequireHmsRoles(HmsRoles.Admin);
 
 app.Run();
 
@@ -741,14 +836,89 @@ static int LastNumberSegment(string value)
     return int.TryParse(segment, out var number) ? number : 0;
 }
 
-static int StatusOrder(string status) => status switch
+static async Task<List<T>> ToPagedListAsync<T>(
+    IQueryable<T> query,
+    HttpContext httpContext,
+    int page,
+    int pageSize)
 {
-    "Open" => 1,
-    "In Progress" => 2,
-    "Under Review" => 3,
-    "Completed" => 4,
-    _ => 5
-};
+    var paging = NormalizePaging(page, pageSize);
+    var totalCount = await query.CountAsync();
+    WritePaginationHeaders(httpContext, totalCount, paging.Page, paging.PageSize);
+
+    return await query
+        .Skip((paging.Page - 1) * paging.PageSize)
+        .Take(paging.PageSize)
+        .ToListAsync();
+}
+
+static List<T> PageList<T>(
+    IReadOnlyList<T> items,
+    HttpContext httpContext,
+    int page,
+    int pageSize)
+{
+    var paging = NormalizePaging(page, pageSize);
+    WritePaginationHeaders(httpContext, items.Count, paging.Page, paging.PageSize);
+    return items
+        .Skip((paging.Page - 1) * paging.PageSize)
+        .Take(paging.PageSize)
+        .ToList();
+}
+
+static (int Page, int PageSize) NormalizePaging(int page, int pageSize)
+{
+    const int defaultPageSize = 100;
+    const int maxPageSize = 500;
+    return (
+        Math.Max(1, page),
+        Math.Clamp(pageSize <= 0 ? defaultPageSize : pageSize, 1, maxPageSize));
+}
+
+static void WritePaginationHeaders(HttpContext httpContext, int totalCount, int page, int pageSize)
+{
+    httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString();
+    httpContext.Response.Headers["X-Page"] = page.ToString();
+    httpContext.Response.Headers["X-Page-Size"] = pageSize.ToString();
+    httpContext.Response.Headers["X-Total-Pages"] = Math.Max(1, (int)Math.Ceiling(totalCount / (double)Math.Max(1, pageSize))).ToString();
+}
+
+static IResult? ValidateDoctorWriteAccess(HttpContext httpContext, Guid patientId, Guid doctorId)
+{
+    if (patientId == Guid.Empty)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Patient is required."));
+    }
+
+    if (doctorId == Guid.Empty)
+    {
+        return Results.BadRequest(ApiResponse<object>.Fail("Doctor is required."));
+    }
+
+    var currentUserId = CurrentUserId(httpContext);
+    if (currentUserId is null)
+    {
+        return Results.Json(
+            ApiResponse<object>.Fail("Authenticated clinician identity is missing.", StatusCodes.Status401Unauthorized),
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    if (currentUserId.Value != doctorId)
+    {
+        return Results.Json(
+            ApiResponse<object>.Fail("Doctor id must match the authenticated doctor.", StatusCodes.Status403Forbidden),
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    return null;
+}
+
+static Guid? CurrentUserId(HttpContext httpContext)
+{
+    var subject = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? httpContext.User.FindFirstValue("sub");
+    return Guid.TryParse(subject, out var userId) ? userId : null;
+}
 
 static async Task<ServiceCallResult> CreateLabInvoiceAsync(
     CreateInvoiceRequest invoiceRequest,
@@ -770,15 +940,40 @@ static async Task<ServiceCallResult> CreateLabInvoiceAsync(
         using var response = await client.SendAsync(request);
         if (response.IsSuccessStatusCode)
         {
-            return new ServiceCallResult(true, "Invoice created.");
+            var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<InvoiceDto>>();
+            return new ServiceCallResult(true, "Invoice created.", envelope?.Data?.Id);
         }
 
         var error = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
-        return new ServiceCallResult(false, error?.Message ?? "Billing service rejected the laboratory invoice.");
+        return new ServiceCallResult(false, error?.Message ?? "Billing service rejected the laboratory invoice.", null);
     }
     catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
     {
-        return new ServiceCallResult(false, $"Billing service is unavailable: {exception.Message}");
+        return new ServiceCallResult(false, $"Billing service is unavailable: {exception.Message}", null);
+    }
+}
+
+static async Task CancelInvoiceAsync(
+    Guid invoiceId,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration,
+    HttpContext httpContext)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"{BillingBaseUrl(configuration)}/api/billing/invoices/{invoiceId}/status")
+        {
+            Content = JsonContent.Create(new UpdateInvoiceStatusRequest("Cancelled"))
+        };
+        ForwardAuthorization(httpContext, request);
+        using var response = await client.SendAsync(request);
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+    {
+        Console.WriteLine($"Billing compensation failed for invoice {invoiceId}: {exception.Message}");
     }
 }
 
@@ -792,7 +987,7 @@ static async Task<LabPaymentSnapshot> GetLabPaymentSnapshotAsync(
         var client = httpClientFactory.CreateClient();
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{BillingBaseUrl(configuration)}/api/billing/invoices");
+            $"{BillingBaseUrl(configuration)}/api/billing/invoices?page=1&pageSize=500");
         ForwardAuthorization(httpContext, request);
 
         using var response = await client.SendAsync(request);
@@ -925,7 +1120,7 @@ sealed record CreateEnterpriseRecordRequest(
 
 sealed record EnterpriseStatusRequest(string Status);
 
-sealed record ServiceCallResult(bool Success, string Message);
+sealed record ServiceCallResult(bool Success, string Message, Guid? InvoiceId);
 
 sealed record PatientInsuranceSnapshot(
     bool HasInsurance,

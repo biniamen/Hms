@@ -32,6 +32,8 @@ public static class HmsSecurity
         var origins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:4200"];
         var methods = configuration.GetSection("Cors:AllowedMethods").Get<string[]>() ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
         var headers = configuration.GetSection("Cors:AllowedHeaders").Get<string[]>() ?? ["Authorization", "Content-Type"];
+        var exposedHeaders = configuration.GetSection("Cors:ExposedHeaders").Get<string[]>()
+            ?? ["X-Total-Count", "X-Page", "X-Page-Size", "X-Total-Pages"];
 
         services.AddCors(options =>
         {
@@ -40,7 +42,8 @@ public static class HmsSecurity
                 policy
                     .WithOrigins(origins)
                     .WithMethods(methods)
-                    .WithHeaders(headers);
+                    .WithHeaders(headers)
+                    .WithExposedHeaders(exposedHeaders);
             });
         });
 

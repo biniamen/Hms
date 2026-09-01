@@ -2,7 +2,7 @@ import { Injectable, computed, signal, inject } from '@angular/core';
 import { Observable, tap } from 'rxjs';
 import { ApiService } from '../../api.service';
 import type {
-  User, UserRole, Patient, Appointment, Prescription, LabOrder,
+  User, UserRole, Patient, Appointment, Prescription, Medication, LabOrder,
   BillingInvoice, Department, Bed, BedAdmission, InsuranceClaim, MedicalRecord,
   ToastMessage, VitalSigns, EnterpriseModule, DiagnosticTest, LabResultItem, ClinicalVitalEntry,
   ClinicalDiagnosis, BackendEmployee, BackendDoctorProfile,
@@ -31,6 +31,11 @@ export class StoreService {
   // Used to re-hydrate the store when a session is restored (page refresh / reopen)
   // without double-fetching right after a fresh login.
   readonly dataLoaded = signal(false);
+  readonly loadFailed = signal(false);
+  private currentLoadEndpointCount = 0;
+  private loadSuccessCount = 0;
+  private loadFailureCount = 0;
+  private readonly prescriptionPayloadMarker = 'HMS_RX_JSON:';
 
   // ── Global Search ──
   readonly globalSearchQuery = signal('');
@@ -278,10 +283,15 @@ export class StoreService {
     this.setCurrentUserFromSession();
     this.isLoading.set(true);
     this.pending.set(0);
+    this.currentLoadEndpointCount = 0;
+    this.loadSuccessCount = 0;
+    this.loadFailureCount = 0;
+    this.loadFailed.set(false);
 
     // Determine which endpoints to call based on role
     const role = session.role;
     const endpoints = this.getEndpointsForRole(role);
+    this.currentLoadEndpointCount = endpoints.length;
     this.pending.set(endpoints.length);
 
     for (const ep of endpoints) {
@@ -338,75 +348,82 @@ export class StoreService {
   }
 
   private callEndpoint(key: string) {
-    const dec = () => {
+    const dec = (failed = false) => {
+      if (failed) {
+        this.loadFailureCount += 1;
+      } else {
+        this.loadSuccessCount += 1;
+      }
+
       this.pending.update(p => p - 1);
       if (this.pending() <= 0) {
         this.pending.set(0);
         this.isLoading.set(false);
-        // Only treat the session as loaded when at least one endpoint returned
-        // data. A fully-failed boot (backend briefly down, expired token) stays
-        // unloaded so the next mount/refresh retries instead of locking in an
-        // empty store.
-        if (this.hasAnyLoadedData()) {
+        // Empty databases are valid, so a successful endpoint counts as a load even
+        // when it returns no rows. A fully failed boot stays retryable.
+        if (this.loadSuccessCount > 0 || this.hasAnyLoadedData()) {
           this.dataLoaded.set(true);
+        } else if (this.currentLoadEndpointCount > 0 && this.loadFailureCount >= this.currentLoadEndpointCount) {
+          this.loadFailed.set(true);
+          this.addToast('error', 'Backend Unavailable', 'No system data was loaded. Check the API Gateway and backend services, then refresh.');
         }
       }
     };
 
     switch (key) {
       case 'employees':
-        this.api.getEmployees().subscribe({ next: (r) => { if (r.data) { this.employees.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
+        this.api.getEmployees().subscribe({ next: (r) => { if (r.data) { this.employees.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: () => dec(true) });
         break;
       case 'doctors':
-        this.api.getDoctors().subscribe({ next: (r) => { if (r.data) { this.doctors.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
+        this.api.getDoctors().subscribe({ next: (r) => { if (r.data) { this.doctors.set(r.data); this.refreshResolvedDisplayValues(); } dec(); }, error: () => dec(true) });
         break;
       case 'patients':
         this.api.getPatients().subscribe({
           next: (r) => { if (r.data) { this.patients.set(r.data.map(p => this.mapBackendPatient(p))); this.refreshResolvedDisplayValues(); } dec(); },
-          error: () => { this.addToast('error', 'Patient Registry Unavailable', 'The patient list could not be loaded. Sign out and back in to retry.'); dec(); },
+          error: () => { this.addToast('error', 'Patient Registry Unavailable', 'The patient list could not be loaded. Sign out and back in to retry.'); dec(true); },
         });
         break;
       case 'appointments':
-        this.api.getAppointments().subscribe({ next: (r) => { if (r.data) this.appointments.set(this.sortAppointmentsForQueue(r.data.map(a => this.mapBackendAppointment(a)))); dec(); }, error: dec });
+        this.api.getAppointments().subscribe({ next: (r) => { if (r.data) this.appointments.set(this.sortAppointmentsForQueue(r.data.map(a => this.mapBackendAppointment(a)))); dec(); }, error: () => dec(true) });
         break;
       case 'departments':
-        this.api.getDepartments().subscribe({ next: (r) => { if (r.data) this.departments.set(r.data.map(d => this.mapBackendDepartment(d))); dec(); }, error: dec });
+        this.api.getDepartments().subscribe({ next: (r) => { if (r.data) this.departments.set(r.data.map(d => this.mapBackendDepartment(d))); dec(); }, error: () => dec(true) });
         break;
       case 'insuranceCompanies':
-        this.api.getInsuranceCompanies().subscribe({ next: (r) => { if (r.data) this.insuranceCompanies.set(r.data); dec(); }, error: dec });
+        this.api.getInsuranceCompanies().subscribe({ next: (r) => { if (r.data) this.insuranceCompanies.set(r.data); dec(); }, error: () => dec(true) });
         break;
       case 'beds':
-        this.api.getBeds().subscribe({ next: (r) => { if (r.data) { this.beds.set(r.data.map(b => this.mapBackendBed(b))); this.refreshResolvedDisplayValues(); } dec(); }, error: dec });
+        this.api.getBeds().subscribe({ next: (r) => { if (r.data) { this.beds.set(r.data.map(b => this.mapBackendBed(b))); this.refreshResolvedDisplayValues(); } dec(); }, error: () => dec(true) });
         break;
       case 'bedAdmissions':
-        this.api.getBedAdmissions().subscribe({ next: (r) => { if (r.data) this.bedAdmissions.set(r.data.map(a => this.mapBackendBedAdmission(a))); dec(); }, error: dec });
+        this.api.getBedAdmissions().subscribe({ next: (r) => { if (r.data) this.bedAdmissions.set(r.data.map(a => this.mapBackendBedAdmission(a))); dec(); }, error: () => dec(true) });
         break;
       case 'prescriptions':
-        this.api.getPrescriptions().subscribe({ next: (r) => { if (r.data) this.prescriptions.set(r.data.map(p => this.mapBackendPrescription(p))); dec(); }, error: dec });
+        this.api.getPrescriptions().subscribe({ next: (r) => { if (r.data) this.prescriptions.set(r.data.map(p => this.mapBackendPrescription(p))); dec(); }, error: () => dec(true) });
         break;
       case 'labRequests':
-        this.api.getLabRequests().subscribe({ next: (r) => { if (r.data) this.labOrders.set(r.data.map(l => this.mapBackendLabRequest(l))); dec(); }, error: dec });
+        this.api.getLabRequests().subscribe({ next: (r) => { if (r.data) this.labOrders.set(r.data.map(l => this.mapBackendLabRequest(l))); dec(); }, error: () => dec(true) });
         break;
       case 'diagnosticTests':
-        this.api.getDiagnosticTests().subscribe({ next: (r) => { if (r.data) this.diagnosticTests.set(r.data.map(t => this.mapBackendDiagnosticTest(t))); dec(); }, error: dec });
+        this.api.getDiagnosticTests().subscribe({ next: (r) => { if (r.data) this.diagnosticTests.set(r.data.map(t => this.mapBackendDiagnosticTest(t))); dec(); }, error: () => dec(true) });
         break;
       case 'vitals':
-        this.api.getVitals().subscribe({ next: (r) => { if (r.data) this.clinicalVitals.set(r.data.map(v => this.mapBackendVital(v))); dec(); }, error: dec });
+        this.api.getVitals().subscribe({ next: (r) => { if (r.data) this.clinicalVitals.set(r.data.map(v => this.mapBackendVital(v))); dec(); }, error: () => dec(true) });
         break;
       case 'diagnoses':
-        this.api.getDiagnoses().subscribe({ next: (r) => { if (r.data) this.clinicalDiagnoses.set(r.data.map(d => this.mapBackendDiagnosis(d))); dec(); }, error: dec });
+        this.api.getDiagnoses().subscribe({ next: (r) => { if (r.data) this.clinicalDiagnoses.set(r.data.map(d => this.mapBackendDiagnosis(d))); dec(); }, error: () => dec(true) });
         break;
       case 'invoices':
-        this.api.getInvoices().subscribe({ next: (r) => { if (r.data) this.billingInvoices.set(r.data.map(i => this.mapBackendInvoice(i))); dec(); }, error: dec });
+        this.api.getInvoices().subscribe({ next: (r) => { if (r.data) this.billingInvoices.set(r.data.map(i => this.mapBackendInvoice(i))); dec(); }, error: () => dec(true) });
         break;
       case 'clinicalEncounters':
-        this.api.getEncounters().subscribe({ next: (r) => { if (r.data) this.medicalRecords.set(r.data.map(e => this.mapBackendEncounter(e))); dec(); }, error: dec });
+        this.api.getEncounters().subscribe({ next: (r) => { if (r.data) this.medicalRecords.set(r.data.map(e => this.mapBackendEncounter(e))); dec(); }, error: () => dec(true) });
         break;
       case 'enterpriseRecords':
-        this.api.getEnterpriseRecords().subscribe({ next: (r) => { if (r.data) this.enterpriseRecords.set(r.data); dec(); }, error: dec });
+        this.api.getEnterpriseRecords().subscribe({ next: (r) => { if (r.data) this.enterpriseRecords.set(r.data); dec(); }, error: () => dec(true) });
         break;
       case 'queue':
-        this.api.getQueueSummary().subscribe({ next: (r) => { if (r.data) this.queueSummary.set(r.data); dec(); }, error: dec });
+        this.api.getQueueSummary().subscribe({ next: (r) => { if (r.data) this.queueSummary.set(r.data); dec(); }, error: () => dec(true) });
         break;
       default:
         dec();
@@ -664,6 +681,69 @@ export class StoreService {
   };
 }
 
+  private serializePrescriptionInstructions(rx: Omit<Prescription, 'id' | 'date' | 'status'>): string {
+    const instructionText = rx.medications
+      .map(item => `${item.name}: ${item.frequency}, ${item.duration}. ${item.instructions}`.trim())
+      .filter(Boolean)
+      .join('\n');
+
+    return `${this.prescriptionPayloadMarker}${JSON.stringify(rx.medications)}\n${instructionText || 'As directed'}`;
+  }
+
+  private parsePrescriptionMedications(p: BackendPrescription): Medication[] {
+    const instructions = p.instructions || '';
+    const markerIndex = instructions.indexOf(this.prescriptionPayloadMarker);
+    if (markerIndex >= 0) {
+      const jsonStart = markerIndex + this.prescriptionPayloadMarker.length;
+      const jsonEnd = instructions.indexOf('\n', jsonStart);
+      const jsonText = (jsonEnd >= 0 ? instructions.slice(jsonStart, jsonEnd) : instructions.slice(jsonStart)).trim();
+
+      try {
+        const parsed = JSON.parse(jsonText) as Partial<Medication>[];
+        if (Array.isArray(parsed)) {
+          const medications = parsed
+            .map(item => ({
+              name: String(item.name || '').trim(),
+              dosage: String(item.dosage || '').trim() || 'As prescribed',
+              frequency: String(item.frequency || '').trim() || 'As directed',
+              duration: String(item.duration || '').trim() || 'As directed',
+              instructions: String(item.instructions || '').trim() || 'As directed by physician',
+            }))
+            .filter(item => item.name.length > 0);
+
+          if (medications.length > 0) {
+            return medications;
+          }
+        }
+      } catch {
+        // Older records keep using the plain-text fallback below.
+      }
+    }
+
+    const cleanInstructions = this.cleanPrescriptionInstructions(instructions) || 'As directed by physician';
+    const medicationNames = (p.medication || 'Medication')
+      .split(';')
+      .map(item => item.trim())
+      .filter(Boolean);
+
+    return (medicationNames.length > 0 ? medicationNames : ['Medication']).map(name => ({
+      name,
+      dosage: 'As prescribed',
+      frequency: 'As directed',
+      duration: 'As directed',
+      instructions: cleanInstructions,
+    }));
+  }
+
+  private cleanPrescriptionInstructions(instructions?: string): string {
+    if (!instructions) return '';
+    const markerIndex = instructions.indexOf(this.prescriptionPayloadMarker);
+    if (markerIndex < 0) return instructions;
+
+    const jsonEnd = instructions.indexOf('\n', markerIndex + this.prescriptionPayloadMarker.length);
+    return jsonEnd >= 0 ? instructions.slice(jsonEnd + 1).trim() : '';
+  }
+
   private mapBackendPrescription(p: BackendPrescription): Prescription {
     const patient = this.patients().find(pat => pat.id === p.patientId);
     const employee = this.employees().find(e => e.id === p.doctorId);
@@ -675,13 +755,7 @@ export class StoreService {
       doctorId: p.doctorId,
       doctorName: employee ? `Dr. ${employee.firstName} ${employee.lastName}` : this.doctorDisplayName(p.doctorId),
       date: p.orderedAtUtc ? new Date(p.orderedAtUtc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      medications: [{
-        name: p.medication,
-        dosage: 'As prescribed',
-        frequency: 'As directed',
-        duration: 'As directed',
-        instructions: p.instructions || 'As directed by physician',
-      }],
+      medications: this.parsePrescriptionMedications(p),
       status: 'PENDING',
     };
   }
@@ -1036,25 +1110,12 @@ export class StoreService {
         }
       },
       error: (err) => {
-        // Surface backend validation/message (e.g. duplicate phone or existing
-        // patient) instead of silently adding an offline copy. Only fall back to the
-        // in-memory record when the API is genuinely unreachable (network error).
         const backendMessage = err?.error?.message || err?.error?.title;
         if (err?.status && err.status >= 400 && err.status < 500 && backendMessage) {
           this.addToast('error', 'Patient Not Registered', backendMessage);
           return;
         }
-        // Fallback to in-memory
-        const newId = 'p-' + Math.floor(100 + Math.random() * 900);
-        const newMrn = 'MRN-' + Math.floor(10000 + Math.random() * 90000);
-        const newPatient: Patient = {
-          ...patient,
-          id: newId,
-          mrn: newMrn,
-          registeredDate: new Date().toISOString().split('T')[0],
-        } as Patient;
-        this.patients.update(current => [newPatient, ...current]);
-        this.addToast('success', 'Patient Registered', `${newPatient.name} (${newMrn}) registered (offline mode).`);
+        this.addToast('error', 'Patient Not Registered', 'The patient was not saved because the Patient Management API is unavailable. Start the service and try again.');
       },
     });
   }
@@ -1084,7 +1145,7 @@ export class StoreService {
         }
       },
       error: () => {
-        this.addToast('info', 'Appointment Booked', `Scheduled for ${apt.patientName} (offline mode).`);
+        this.addToast('error', 'Appointment Not Booked', 'The appointment was not saved. Check the Patient Management API and try again.');
       },
     });
   }
@@ -1157,7 +1218,7 @@ export class StoreService {
         this.refreshQueueSummary();
         this.addToast('info', 'Status Updated', `Appointment marked as ${status}.`);
       },
-      error: () => this.addToast('info', 'Status Updated', `Appointment status updated (offline mode).`),
+      error: () => this.addToast('error', 'Status Not Updated', 'The queue status was not saved. Check the Patient Management API and try again.'),
     });
   }
 
@@ -1172,30 +1233,21 @@ export class StoreService {
 
   addPrescription(rx: Omit<Prescription, 'id' | 'date' | 'status'>) {
     const medicationText = rx.medications.map(item => `${item.name} ${item.dosage}`.trim()).join('; ');
-    const instructionText = rx.medications.map(item => `${item.name}: ${item.frequency}, ${item.duration}. ${item.instructions}`.trim()).join('\n');
     const payload = {
       patientId: rx.patientId,
       doctorId: rx.doctorId,
       medication: medicationText || 'Medication',
-      instructions: instructionText || 'As directed',
+      instructions: this.serializePrescriptionInstructions(rx),
     };
     this.api.createPrescription(payload).subscribe({
       next: (res) => {
         if (res.data) {
-          const mapped = { ...this.mapBackendPrescription(res.data), medications: rx.medications };
+          const mapped = this.mapBackendPrescription(res.data);
           this.prescriptions.update(current => [mapped, ...current]);
           this.addToast('success', 'Prescription Created', `Prescription for ${rx.patientName}.`);
         }
       },
-      error: () => {
-        this.prescriptions.update(current => [{
-          ...rx,
-          id: 'rx-' + Math.floor(100 + Math.random() * 900),
-          date: new Date().toISOString().split('T')[0],
-          status: 'PENDING' as const,
-        }, ...current]);
-        this.addToast('success', 'Prescription Created', `Prescription for ${rx.patientName} (offline mode).`);
-      },
+      error: (error) => this.addToast('error', 'Prescription Not Created', error?.error?.message || 'The prescription was not saved. Check the Clinical API and try again.'),
     });
   }
 
@@ -1407,25 +1459,7 @@ export class StoreService {
           this.addToast('success', 'Encounter Saved', `Clinical note saved for ${payload.patientName}.`);
         }
       },
-      error: () => {
-        this.addMedicalRecord({
-          patientId: payload.patientId,
-          patientName: payload.patientName,
-          doctorId: payload.doctorId,
-          doctorName: payload.doctorName,
-          diagnosis: payload.assessment,
-          symptoms: [payload.chiefComplaint],
-          clinicalNotes: `Visit Type: ${payload.visitType}\n\nComplaint: ${payload.chiefComplaint}\n\nAssessment: ${payload.assessment}\n\nPlan: ${payload.plan}`,
-          vitalSigns: {
-            bp: 'N/A',
-            hr: 0,
-            temp: 0,
-            spo2: 0,
-            respiratoryRate: 0,
-            updatedAt: 'N/A',
-          },
-        });
-      },
+      error: (error) => this.addToast('error', 'Encounter Not Saved', error?.error?.message || 'The clinical encounter was not saved. Check the Clinical API and try again.'),
     });
   }
 
@@ -1456,15 +1490,7 @@ export class StoreService {
           this.addToast('success', 'Vitals Recorded', `Vitals saved for ${vital.patientName}.`);
         }
       },
-      error: () => {
-        const entry: ClinicalVitalEntry = {
-          ...vital,
-          id: 'vital-' + Math.floor(100 + Math.random() * 900),
-          recordedAtUtc: new Date().toISOString(),
-        };
-        this.clinicalVitals.update(current => [entry, ...current]);
-        this.addToast('success', 'Vitals Recorded', `Vitals saved for ${vital.patientName} (offline mode).`);
-      },
+      error: (error) => this.addToast('error', 'Vitals Not Saved', error?.error?.message || 'Vitals were not saved. Check the Clinical API and try again.'),
     });
   }
 
@@ -1482,15 +1508,7 @@ export class StoreService {
           this.addToast('success', 'Diagnosis Added', `${diagnosis.description} added for ${diagnosis.patientName}.`);
         }
       },
-      error: () => {
-        const entry: ClinicalDiagnosis = {
-          ...diagnosis,
-          id: 'dx-' + Math.floor(100 + Math.random() * 900),
-          diagnosedAtUtc: new Date().toISOString(),
-        };
-        this.clinicalDiagnoses.update(current => [entry, ...current]);
-        this.addToast('success', 'Diagnosis Added', `${diagnosis.description} added for ${diagnosis.patientName} (offline mode).`);
-      },
+      error: (error) => this.addToast('error', 'Diagnosis Not Saved', error?.error?.message || 'Diagnosis was not saved. Check the Clinical API and try again.'),
     });
   }
 
@@ -1513,21 +1531,6 @@ export class StoreService {
     verifiedBy = this.currentUser()?.name || '',
     resultItems: LabResultItem[] = []
   ) {
-    const applyLocalUpdate = () => {
-      this.labOrders.update(current =>
-        current.map(l => l.id === id ? {
-          ...l, status: 'COMPLETED' as const, result, normalRange, unit, isAbnormal,
-          resultFlag,
-          resultNotes,
-          performedBy,
-          verifiedBy,
-          resultItems,
-          completedDate: new Date().toLocaleString(),
-          labTechName: performedBy || this.currentUser()?.name,
-        } : l)
-      );
-    };
-
     this.api.updateLabResult(id, {
       status: 'Completed',
       resultSummary: result,
@@ -1544,15 +1547,12 @@ export class StoreService {
         if (res.data) {
           const mapped = { ...this.mapBackendLabRequest(res.data), unit, resultFlag, resultNotes, performedBy, verifiedBy, resultItems, isAbnormal };
           this.labOrders.update(current => current.map(l => l.id === id ? mapped : l));
+          this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR.');
         } else {
-          applyLocalUpdate();
+          this.addToast('warning', 'Lab Result Not Confirmed', 'The service responded without an updated result. Refresh the queue before continuing.');
         }
-        this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR.');
       },
-      error: () => {
-        applyLocalUpdate();
-        this.addToast('success', 'Lab Result Submitted', 'Results posted to EHR (offline mode).');
-      },
+      error: () => this.addToast('error', 'Lab Result Not Saved', 'The result was not posted. Check the Clinical API and try again.'),
     });
   }
 
@@ -1571,16 +1571,6 @@ export class StoreService {
         ? 'Request is now in progress.'
         : `Status updated to ${status}.`;
 
-    const applyLocalUpdate = () => {
-      this.labOrders.update(current => current.map(l => l.id === id ? {
-        ...l,
-        status,
-        collectedDate: status === 'SAMPLE_COLLECTED'
-          ? (collectedAtUtc ? new Date(collectedAtUtc).toLocaleString() : new Date().toLocaleString())
-          : l.collectedDate,
-      } : l));
-    };
-
     const payload: { status: string; collectedAtUtc?: string } = { status: backendStatus };
     if (status === 'SAMPLE_COLLECTED') {
       payload.collectedAtUtc = collectedAtUtc || new Date().toISOString();
@@ -1593,15 +1583,12 @@ export class StoreService {
           this.labOrders.update(current => current.map(l => l.id === id
             ? { ...mapped, collectedDate: mapped.collectedDate ?? l.collectedDate }
             : l));
+          this.addToast('success', 'Lab Status Updated', message);
         } else {
-          applyLocalUpdate();
+          this.addToast('warning', 'Lab Status Not Confirmed', 'The service responded without the updated request. Refresh the queue before continuing.');
         }
-        this.addToast('success', 'Lab Status Updated', message);
       },
-      error: () => {
-        applyLocalUpdate();
-        this.addToast('success', 'Lab Status Updated', `${message} (offline mode)`);
-      },
+      error: () => this.addToast('error', 'Lab Status Not Saved', 'The laboratory status was not saved. Check the Clinical API and try again.'),
     });
   }
 
@@ -1654,35 +1641,11 @@ export class StoreService {
           this.addToast('success', 'Invoice Generated', `Invoice created for ETB ${inv.totalAmount}.`);
         }
       },
-      error: () => this.addToast('success', 'Invoice Generated', `Invoice created (offline mode).`),
+      error: () => this.addToast('error', 'Invoice Not Created', 'The invoice was not saved. Check the Billing API and try again.'),
     });
   }
 
   payInvoice(id: string, amount: number, paymentMethod?: string) {
-    const applyLocalPayment = () => {
-      this.billingInvoices.update(current =>
-        current.map(inv => {
-          if (inv.id === id) {
-            const newPaid = inv.patientPaidAmount + amount;
-            // Insurance-aware status: the invoice is only fully PAID when everything
-            // (including the insured portion) is settled. Once the patient's own share
-            // is covered it is PARTIALLY_PAID for cash purposes, but that still clears
-            // clinical access because the patient share balance is zero.
-            const status = newPaid >= inv.totalAmount
-              ? 'PAID'
-              : newPaid > 0
-                ? 'PARTIALLY_PAID'
-                : 'UNPAID';
-            if ((paymentMethod || '').toLowerCase().includes('insurance') && newPaid >= inv.totalAmount) {
-              this.markInsuranceClaimPaid(inv.id, amount);
-            }
-            return { ...inv, patientPaidAmount: newPaid, status, paymentMethod: paymentMethod as any };
-          }
-          return inv;
-        })
-      );
-    };
-
     this.api.recordPayment({
       invoiceId: id,
       amount,
@@ -1699,19 +1662,19 @@ export class StoreService {
                 this.markInsuranceClaimPaid(id, amount);
               }
             } else {
-              applyLocalPayment();
+              this.addToast('warning', 'Invoice Refresh Needed', 'Payment was recorded, but the updated invoice could not be confirmed. Refresh Billing before collecting another payment.');
             }
-            this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded.`);
+            if (res.data) {
+              this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded.`);
+            }
           },
           error: () => {
-            applyLocalPayment();
-            this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded.`);
+            this.addToast('warning', 'Payment Recorded', 'The payment request completed, but the invoice refresh failed. Refresh Billing to verify the latest status.');
           },
         });
       },
       error: () => {
-        applyLocalPayment();
-        this.addToast('success', 'Payment Processed', `ETB ${amount} payment recorded (offline mode).`);
+        this.addToast('error', 'Payment Not Recorded', 'The payment was not saved. Check the Billing API and try again.');
       },
     });
   }

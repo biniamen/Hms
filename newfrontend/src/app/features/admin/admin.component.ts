@@ -582,7 +582,6 @@ import type { AdminTab, BackendRolePermission, BackendPermission, BackendEmailOu
                     <span class="text-[10px] font-bold uppercase text-slate-500">Currency</span>
                     <select [(ngModel)]="diagnosticForm.currency" name="diagCurrency" [class]="inputClasses">
                       <option value="ETB">ETB</option>
-                      <option value="USD">USD</option>
                     </select>
                   </label>
                 </div>
